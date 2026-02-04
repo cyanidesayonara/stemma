@@ -46,6 +46,13 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
+  tests/               # pytest test suite
+    conftest.py        # Shared fixtures
+    test_separator.py
+    test_model_manager.py
+    test_player.py
+    test_library.py
+    test_exporter.py
   data/                # Runtime data (gitignored)
     models/            # Cached ONNX model files
     songs/{song-id}/   # Separated stems per song
@@ -59,6 +66,10 @@ stemma/
 4. Commit after each major change. Keep git log clean and PRs manageable.
 5. PEP 8 for Python code. Clear docstrings for classes and complex functions.
 6. Keep dependencies lean. No PyTorch. Use ONNX Runtime for inference.
+7. All changes go through PRs. No direct pushes to `main`.
+8. TDD when possible: write tests first, then implement to make them pass.
+9. No placeholder or mock code in `main` branch. Use `NotImplementedError` with clear TODOs.
+10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 
 ## Current Status
 
@@ -69,13 +80,14 @@ Last updated: 2026-03-20
 - Project scaffolding: all source files created (empty skeletons)
 - Virtual environment set up, dependencies installed
 - `PROJECT.md` finalized with full spec
-- GitHub Projects kanban board set up with Phase 1 issues
 
 ### In Progress
+- Quality infrastructure: PR workflow, testing setup, code cleanup
 - Stem separation engine (`src/separator.py`): skeleton `SeparatorWorker` QThread exists
 - Model manager (`src/model_manager.py`): `ModelManager` and `ModelDownloader` classes exist
 
 ### Next Steps
+- Set up GitHub Projects kanban board with Phase 1 issues
 - Complete the ONNX inference pipeline in `separator.py` (STFT via librosa, chunked inference, iSTFT)
 - Implement multi-track audio player (`src/player.py`)
 - Build the UI components
