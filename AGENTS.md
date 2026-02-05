@@ -70,6 +70,7 @@ stemma/
 8. TDD when possible: write tests first, then implement to make them pass.
 9. No placeholder or mock code in `main` branch. Use `NotImplementedError` with clear TODOs.
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
+11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
 
 ## Current Status
 
