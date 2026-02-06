@@ -1,6 +1,7 @@
-# Logs and test outputs
+# Logs, test outputs, and AI agent artifacts
 *.log
 tests_out.txt
+.agent-local/
 __pycache__/
 *.py[codz]
 *$py.class
