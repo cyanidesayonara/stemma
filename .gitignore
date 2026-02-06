@@ -1,4 +1,6 @@
-# Byte-compiled / optimized / DLL files
+# Logs and test outputs
+*.log
+tests_out.txt
 __pycache__/
 *.py[codz]
 *$py.class
