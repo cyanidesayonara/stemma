@@ -71,6 +71,7 @@ stemma/
 9. No placeholder or mock code in `main` branch. Use `NotImplementedError` with clear TODOs.
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
+12. **Dual-Agent Workflow:** We use a builder/reviewer model. The "Builder" agent implements the feature and opens a PR. Do not merge your own PRs. The user will pass the PR to a "Reviewer" agent to audit the code, catch bugs, suggest improvements, and approve it.
 
 ## Current Status
 
