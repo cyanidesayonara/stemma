@@ -130,6 +130,33 @@ class TestSongLibraryCRUD:
         assert song.id  # Non-empty ID generated
         assert len(library.songs) == 1
 
+    def test_add_song_copies_audio_into_song_dir(self, library, library_dir, fake_audio):
+        song = library.add_song(
+            title="My Song",
+            artist="My Artist",
+            original_path=fake_audio,
+        )
+        # original_path should point inside the song directory, not the source.
+        assert song.original_path.startswith(
+            os.path.join(library_dir, "songs", song.id)
+        )
+        assert os.path.isfile(song.original_path)
+        assert song.original_path.endswith(".wav")
+
+    def test_add_song_preserves_source_extension(self, library, tmp_path):
+        import numpy as np
+        import soundfile as sf
+
+        flac_path = tmp_path / "track.flac"
+        sf.write(str(flac_path), np.zeros((44100, 2), dtype=np.float32), 44100)
+
+        song = library.add_song(
+            title="FLAC Song",
+            artist="Artist",
+            original_path=str(flac_path),
+        )
+        assert song.original_path.endswith(".flac")
+
     def test_add_song_creates_song_directory(self, library, library_dir, fake_audio):
         song = library.add_song(
             title="My Song",
