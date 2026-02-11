@@ -50,6 +50,7 @@ class StemExporter:
         output_path: str,
         stem_names: list[str] | None = None,
         muted_stems: set[str] | None = None,
+        volumes: dict[str, float] | None = None,
     ) -> None:
         """Export a mix of selected stems to a WAV file.
 
@@ -58,6 +59,8 @@ class StemExporter:
             stem_names: Stems to include. Defaults to all available stems.
             muted_stems: Stems to exclude from the mix. Applied after
                 *stem_names* filtering.
+            volumes: Per-stem gain levels (0.0–2.0). Missing stems
+                default to 1.0.
 
         Raises:
             ValueError: If the resulting stem list is empty.
@@ -71,10 +74,15 @@ class StemExporter:
         if not stem_names:
             raise ValueError("No stems selected for export")
 
-        # Load and sum the selected stems.
+        if volumes is None:
+            volumes = {}
+
+        # Load and sum the selected stems with volume applied.
         mixed = None
         for name in stem_names:
             audio, sr = sf.read(self.stem_paths[name], dtype="float32")
+            gain = volumes.get(name, 1.0)
+            audio = audio * gain
             if mixed is None:
                 mixed = audio.copy()
             else:
