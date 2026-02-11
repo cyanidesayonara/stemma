@@ -47,6 +47,11 @@ class MultiTrackPlayer(QObject):
         self._timer.timeout.connect(self._emit_position)
 
     @property
+    def has_stems(self) -> bool:
+        """Return True if any stems are loaded."""
+        return bool(self._stems)
+
+    @property
     def is_playing(self) -> bool:
         """Return True if audio is currently playing."""
         return self._is_playing
@@ -149,6 +154,11 @@ class MultiTrackPlayer(QObject):
             self._muted_stems.add(stem_name)
         else:
             self._muted_stems.discard(stem_name)
+
+    @property
+    def muted_stems(self) -> set[str]:
+        """Return the set of currently muted stem names."""
+        return set(self._muted_stems)
 
     def set_solo(self, stem_name: str, soloed: bool) -> None:
         """Solo or unsolo a specific stem."""
