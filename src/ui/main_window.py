@@ -146,5 +146,13 @@ class MainWindow(QMainWindow):
         )
         if path:
             exporter = StemExporter(stem_paths)
-            exporter.export_mix(path, muted_stems=self._player.muted_stems)
+            volumes = {
+                name: self._player.get_volume(name)
+                for name in stem_paths
+            }
+            exporter.export_mix(
+                path,
+                muted_stems=self._player.muted_stems,
+                volumes=volumes,
+            )
             QMessageBox.information(self, "Export", f"Mix exported to {path}")
