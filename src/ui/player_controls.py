@@ -59,6 +59,19 @@ class StemRow(QWidget):
         self._solo_btn.toggled.connect(self._on_solo)
         layout.addWidget(self._solo_btn)
 
+        self._volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setValue(100)
+        self._volume_slider.setFixedWidth(120)
+        self._volume_slider.setToolTip(f"{stem_name} volume")
+        self._volume_slider.valueChanged.connect(self._on_volume)
+        layout.addWidget(self._volume_slider)
+
+        self._vol_label = QLabel("100%")
+        self._vol_label.setFixedWidth(40)
+        self._vol_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(self._vol_label)
+
         layout.addStretch()
 
     def _on_mute(self, checked: bool) -> None:
@@ -66,6 +79,11 @@ class StemRow(QWidget):
 
     def _on_solo(self, checked: bool) -> None:
         self._player.set_solo(self._stem_name, checked)
+
+    def _on_volume(self, value: int) -> None:
+        gain = value / 100.0
+        self._player.set_volume(self._stem_name, gain)
+        self._vol_label.setText(f"{value}%")
 
 
 class PlayerControls(QWidget):

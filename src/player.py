@@ -37,6 +37,7 @@ class MultiTrackPlayer(QObject):
         self._is_playing: bool = False
         self._muted_stems: set[str] = set()
         self._soloed_stems: set[str] = set()
+        self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
 
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
@@ -73,6 +74,7 @@ class MultiTrackPlayer(QObject):
         self._stems.clear()
         self._muted_stems.clear()
         self._soloed_stems.clear()
+        self._volumes.clear()
 
         max_frames = 0
         sample_rate = 0
@@ -160,6 +162,19 @@ class MultiTrackPlayer(QObject):
         """Return the set of currently muted stem names."""
         return set(self._muted_stems)
 
+    def set_volume(self, stem_name: str, volume: float) -> None:
+        """Set the volume (gain) for a stem.
+
+        Args:
+            stem_name: Name of the stem.
+            volume: Gain from 0.0 (silent) to 2.0 (double). Clamped.
+        """
+        self._volumes[stem_name] = max(0.0, min(volume, 2.0))
+
+    def get_volume(self, stem_name: str) -> float:
+        """Return the current volume for a stem (default 1.0)."""
+        return self._volumes.get(stem_name, 1.0)
+
     def set_solo(self, stem_name: str, soloed: bool) -> None:
         """Solo or unsolo a specific stem."""
         if soloed:
@@ -224,7 +239,8 @@ class MultiTrackPlayer(QObject):
             read_len = stem_end - start
 
             if read_len > 0:
-                outdata[:read_len] += stem_data[start:stem_end]
+                gain = self._volumes.get(name, 1.0)
+                outdata[:read_len] += stem_data[start:stem_end] * gain
 
         self._current_frame += frames_to_read
 

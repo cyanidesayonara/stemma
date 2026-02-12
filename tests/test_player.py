@@ -158,3 +158,83 @@ class TestMultiTrackPlayerMixing:
         assert np.allclose(outdata[:10], 0.6, atol=1e-4)
         assert np.allclose(outdata[10:], 0.0)
         assert not player.is_playing # Flag should be flipped to false
+
+
+class TestMultiTrackPlayerVolume:
+    """Test per-stem volume control."""
+
+    def test_default_volume_is_1(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        assert player.get_volume("vocals") == 1.0
+        assert player.get_volume("drums") == 1.0
+
+    def test_set_volume_changes_gain(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_volume("vocals", 0.5)
+        assert player.get_volume("vocals") == 0.5
+
+    def test_set_volume_clamps_range(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_volume("vocals", -0.5)
+        assert player.get_volume("vocals") == 0.0
+
+        player.set_volume("vocals", 2.5)
+        assert player.get_volume("vocals") == 2.0
+
+    def test_volume_applied_in_callback(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        player.set_volume("vocals", 0.5)  # 0.1 * 0.5 = 0.05
+        player.set_volume("drums", 0.0)   # 0.2 * 0.0 = 0.0
+        # bass stays at 1.0: 0.3 * 1.0 = 0.3
+
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+        # 0.05 + 0.0 + 0.3 = 0.35
+        assert np.allclose(outdata, 0.35, atol=1e-4)
+
+    def test_volume_with_mute(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        player.set_volume("vocals", 0.5)
+        player.set_mute("vocals", True)
+
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+        # Muted vocals: 0.0. Drums 0.2 + Bass 0.3 = 0.5
+        assert np.allclose(outdata, 0.5, atol=1e-4)
+
+    def test_volume_with_solo(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        player.set_volume("drums", 0.5)
+        player.set_solo("drums", True)
+
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+        # Only drums at half volume: 0.2 * 0.5 = 0.1
+        assert np.allclose(outdata, 0.1, atol=1e-4)
+
+    def test_load_stems_resets_volumes(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_volume("vocals", 0.5)
+
+        # Reload — volumes should reset to 1.0
+        player.load_stems(mock_stems)
+        assert player.get_volume("vocals") == 1.0
