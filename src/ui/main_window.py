@@ -19,11 +19,11 @@ from src.exporter import StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
-from src.separator import STEMS_4, STEMS_6
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls
 
-ALL_STEM_NAMES = STEMS_6  # Superset: try loading all possible stems.
+# Try loading all components in this preferred visual layout order
+ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 
 
 class MainWindow(QMainWindow):
