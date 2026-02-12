@@ -132,3 +132,19 @@ class TestExportMix:
         out = str(tmp_path / "nested" / "mix.wav")
         exporter.export_mix(out)
         assert os.path.isfile(out)
+
+    def test_export_mix_with_volumes(self, exporter, tmp_path):
+        full_out = str(tmp_path / "full.wav")
+        exporter.export_mix(full_out)
+
+        half_out = str(tmp_path / "half.wav")
+        volumes = {"vocals": 0.5, "drums": 0.5, "bass": 0.5, "other": 0.5}
+        exporter.export_mix(half_out, volumes=volumes)
+
+        full, _ = sf.read(full_out, dtype="float32")
+        half, _ = sf.read(half_out, dtype="float32")
+
+        # Half-volume mix should have ~25% the energy of full mix
+        full_energy = np.sum(full ** 2)
+        half_energy = np.sum(half ** 2)
+        assert half_energy < full_energy * 0.5
