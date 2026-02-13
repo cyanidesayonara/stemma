@@ -33,10 +33,10 @@ class TestSeparatorConstants:
         assert SEGMENT_SAMPLES == 343980
 
     def test_stems_4(self):
-        assert STEMS_4 == ("vocals", "drums", "bass", "other")
+        assert STEMS_4 == ("drums", "bass", "other", "vocals")
 
     def test_stems_6(self):
-        assert STEMS_6 == ("vocals", "drums", "bass", "other", "guitar", "piano")
+        assert STEMS_6 == ("drums", "bass", "other", "vocals", "guitar", "piano")
 
 
 class TestSeparatorWorkerInit:
