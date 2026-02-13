@@ -58,6 +58,13 @@ class MultiTrackPlayer(QObject):
         return self._is_playing
 
     @property
+    def current_seconds(self) -> float:
+        """Return the current playback position in seconds."""
+        if self._sample_rate == 0:
+            return 0.0
+        return self._current_frame / self._sample_rate
+
+    @property
     def total_seconds(self) -> float:
         """Return the total duration of the loaded track in seconds."""
         if self._sample_rate == 0:
