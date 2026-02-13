@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -44,6 +46,11 @@ class LibraryPanel(QWidget):
         self._list.currentItemChanged.connect(self._on_item_changed)
         layout.addWidget(self._list)
 
+        self._remove_btn = QPushButton("Remove Selected")
+        self._remove_btn.setEnabled(False)
+        self._remove_btn.clicked.connect(self._on_remove_clicked)
+        layout.addWidget(self._remove_btn)
+
     def refresh(self) -> None:
         """Reload the song list from the library."""
         self._list.clear()
@@ -57,3 +64,22 @@ class LibraryPanel(QWidget):
             song_id = current.data(256)
             if song_id:
                 self.song_selected.emit(song_id)
+                self._remove_btn.setEnabled(True)
+        else:
+            self._remove_btn.setEnabled(False)
+
+    def _on_remove_clicked(self) -> None:
+        current = self._list.currentItem()
+        if current is not None:
+            song_id = current.data(256)
+            if song_id:
+                reply = QMessageBox.question(
+                    self,
+                    "Remove Song",
+                    f"Are you sure you want to remove '{current.text()}' and delete its separated audio files?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._library.remove_song(song_id)
+                    self.refresh()

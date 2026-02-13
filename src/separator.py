@@ -25,8 +25,9 @@ from PySide6.QtCore import QThread, Signal
 
 
 # Stem names for each model variant.
-STEMS_4 = ("vocals", "drums", "bass", "other")
-STEMS_6 = ("vocals", "drums", "bass", "other", "guitar", "piano")
+# HTDemucs natively outputs tensors in this exact order: 0=drums, 1=bass, etc.
+STEMS_4 = ("drums", "bass", "other", "vocals")
+STEMS_6 = ("drums", "bass", "other", "vocals", "guitar", "piano")
 
 # HTDemucs expects audio at this sample rate.
 SAMPLE_RATE = 44100
