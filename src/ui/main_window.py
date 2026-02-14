@@ -8,6 +8,7 @@ Menu bar: File > Import / Export.
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
+        self._setup_shortcuts()
         self._connect_signals()
 
     # ------------------------------------------------------------------
@@ -80,6 +82,53 @@ class MainWindow(QMainWindow):
 
         quit_action = file_menu.addAction("&Quit")
         quit_action.triggered.connect(self.close)
+
+    def _setup_shortcuts(self) -> None:
+        """Register global keyboard shortcuts."""
+        # Transport
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self).activated.connect(
+            self._on_shortcut_play_pause
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_S), self).activated.connect(
+            self._player.stop
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self).activated.connect(
+            lambda: self._player.seek(
+                max(0.0, self._player.current_seconds - 5.0)
+            )
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self).activated.connect(
+            lambda: self._player.seek(self._player.current_seconds + 5.0)
+        )
+
+        # Number keys 1–6 toggle mute on corresponding stem
+        stem_order = list(ALL_STEM_NAMES)
+        for i, key in enumerate([
+            Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
+            Qt.Key.Key_4, Qt.Key.Key_5, Qt.Key.Key_6,
+        ]):
+            stem_name = stem_order[i]
+            QShortcut(QKeySequence(key), self).activated.connect(
+                self._make_mute_toggler(stem_name)
+            )
+
+    def _make_mute_toggler(self, stem_name: str):
+        """Return a callable that toggles mute for a stem and updates the UI."""
+        def toggle():
+            is_muted = stem_name in self._player.muted_stems
+            self._player.set_mute(stem_name, not is_muted)
+            # Sync the UI button state
+            row = self._player_controls._stem_rows.get(stem_name)
+            if row is not None:
+                row._mute_btn.setChecked(not is_muted)
+        return toggle
+
+    def _on_shortcut_play_pause(self) -> None:
+        """Toggle play/pause via keyboard shortcut."""
+        if self._player.is_playing:
+            self._player.pause()
+        else:
+            self._player.play()
 
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
