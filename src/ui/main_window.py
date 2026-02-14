@@ -7,7 +7,7 @@ Menu bar: File > Import / Export.
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -45,10 +45,13 @@ class MainWindow(QMainWindow):
         self._model_manager = model_manager
         self._current_song_id: str | None = None
 
+        self._settings = QSettings("stemma", "stemma")
+
         self._setup_ui()
         self._setup_menu()
         self._setup_shortcuts()
         self._connect_signals()
+        self._restore_state()
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -129,6 +132,21 @@ class MainWindow(QMainWindow):
             self._player.pause()
         else:
             self._player.play()
+
+    def _restore_state(self) -> None:
+        """Restore saved window geometry and state."""
+        geometry = self._settings.value("window/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        state = self._settings.value("window/state")
+        if state is not None:
+            self.restoreState(state)
+
+    def closeEvent(self, event) -> None:
+        """Save window geometry and state before closing."""
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("window/state", self.saveState())
+        super().closeEvent(event)
 
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
