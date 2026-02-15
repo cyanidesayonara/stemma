@@ -1,7 +1,8 @@
-"""Export individual stems or custom mixes as WAV files.
+"""Export individual stems or custom mixes as WAV or MP3 files.
 
 Reads stem WAV files from disk and writes either a single stem copy
 or a mixed-down combination of selected stems to a new file.
+Output format is determined by the file extension (.wav or .mp3).
 """
 
 import os
@@ -10,6 +11,68 @@ import numpy as np
 import soundfile as sf
 
 from src.separator import SAMPLE_RATE
+
+# Supported output formats by extension.
+SUPPORTED_FORMATS = (".wav", ".mp3")
+
+
+def _write_audio(path: str, audio: np.ndarray, sample_rate: int) -> None:
+    """Write audio data to a file, choosing format by extension.
+
+    Args:
+        path: Output file path (.wav or .mp3).
+        audio: Audio array of shape (frames, channels), float32 in [-1, 1].
+        sample_rate: Sample rate in Hz.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext == ".wav":
+        sf.write(path, audio, sample_rate)
+    elif ext == ".mp3":
+        _write_mp3(path, audio, sample_rate)
+    else:
+        raise ValueError(f"Unsupported format '{ext}'. Use .wav or .mp3.")
+
+
+def _write_mp3(
+    path: str,
+    audio: np.ndarray,
+    sample_rate: int,
+    bitrate: int = 320,
+) -> None:
+    """Encode float32 audio to MP3 using lameenc.
+
+    Args:
+        path: Output file path.
+        audio: Float32 array of shape (frames, channels) in [-1, 1].
+        sample_rate: Sample rate in Hz.
+        bitrate: MP3 bitrate in kbps (default 320).
+    """
+    import lameenc
+
+    # Ensure stereo.
+    if audio.ndim == 1:
+        audio = np.column_stack([audio, audio])
+
+    n_channels = audio.shape[1]
+
+    # Convert float32 [-1, 1] to int16 PCM.
+    pcm = (audio * 32767).clip(-32768, 32767).astype(np.int16)
+
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(bitrate)
+    encoder.set_in_sample_rate(sample_rate)
+    encoder.set_channels(n_channels)
+    encoder.set_quality(2)  # 2 = high quality
+
+    mp3_data = encoder.encode(pcm.tobytes())
+    mp3_data += encoder.flush()
+
+    with open(path, "wb") as f:
+        f.write(mp3_data)
 
 
 class StemExporter:
@@ -28,11 +91,11 @@ class StemExporter:
         return list(self.stem_paths.keys())
 
     def export_stem(self, stem_name: str, output_path: str) -> None:
-        """Export a single stem to a WAV file.
+        """Export a single stem to a WAV or MP3 file.
 
         Args:
             stem_name: Name of the stem to export.
-            output_path: Destination file path.
+            output_path: Destination file path (.wav or .mp3).
 
         Raises:
             KeyError: If *stem_name* is not available.
@@ -43,7 +106,7 @@ class StemExporter:
         audio, sr = sf.read(self.stem_paths[stem_name], dtype="float32")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        sf.write(output_path, audio, sr)
+        _write_audio(output_path, audio, sr)
 
     def export_mix(
         self,
@@ -92,4 +155,4 @@ class StemExporter:
         np.clip(mixed, -1.0, 1.0, out=mixed)
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        sf.write(output_path, mixed, SAMPLE_RATE)
+        _write_audio(output_path, mixed, SAMPLE_RATE)
