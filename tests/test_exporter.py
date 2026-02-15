@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from src.exporter import StemExporter
+from src.exporter import StemExporter, _write_audio
 from src.separator import SAMPLE_RATE
 
 
@@ -148,3 +148,38 @@ class TestExportMix:
         full_energy = np.sum(full ** 2)
         half_energy = np.sum(half ** 2)
         assert half_energy < full_energy * 0.5
+
+
+class TestMP3Export:
+
+    def test_export_stem_as_mp3(self, exporter, tmp_path):
+        out = str(tmp_path / "vocals.mp3")
+        exporter.export_stem("vocals", out)
+        assert os.path.isfile(out)
+        # MP3 files start with ID3 tag or MPEG sync word (0xff 0xfb/f3/f2).
+        with open(out, "rb") as f:
+            header = f.read(2)
+        assert header == b"ID3" [:2] or header[0:1] == b"\xff"
+
+    def test_export_mix_as_mp3(self, exporter, tmp_path):
+        out = str(tmp_path / "mix.mp3")
+        exporter.export_mix(out)
+        assert os.path.isfile(out)
+        assert os.path.getsize(out) > 1000  # Not trivially empty.
+
+    def test_mp3_file_is_smaller_than_wav(self, exporter, tmp_path):
+        wav_out = str(tmp_path / "mix.wav")
+        mp3_out = str(tmp_path / "mix.mp3")
+        exporter.export_mix(wav_out)
+        exporter.export_mix(mp3_out)
+        assert os.path.getsize(mp3_out) < os.path.getsize(wav_out)
+
+    def test_write_audio_unsupported_format(self, tmp_path):
+        audio = np.zeros((1000, 2), dtype=np.float32)
+        with pytest.raises(ValueError, match="Unsupported format"):
+            _write_audio(str(tmp_path / "out.ogg"), audio, SAMPLE_RATE)
+
+    def test_export_stem_mp3_creates_parent_directory(self, exporter, tmp_path):
+        out = str(tmp_path / "nested" / "deep" / "vocals.mp3")
+        exporter.export_stem("vocals", out)
+        assert os.path.isfile(out)
