@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from src.exporter import StemExporter
+from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
@@ -218,9 +218,22 @@ class MainWindow(QMainWindow):
                 name: self._player.get_volume(name)
                 for name in stem_paths
             }
-            exporter.export_mix(
-                path,
+            self._export_worker = ExportWorker(
+                exporter=exporter,
+                output_path=path,
                 muted_stems=self._player.muted_stems,
                 volumes=volumes,
             )
-            QMessageBox.information(self, "Export", f"Mix exported to {path}")
+            self._export_worker.finished.connect(self._on_export_finished)
+            self._export_worker.error.connect(self._on_export_error)
+            
+            self.statusBar().showMessage("Exporting mix... please wait.", 10000)
+            self._export_worker.start()
+
+    def _on_export_finished(self, path: str) -> None:
+        self.statusBar().showMessage("Export complete.", 5000)
+        QMessageBox.information(self, "Export", f"Mix successfully exported to {path}")
+
+    def _on_export_error(self, err: str) -> None:
+        self.statusBar().clearMessage()
+        QMessageBox.critical(self, "Export Error", f"Failed to export mix:\n{err}")

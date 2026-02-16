@@ -9,6 +9,7 @@ import os
 
 import numpy as np
 import soundfile as sf
+from PySide6.QtCore import QThread, Signal
 
 from src.separator import SAMPLE_RATE
 
@@ -152,7 +153,49 @@ class StemExporter:
                 min_len = min(mixed.shape[0], audio.shape[0])
                 mixed[:min_len] += audio[:min_len]
 
-        np.clip(mixed, -1.0, 1.0, out=mixed)
+        # Prevent hard digital clipping distortion by auto-normalizing 
+        # the master bus down if it exceeds 0dBFS (1.0).
+        peak = np.max(np.abs(mixed))
+        if peak > 1.0:
+            mixed /= peak
+        else:
+            np.clip(mixed, -1.0, 1.0, out=mixed)
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         _write_audio(output_path, mixed, SAMPLE_RATE)
+
+
+class ExportWorker(QThread):
+    """Background thread for exporting a custom mix without freezing the UI.
+
+    Signals:
+        finished(str): Emitted with the final output path on success.
+        error(str): Emitted with error traceback on failure.
+    """
+
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        exporter: StemExporter,
+        output_path: str,
+        muted_stems: set[str],
+        volumes: dict[str, float],
+    ) -> None:
+        super().__init__()
+        self.exporter = exporter
+        self.output_path = output_path
+        self.muted_stems = muted_stems
+        self.volumes = volumes
+
+    def run(self) -> None:
+        try:
+            self.exporter.export_mix(
+                self.output_path,
+                muted_stems=self.muted_stems,
+                volumes=self.volumes,
+            )
+            self.finished.emit(self.output_path)
+        except Exception as exc:
+            self.error.emit(str(exc))
