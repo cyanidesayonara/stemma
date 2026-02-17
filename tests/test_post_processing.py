@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.post_processing import wiener_filter, soft_gate
+from src.post_processing import wiener_filter, soft_gate, _CHUNK_SAMPLES
 from src.separator import SAMPLE_RATE
 
 
@@ -213,3 +213,37 @@ class TestSoftGate:
         strict_energy = np.sum(strict ** 2)
         lenient_energy = np.sum(lenient ** 2)
         assert lenient_energy >= strict_energy
+
+
+class TestChunkedProcessing:
+    """Verify that chunked processing produces correct results for
+    audio longer than _CHUNK_SAMPLES."""
+
+    def test_wiener_multi_chunk_shape(self):
+        """Wiener filter on long audio should return correct shape."""
+        # Create audio that spans multiple chunks.
+        duration_s = (_CHUNK_SAMPLES / SAMPLE_RATE) * 2.5
+        stems = _make_stems(n_stems=4, duration_s=duration_s)
+        result = wiener_filter(stems)
+        assert result.shape == stems.shape
+
+    def test_wiener_multi_chunk_no_boundary_silence(self):
+        """No silent gaps should appear at chunk boundaries."""
+        duration_s = (_CHUNK_SAMPLES / SAMPLE_RATE) * 2.5
+        stems = _make_stems(n_stems=2, duration_s=duration_s)
+        result = wiener_filter(stems)
+
+        # Sum of all stems at every sample should have non-trivial energy.
+        mixture = np.sum(result, axis=0)  # (2, samples)
+        # Check RMS in 0.5s windows — none should be near-zero.
+        window = SAMPLE_RATE // 2
+        for start in range(0, result.shape[2] - window, window):
+            chunk_rms = np.sqrt(np.mean(mixture[0, start:start + window] ** 2))
+            assert chunk_rms > 1e-4, f"Silent gap at sample {start}"
+
+    def test_soft_gate_multi_chunk_shape(self):
+        """Soft gate on long audio should return correct shape."""
+        duration_s = (_CHUNK_SAMPLES / SAMPLE_RATE) * 2.5
+        stems = _make_stems(n_stems=4, duration_s=duration_s)
+        result = soft_gate(stems)
+        assert result.shape == stems.shape
