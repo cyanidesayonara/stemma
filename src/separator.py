@@ -111,7 +111,14 @@ class SeparatorWorker(QThread):
             self.error.emit("Separation cancelled by user.")
             return
 
-        self.progress.emit(90, "Saving separated files...")
+        self.progress.emit(90, "Post-processing stems...")
+        separated = self._post_process(separated)
+
+        if self._is_cancelled:
+            self.error.emit("Separation cancelled by user.")
+            return
+
+        self.progress.emit(95, "Saving separated files...")
         result_files = self._save_stems(separated)
 
         self.progress.emit(100, "Done")
@@ -383,6 +390,21 @@ class SeparatorWorker(QThread):
             result[ch] = audio
 
         return result
+
+    def _post_process(self, stems: np.ndarray) -> np.ndarray:
+        """Apply Wiener filtering and soft gating to improve stem quality.
+
+        Args:
+            stems: Separated stems, shape (n_stems, 2, total_samples).
+
+        Returns:
+            Post-processed stems with same shape.
+        """
+        from src.post_processing import wiener_filter, soft_gate
+
+        stems = wiener_filter(stems)
+        stems = soft_gate(stems)
+        return stems
 
     def _save_stems(self, separated: np.ndarray) -> dict[str, str]:
         """Write separated stems to WAV files.
