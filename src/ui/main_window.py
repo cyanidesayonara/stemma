@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         self._player = player
         self._model_manager = model_manager
         self._current_song_id: str | None = None
+        self._export_worker: ExportWorker | None = None
 
         self._settings = QSettings("stemma", "stemma")
 
@@ -118,12 +119,7 @@ class MainWindow(QMainWindow):
     def _make_mute_toggler(self, stem_name: str):
         """Return a callable that toggles mute for a stem and updates the UI."""
         def toggle():
-            is_muted = stem_name in self._player.muted_stems
-            self._player.set_mute(stem_name, not is_muted)
-            # Sync the UI button state
-            row = self._player_controls._stem_rows.get(stem_name)
-            if row is not None:
-                row._mute_btn.setChecked(not is_muted)
+            self._player_controls.toggle_stem_mute(stem_name)
         return toggle
 
     def _on_shortcut_play_pause(self) -> None:
@@ -143,9 +139,17 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
 
     def closeEvent(self, event) -> None:
-        """Save window geometry and state before closing."""
+        """Save window geometry/state and clean up background threads."""
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
+
+        # Wait for any in-flight export to finish.
+        if self._export_worker is not None and self._export_worker.isRunning():
+            self._export_worker.wait(5000)
+
+        # Stop playback.
+        self._player.stop()
+
         super().closeEvent(event)
 
     def _connect_signals(self) -> None:
