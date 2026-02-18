@@ -500,7 +500,7 @@ class TestFullPipeline:
 
         # 6. Verify mute works end-to-end.
         player._current_frame = 0
-        player.set_mute("vocals", True)
+        player.set_mute("other", True)
         out_muted = np.zeros((2048, 2), dtype=np.float32)
         player._audio_callback(out_muted, 2048, {}, sd.CallbackFlags())
 
