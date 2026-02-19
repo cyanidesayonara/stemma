@@ -38,7 +38,7 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 | **Stem Models** | HTDemucs v4 ONNX | 4-stem + 6-stem, downloaded on first run (~80-300MB) |
 | **Audio Playback** | `sounddevice` + `soundfile` | Low-latency multi-track mixing via NumPy |
 | **Audio Processing** | `numpy` | Efficient buffer manipulation |
-| **Export** | `soundfile` (WAV), `pydub` (MP3) | Individual stems or custom mix |
+| **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **Packaging** | PyInstaller | Single `.exe` (~150-250MB without models) |
 | **Future** | `yt-dlp`, `librosa`/`audiotsm` | YouTube import, tempo/pitch changes |
 
@@ -66,9 +66,11 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 stemma/
 ├── main.py                    # App entry point
 ├── requirements.txt
+├── pyproject.toml             # pytest config
 ├── README.md
 ├── LICENSE                    # MIT
 ├── .gitignore
+├── .github/workflows/ci.yml  # CI: fast tests on every push
 ├── src/
 │   ├── __init__.py
 │   ├── app.py                 # QApplication setup
@@ -77,15 +79,23 @@ stemma/
 │   ├── player.py              # Multi-track audio player (sounddevice)
 │   ├── library.py             # Song library (JSON-based)
 │   ├── exporter.py            # Export stems as WAV/MP3
+│   ├── post_processing.py     # Wiener filter + soft gate
 │   └── ui/
 │       ├── __init__.py
 │       ├── main_window.py     # Main window layout
-│       ├── player_controls.py # Transport + stem mute/solo
-│       ├── library_panel.py   # Song list / playlist
+│       ├── player_controls.py # Transport + stem mute/solo + volume
+│       ├── library_panel.py   # Song list with remove
 │       ├── import_dialog.py   # Import songs dialog
 │       └── styles.py          # Dark theme stylesheet
-├── assets/
-│   └── icons/
+├── tests/
+│   ├── conftest.py            # Shared fixtures
+│   ├── test_separator.py      # 22 tests
+│   ├── test_model_manager.py  # 9 tests
+│   ├── test_player.py         # 16 tests
+│   ├── test_library.py        # 22 tests
+│   ├── test_exporter.py       # 18 tests
+│   ├── test_post_processing.py # 17 tests
+│   └── test_integration.py    # 13 tests (5 slow, 1 hardware)
 └── data/                      # Created at runtime
     ├── library.json
     ├── models/                # Downloaded ONNX models cached here
@@ -119,45 +129,64 @@ stemma/
 ### `player.py` — Multi-Track Audio Player
 - Loads stem WAVs as NumPy arrays
 - `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output
-- API: `play()`, `pause()`, `stop()`, `seek()`, `set_stem_gain(stem, value)`
+- API: `play()`, `pause()`, `stop()`, `seek()`, `set_mute()`, `set_solo()`, `set_volume()`
+- Per-stem volume control (0.0-2.0)
 - Tracks playback position for UI sync
+- PortAudioError handling with stream cleanup
 
 ### `library.py` — Song Library
 - JSON song index: `{id, title, artist, stems_path, model_used, date_added}`
 - CRUD operations on the song list
+- Atomic writes via `os.replace()` to prevent corruption
+- Graceful recovery from corrupted JSON
 
 ### `exporter.py` — Stem Export
 - Export individual stems or custom mix (with current mute/solo state) as WAV or MP3
+- MP3 encoding via `lameenc` (320kbps CBR, no ffmpeg needed)
+- Peak normalization instead of hard clipping
+- Background export via `ExportWorker` QThread
+
+### `post_processing.py` — Audio Post-Processing
+- Wiener filtering: magnitude-based soft masks reduce inter-stem bleed
+- Soft gating: RMS-envelope-driven gate suppresses faint ghost artifacts
+- Chunked processing (~10s windows) to bound memory usage
 
 ### UI Modules
-- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export
+- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export. Keyboard shortcuts. Window state persistence via QSettings.
 - **`player_controls.py`** — Transport (Play/Pause/Stop + seek slider + time display). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray)
-- **`styles.py`** — Dark theme, modern aesthetic, good contrast
+- **`library_panel.py`** — Song list with selection and Remove button (with confirmation)
+- **`import_dialog.py`** — File browser, metadata fields, separation progress bar. Cancels worker on close.
+- **`styles.py`** — Dark theme (Catppuccin Mocha-inspired), good contrast
 
 ---
 
 ## Implementation Phases
 
-### Phase 1 — MVP
-- [ ] Project setup (GitHub repo, deps, structure)
-- [ ] Model manager (download ONNX models on first run)
-- [ ] Stem separation engine (ONNX Runtime + DirectML)
-- [ ] Multi-track player with mute/solo
-- [ ] Song library (import, list, remove)
-- [ ] Export stems as WAV
-- [ ] UI: main window, player controls, library panel, import dialog
-- [ ] Dark theme styling
-- [ ] Manual testing & bug fixes
+### Phase 1 — MVP (complete)
+- [x] Project setup (GitHub repo, deps, structure)
+- [x] Model manager (download ONNX models on first run)
+- [x] Stem separation engine (ONNX Runtime + DirectML)
+- [x] Multi-track player with mute/solo
+- [x] Song library (import, list, remove)
+- [x] Export stems as WAV
+- [x] UI: main window, player controls, library panel, import dialog
+- [x] Dark theme styling
+- [x] Integration test suite (13 tests including hardware playback)
+- [x] Overlap-add Hann windowing (click-free segment boundaries)
 
-### Phase 2 — Polish
-- [ ] MP3 export support
-- [ ] Separation progress bar
-- [ ] Keyboard shortcuts (Space=play/pause, M=mute, S=solo)
-- [ ] Per-stem volume sliders
-- [ ] Window state persistence
-- [ ] Error handling & edge cases
+### Phase 2 — Polish (complete)
+- [x] MP3 export support (lameenc, 320kbps)
+- [x] Separation progress bar (in import dialog)
+- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, 1-6=mute stems)
+- [x] Per-stem volume sliders (0-200%)
+- [x] Window state persistence (QSettings)
+- [x] Audio post-processing (Wiener filter + soft gating)
+- [x] Error handling & edge cases (JSON recovery, thread cleanup, stream safety)
+- [x] CI pipeline (GitHub Actions, fast tests on every push)
 
 ### Phase 3 — Advanced
+- [ ] Real-time streaming stem separation
+- [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
 - [ ] YouTube URL import (yt-dlp)
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
