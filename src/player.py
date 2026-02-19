@@ -115,14 +115,21 @@ class MultiTrackPlayer(QObject):
         if self._current_frame >= self._total_frames:
             self._current_frame = 0
 
-        if self._stream is None:
-            self._stream = sd.OutputStream(
-                samplerate=self._sample_rate,
-                channels=2,
-                callback=self._audio_callback,
-            )
+        try:
+            if self._stream is None:
+                self._stream = sd.OutputStream(
+                    samplerate=self._sample_rate,
+                    channels=2,
+                    callback=self._audio_callback,
+                )
+            self._stream.start()
+        except sd.PortAudioError:
+            # No audio device or device error — clean up and bail.
+            if self._stream is not None:
+                self._stream.close()
+                self._stream = None
+            return
 
-        self._stream.start()
         self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
