@@ -157,3 +157,10 @@ class ImportDialog(QDialog):
     def _on_error(self, message: str) -> None:
         self._status_label.setText(f"Error: {message}")
         self._button_box.setEnabled(True)
+
+    def reject(self) -> None:
+        """Cancel any running separation before closing."""
+        if hasattr(self, "_worker") and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait(5000)
+        super().reject()

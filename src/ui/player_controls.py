@@ -87,6 +87,10 @@ class StemRow(QWidget):
         self._player.set_volume(self._stem_name, gain)
         self._vol_label.setText(f"{value}%")
 
+    def set_muted(self, muted: bool) -> None:
+        """Programmatically set the mute button state (e.g. from keyboard shortcut)."""
+        self._mute_btn.setChecked(muted)
+
 
 class PlayerControls(QWidget):
     """Transport controls and stem mixer panel."""
@@ -166,6 +170,13 @@ class PlayerControls(QWidget):
             row = StemRow(name, self._player)
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
+
+    def toggle_stem_mute(self, stem_name: str) -> None:
+        """Toggle the mute state of a stem and update the UI button."""
+        row = self._stem_rows.get(stem_name)
+        if row is not None:
+            is_muted = stem_name in self._player.muted_stems
+            row.set_muted(not is_muted)
 
     # -- Transport slots --
 
