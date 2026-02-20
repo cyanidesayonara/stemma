@@ -100,8 +100,10 @@ All core functionality implemented and tested:
 - CI pipeline (GitHub Actions)
 
 ### Phase 3 (Advanced) -- Not Started
-Remaining tickets: real-time streaming (#13), experimental DSP (#28)
+Remaining tickets: real-time streaming (#13), youtube import (#41), tempo/key (#42), waveform (#43), a-b loop (#44)
 
+### Phase 4 (Sandbox) -- Not Started
+Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
