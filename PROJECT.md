@@ -186,10 +186,12 @@ stemma/
 
 ### Phase 3 — Advanced
 - [ ] Real-time streaming stem separation
-- [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
 - [ ] YouTube URL import (yt-dlp)
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
+
+### Phase 4 — Sandbox
+- [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
 - [ ] Waveform visualization
 - [ ] A-B loop repeat
 - [ ] General music player features (shuffle, repeat, EQ)
