@@ -189,11 +189,11 @@ stemma/
 - [ ] YouTube URL import (yt-dlp)
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
+- [ ] Waveform visualization
+- [ ] A-B loop repeat
 
 ### Phase 4 — Sandbox
 - [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
-- [ ] Waveform visualization
-- [ ] A-B loop repeat
 - [ ] General music player features (shuffle, repeat, EQ)
 
 ---
