@@ -135,6 +135,41 @@ class PlayerControls(QWidget):
 
         layout.addLayout(transport)
 
+        # -- A-B loop controls --
+        loop_bar = QHBoxLayout()
+
+        self._loop_a_btn = QPushButton("Set A")
+        self._loop_a_btn.setFixedWidth(60)
+        self._loop_a_btn.setToolTip("Set loop start point (A)")
+        self._loop_a_btn.clicked.connect(self._on_set_loop_a)
+        loop_bar.addWidget(self._loop_a_btn)
+
+        self._loop_b_btn = QPushButton("Set B")
+        self._loop_b_btn.setFixedWidth(60)
+        self._loop_b_btn.setToolTip("Set loop end point (B)")
+        self._loop_b_btn.clicked.connect(self._on_set_loop_b)
+        loop_bar.addWidget(self._loop_b_btn)
+
+        self._loop_toggle_btn = QPushButton("Loop")
+        self._loop_toggle_btn.setCheckable(True)
+        self._loop_toggle_btn.setFixedWidth(60)
+        self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
+        self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
+        loop_bar.addWidget(self._loop_toggle_btn)
+
+        self._loop_clear_btn = QPushButton("Clear")
+        self._loop_clear_btn.setFixedWidth(60)
+        self._loop_clear_btn.setToolTip("Clear loop points")
+        self._loop_clear_btn.clicked.connect(self._on_clear_loop)
+        loop_bar.addWidget(self._loop_clear_btn)
+
+        self._loop_label = QLabel("")
+        self._loop_label.setStyleSheet("color: #585b70;")
+        loop_bar.addWidget(self._loop_label)
+
+        loop_bar.addStretch()
+        layout.addLayout(loop_bar)
+
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
@@ -213,3 +248,40 @@ class PlayerControls(QWidget):
     def _on_play_finished(self) -> None:
         self._play_btn.setText("Play")
         self._seek_slider.setValue(0)
+
+    # -- A-B loop slots --
+
+    def _on_set_loop_a(self) -> None:
+        """Set loop A to the current playback position."""
+        self._player.set_loop_a(self._player.current_seconds)
+        self._update_loop_label()
+
+    def _on_set_loop_b(self) -> None:
+        """Set loop B to the current playback position."""
+        self._player.set_loop_b(self._player.current_seconds)
+        self._update_loop_label()
+
+    def _on_loop_toggled(self, checked: bool) -> None:
+        """Enable or disable A-B looping."""
+        self._player.set_looping(checked)
+
+    def _on_clear_loop(self) -> None:
+        """Clear loop points and disable looping."""
+        self._player.clear_loop()
+        self._loop_toggle_btn.setChecked(False)
+        self._update_loop_label()
+
+    def toggle_looping(self) -> None:
+        """Toggle the loop button state (e.g. from keyboard shortcut)."""
+        self._loop_toggle_btn.setChecked(not self._loop_toggle_btn.isChecked())
+
+    def _update_loop_label(self) -> None:
+        """Update the loop info label with current A/B points."""
+        a = self._player.loop_a
+        b = self._player.loop_b
+        parts = []
+        if a is not None:
+            parts.append(f"A: {_format_time(a)}")
+        if b is not None:
+            parts.append(f"B: {_format_time(b)}")
+        self._loop_label.setText("  ".join(parts))
