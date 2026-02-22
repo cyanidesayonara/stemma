@@ -39,6 +39,11 @@ class MultiTrackPlayer(QObject):
         self._soloed_stems: set[str] = set()
         self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
 
+        # A-B loop state.
+        self._loop_a_frame: int | None = None
+        self._loop_b_frame: int | None = None
+        self._looping: bool = False
+
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
 
@@ -82,6 +87,9 @@ class MultiTrackPlayer(QObject):
         self._muted_stems.clear()
         self._soloed_stems.clear()
         self._volumes.clear()
+        self._loop_a_frame = None
+        self._loop_b_frame = None
+        self._looping = False
 
         max_frames = 0
         sample_rate = 0
@@ -197,6 +205,69 @@ class MultiTrackPlayer(QObject):
             self._soloed_stems.discard(stem_name)
 
     # ------------------------------------------------------------------
+    # A-B Loop
+    # ------------------------------------------------------------------
+
+    @property
+    def loop_a(self) -> float | None:
+        """Return the A (start) loop point in seconds, or None."""
+        if self._loop_a_frame is None:
+            return None
+        return self._loop_a_frame / self._sample_rate
+
+    @property
+    def loop_b(self) -> float | None:
+        """Return the B (end) loop point in seconds, or None."""
+        if self._loop_b_frame is None:
+            return None
+        return self._loop_b_frame / self._sample_rate
+
+    @property
+    def looping(self) -> bool:
+        """Return True if A-B looping is active."""
+        return self._looping
+
+    def set_loop_a(self, position_s: float) -> None:
+        """Set the A (start) loop point in seconds.
+
+        If B is already set and A > B, the two points are swapped so that
+        A is always before B.
+        """
+        frame = int(position_s * self._sample_rate)
+        frame = max(0, min(frame, self._total_frames))
+
+        if self._loop_b_frame is not None and frame > self._loop_b_frame:
+            self._loop_a_frame = self._loop_b_frame
+            self._loop_b_frame = frame
+        else:
+            self._loop_a_frame = frame
+
+    def set_loop_b(self, position_s: float) -> None:
+        """Set the B (end) loop point in seconds.
+
+        If A is already set and B < A, the two points are swapped so that
+        A is always before B.
+        """
+        frame = int(position_s * self._sample_rate)
+        frame = max(0, min(frame, self._total_frames))
+
+        if self._loop_a_frame is not None and frame < self._loop_a_frame:
+            self._loop_b_frame = self._loop_a_frame
+            self._loop_a_frame = frame
+        else:
+            self._loop_b_frame = frame
+
+    def set_looping(self, enabled: bool) -> None:
+        """Enable or disable A-B looping."""
+        self._looping = enabled
+
+    def clear_loop(self) -> None:
+        """Clear both loop points and disable looping."""
+        self._loop_a_frame = None
+        self._loop_b_frame = None
+        self._looping = False
+
+    # ------------------------------------------------------------------
     # Internal Callbacks
     # ------------------------------------------------------------------
 
@@ -217,52 +288,78 @@ class MultiTrackPlayer(QObject):
 
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags) -> None:
-        """PortAudio callback for pushing mixed audio to the hardware."""
+        """PortAudio callback for pushing mixed audio to the hardware.
+
+        When A-B looping is active, playback wraps from loop_b back to loop_a
+        instead of stopping at the end of the track.
+        """
         if not self._is_playing or self._current_frame >= self._total_frames:
             outdata.fill(0.0)
             raise sd.CallbackStop
-
-        # Calculate how many frames we can actually read without overflowing.
-        frames_available = self._total_frames - self._current_frame
-        frames_to_read = min(frames, frames_available)
 
         # Clear the output buffer.
         outdata.fill(0.0)
 
         # Determine which stems should be audible.
-        active_stems = []
         if self._soloed_stems:
-            # If any stem is soloed, only play soloed stems (ignoring mute).
             active_stems = [
                 name for name in self._stems if name in self._soloed_stems
             ]
         else:
-            # Otherwise play everything not muted.
             active_stems = [
                 name for name in self._stems if name not in self._muted_stems
             ]
 
-        # Accumulate the active stems directly into the output buffer slice.
-        start = self._current_frame
-        end = start + frames_to_read
+        # Determine the effective playback boundary.
+        looping = (self._looping
+                   and self._loop_a_frame is not None
+                   and self._loop_b_frame is not None
+                   and self._loop_b_frame > self._loop_a_frame)
 
-        for name in active_stems:
-            stem_data = self._stems[name]
-            # Ensure we don't index past the end of a shorter stem.
-            stem_end = min(end, stem_data.shape[0])
-            read_len = stem_end - start
+        # Fill the output buffer, handling loop wraps as needed.
+        buf_offset = 0
+        remaining = frames
 
-            if read_len > 0:
-                gain = self._volumes.get(name, 1.0)
-                outdata[:read_len] += stem_data[start:stem_end] * gain
+        while remaining > 0:
+            if looping:
+                boundary = self._loop_b_frame
+            else:
+                boundary = self._total_frames
 
-        self._current_frame += frames_to_read
+            frames_available = boundary - self._current_frame
+            frames_to_read = min(remaining, max(frames_available, 0))
+
+            if frames_to_read > 0:
+                start = self._current_frame
+                end = start + frames_to_read
+
+                for name in active_stems:
+                    stem_data = self._stems[name]
+                    stem_end = min(end, stem_data.shape[0])
+                    read_len = stem_end - start
+                    if read_len > 0:
+                        gain = self._volumes.get(name, 1.0)
+                        outdata[buf_offset:buf_offset + read_len] += (
+                            stem_data[start:stem_end] * gain
+                        )
+
+                self._current_frame += frames_to_read
+                buf_offset += frames_to_read
+                remaining -= frames_to_read
+
+            # Check if we hit the boundary.
+            if self._current_frame >= boundary:
+                if looping:
+                    # Wrap back to loop A.
+                    self._current_frame = self._loop_a_frame
+                else:
+                    # End of track.
+                    break
 
         # Apply clipping protection.
         np.clip(outdata, -1.0, 1.0, out=outdata)
 
-        # If we reached the end of the track, pad the rest of the buffer
-        # with silence and raise the stop signal for PortAudio.
-        if frames_to_read < frames:
+        # If we didn't fill the entire buffer, we hit EOF without looping.
+        if remaining > 0:
             self._is_playing = False
             raise sd.CallbackStop
