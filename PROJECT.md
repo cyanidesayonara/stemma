@@ -91,7 +91,7 @@ stemma/
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_separator.py      # 22 tests
 │   ├── test_model_manager.py  # 9 tests
-│   ├── test_player.py         # 16 tests
+│   ├── test_player.py         # 24 tests
 │   ├── test_library.py        # 22 tests
 │   ├── test_exporter.py       # 18 tests
 │   ├── test_post_processing.py # 17 tests
@@ -131,6 +131,7 @@ stemma/
 - `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output
 - API: `play()`, `pause()`, `stop()`, `seek()`, `set_mute()`, `set_solo()`, `set_volume()`
 - Per-stem volume control (0.0-2.0)
+- A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`
 - Tracks playback position for UI sync
 - PortAudioError handling with stream cleanup
 
@@ -153,7 +154,7 @@ stemma/
 
 ### UI Modules
 - **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export. Keyboard shortcuts. Window state persistence via QSettings.
-- **`player_controls.py`** — Transport (Play/Pause/Stop + seek slider + time display). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray)
+- **`player_controls.py`** — Transport (Play/Pause/Stop + seek slider + time display). A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray)
 - **`library_panel.py`** — Song list with selection and Remove button (with confirmation)
 - **`import_dialog.py`** — File browser, metadata fields, separation progress bar. Cancels worker on close.
 - **`styles.py`** — Dark theme (Catppuccin Mocha-inspired), good contrast
@@ -177,7 +178,7 @@ stemma/
 ### Phase 2 — Polish (complete)
 - [x] MP3 export support (lameenc, 320kbps)
 - [x] Separation progress bar (in import dialog)
-- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, 1-6=mute stems)
+- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, 1-6=mute stems, A/B/L=loop)
 - [x] Per-stem volume sliders (0-200%)
 - [x] Window state persistence (QSettings)
 - [x] Audio post-processing (Wiener filter + soft gating)
@@ -190,7 +191,7 @@ stemma/
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
 - [ ] Waveform visualization
-- [ ] A-B loop repeat
+- [x] A-B loop repeat
 
 ### Phase 4 — Sandbox
 - [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
