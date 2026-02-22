@@ -105,6 +105,17 @@ class MainWindow(QMainWindow):
             lambda: self._player.seek(self._player.current_seconds + 5.0)
         )
 
+        # A-B loop
+        QShortcut(QKeySequence(Qt.Key.Key_A), self).activated.connect(
+            self._player_controls._on_set_loop_a
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_B), self).activated.connect(
+            self._player_controls._on_set_loop_b
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_L), self).activated.connect(
+            self._player_controls.toggle_looping
+        )
+
         # Number keys 1–6 toggle mute on corresponding stem
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([

@@ -238,3 +238,138 @@ class TestMultiTrackPlayerVolume:
         # Reload — volumes should reset to 1.0
         player.load_stems(mock_stems)
         assert player.get_volume("vocals") == 1.0
+
+
+class TestABLoop:
+    """Test A-B loop functionality."""
+
+    def test_loop_disabled_by_default(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        assert player.loop_a is None
+        assert player.loop_b is None
+        assert not player.looping
+
+    def test_set_loop_points(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_loop_a(0.2)
+        player.set_loop_b(0.8)
+        assert player.loop_a == pytest.approx(0.2, abs=0.001)
+        assert player.loop_b == pytest.approx(0.8, abs=0.001)
+
+    def test_set_loop_a_after_b_swaps(self, mock_stems):
+        """If A is set after B and A > B, they should swap."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_loop_b(0.3)
+        player.set_loop_a(0.7)
+        assert player.loop_a == pytest.approx(0.3, abs=0.001)
+        assert player.loop_b == pytest.approx(0.7, abs=0.001)
+
+    def test_clear_loop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_loop_a(0.2)
+        player.set_loop_b(0.8)
+        player.set_looping(True)
+        player.clear_loop()
+
+        assert player.loop_a is None
+        assert player.loop_b is None
+        assert not player.looping
+
+    def test_callback_wraps_at_loop_b(self, mock_stems):
+        """When looping, playback should wrap from B back to A."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        # Set loop region: 0.0s to 0.5s (22050 frames)
+        player.set_loop_a(0.0)
+        player.set_loop_b(0.5)
+        player.set_looping(True)
+
+        # Seek near end of loop region (100 frames before loop_b)
+        player.seek(0.5 - 100 / 44100)
+
+        outdata = np.zeros((200, 2), dtype=np.float32)
+        # Should NOT raise CallbackStop — loop wraps instead of EOF
+        player._audio_callback(outdata, 200, {}, sd.CallbackFlags())
+
+        # Should have wrapped back into the loop region
+        assert player._current_frame < 22050  # Still within loop
+
+    def test_callback_no_wrap_when_not_looping(self, mock_stems):
+        """Without looping enabled, playback at EOF raises CallbackStop."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        player.set_loop_a(0.0)
+        player.set_loop_b(0.5)
+        # looping NOT enabled
+
+        # Seek near end of track
+        player.seek(1.0 - 10 / 44100)
+
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        with pytest.raises(sd.CallbackStop):
+            player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+    def test_load_stems_clears_loop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.set_loop_a(0.2)
+        player.set_loop_b(0.8)
+        player.set_looping(True)
+
+        player.load_stems(mock_stems)
+        assert player.loop_a is None
+        assert player.loop_b is None
+        assert not player.looping
+
+    def test_zero_width_loop_does_not_deadlock(self, mock_stems):
+        """A == B must not cause an infinite loop in the callback."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        # Set A and B to the exact same position (zero-width loop)
+        player.set_loop_a(0.5)
+        player.set_loop_b(0.5)
+        player.set_looping(True)
+
+        # Seek to that position
+        player.seek(0.5)
+
+        outdata = np.zeros((200, 2), dtype=np.float32)
+        # Should complete without hanging -- looping is effectively ignored
+        player._audio_callback(outdata, 200, {}, sd.CallbackFlags())
+
+        # Playback should have advanced past the zero-width "loop"
+        assert player._current_frame > 22050
+
+    def test_loop_fills_output_buffer_correctly(self, mock_stems):
+        """Even when wrapping, the entire output buffer should be filled."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        # Small loop: 0.0s to 0.01s (~441 frames)
+        player.set_loop_a(0.0)
+        player.set_loop_b(441 / 44100)
+        player.set_looping(True)
+
+        # Seek to 400 frames in — only 41 frames before wrap
+        player._current_frame = 400
+
+        outdata = np.zeros((200, 2), dtype=np.float32)
+        player._audio_callback(outdata, 200, {}, sd.CallbackFlags())
+
+        # Entire buffer should be non-zero (filled with stem data)
+        assert np.all(outdata != 0.0)
