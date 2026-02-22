@@ -59,6 +59,9 @@ pytest -m hardware
 | S | Stop |
 | Left / Right | Seek -/+ 5 seconds |
 | 1-6 | Toggle mute on stem |
+| A | Set loop start point |
+| B | Set loop end point |
+| L | Toggle A-B loop |
 
 ## Project Documentation
 
