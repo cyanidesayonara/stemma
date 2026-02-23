@@ -1,0 +1,102 @@
+"""YouTube audio downloader using yt-dlp.
+
+Downloads the audio track from a YouTube URL and saves it as an audio file
+for subsequent import into the stemma library.
+"""
+
+import os
+import re
+from typing import Callable
+
+import yt_dlp
+
+
+class DownloadError(Exception):
+    """Raised when a download or metadata extraction fails."""
+
+
+_YOUTUBE_PATTERN = re.compile(
+    r"(https?://)?(www\.)?"
+    r"(youtube\.com/watch\?v=|youtu\.be/|music\.youtube\.com/watch\?v=)"
+)
+
+
+def is_supported_url(text: str) -> bool:
+    """Return True if *text* looks like a supported YouTube URL."""
+    return bool(_YOUTUBE_PATTERN.search(text))
+
+
+def extract_metadata(url: str) -> tuple[str, str]:
+    """Extract title and artist from a YouTube URL without downloading.
+
+    Returns:
+        A ``(title, artist)`` tuple. Falls back to ``"Untitled"`` and
+        ``"Unknown Artist"`` when metadata is unavailable.
+
+    Raises:
+        DownloadError: If the metadata extraction fails.
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "skip_download": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise DownloadError(str(exc)) from exc
+
+    title = info.get("title") or "Untitled"
+    artist = info.get("artist") or info.get("uploader") or "Unknown Artist"
+    return title, artist
+
+
+def download_audio(
+    url: str,
+    output_path: str,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> str:
+    """Download the audio from *url* and save it to *output_path*.
+
+    Args:
+        url: YouTube video URL.
+        output_path: Destination file path (e.g. ``/tmp/audio.mp3``).
+        progress_callback: Optional callable invoked with yt-dlp progress
+            dictionaries (keys: ``status``, ``downloaded_bytes``,
+            ``total_bytes``, etc.).
+
+    Returns:
+        The *output_path* on success.
+
+    Raises:
+        DownloadError: If the download fails.
+    """
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": output_path,
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "320",
+            }
+        ],
+        "progress_hooks": [],
+    }
+
+    if progress_callback is not None:
+        opts["progress_hooks"].append(progress_callback)
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except Exception as exc:
+        raise DownloadError(str(exc)) from exc
+
+    return output_path
