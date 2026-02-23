@@ -333,6 +333,27 @@ class TestABLoop:
         assert player.loop_b is None
         assert not player.looping
 
+    def test_zero_width_loop_does_not_deadlock(self, mock_stems):
+        """A == B must not cause an infinite loop in the callback."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+
+        # Set A and B to the exact same position (zero-width loop)
+        player.set_loop_a(0.5)
+        player.set_loop_b(0.5)
+        player.set_looping(True)
+
+        # Seek to that position
+        player.seek(0.5)
+
+        outdata = np.zeros((200, 2), dtype=np.float32)
+        # Should complete without hanging -- looping is effectively ignored
+        player._audio_callback(outdata, 200, {}, sd.CallbackFlags())
+
+        # Playback should have advanced past the zero-width "loop"
+        assert player._current_frame > 22050
+
     def test_loop_fills_output_buffer_correctly(self, mock_stems):
         """Even when wrapping, the entire output buffer should be filled."""
         player = MultiTrackPlayer()
