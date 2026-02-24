@@ -22,6 +22,7 @@ For full technical specs, module descriptions, and the phased roadmap, see `PROJ
 - sounddevice + soundfile for audio playback
 - numpy for audio buffer processing
 - librosa for STFT/iSTFT (pre/post-processing outside ONNX model)
+- yt-dlp + ffmpeg for YouTube audio download
 - PyInstaller for packaging
 
 ## Project Structure
@@ -42,6 +43,7 @@ stemma/
     player.py          # Multi-track audio player
     library.py         # Song library (JSON-based)
     exporter.py        # Export stems as WAV/MP3
+    downloader.py      # YouTube audio download (yt-dlp)
     post_processing.py # Wiener filter + soft gate
     ui/
       main_window.py
@@ -49,12 +51,13 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (112 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (136 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
     test_player.py
     test_library.py
+    test_downloader.py
     test_exporter.py
     test_post_processing.py
     test_integration.py
@@ -101,14 +104,15 @@ All core functionality implemented and tested:
 
 ### Phase 3 (Advanced) -- In Progress
 - [x] A-B loop repeat (#44, PR #48)
-- Remaining tickets: real-time streaming (#13), youtube import (#41), tempo/key (#42), waveform (#43)
+- [x] YouTube URL import (#41, PR #49)
+- Remaining tickets: real-time streaming (#13), tempo/key (#42), waveform (#43)
 
 ### Phase 4 (Sandbox) -- Not Started
 Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 120 fast tests (~9s)
+pytest                                    # 136 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
