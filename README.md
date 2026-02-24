@@ -10,7 +10,9 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - GPU-accelerated inference via ONNX Runtime + DirectML
 - Multi-track player with per-stem mute/solo/volume controls
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
+- Import from YouTube URL (requires ffmpeg)
 - Export individual stems or custom mixes as WAV or MP3
+- A-B loop for practice sections
 - Keyboard shortcuts for transport and stem control
 - Dark-themed Qt desktop interface with window state persistence
 - 100% local processing -- no cloud, no subscriptions
@@ -20,6 +22,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Windows 10/11
 - Python 3.14
 - NVIDIA GPU recommended (DirectML, falls back to CPU)
+- ffmpeg on PATH (required for YouTube import)
 
 ## Development Setup
 
