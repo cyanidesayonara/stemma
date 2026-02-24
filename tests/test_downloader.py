@@ -9,6 +9,7 @@ from src.downloader import (
     is_supported_url,
     extract_metadata,
     download_audio,
+    check_ffmpeg,
     DownloadError,
 )
 
@@ -117,6 +118,18 @@ class TestExtractMetadata:
 
         with pytest.raises(DownloadError):
             extract_metadata("https://youtu.be/private123")
+
+
+class TestCheckFFmpeg:
+    """Test ffmpeg availability check."""
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_ffmpeg_available(self, mock_which):
+        assert check_ffmpeg() is True
+
+    @patch("shutil.which", return_value=None)
+    def test_ffmpeg_missing(self, mock_which):
+        assert check_ffmpeg() is False
 
 
 class TestDownloadAudio:

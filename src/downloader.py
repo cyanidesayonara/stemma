@@ -6,6 +6,7 @@ for subsequent import into the stemma library.
 
 import os
 import re
+import shutil
 from typing import Callable
 
 import yt_dlp
@@ -19,6 +20,11 @@ _YOUTUBE_PATTERN = re.compile(
     r"^(https?://)?(www\.)?"
     r"(youtube\.com/watch\?v=|youtu\.be/|music\.youtube\.com/watch\?v=)"
 )
+
+
+def check_ffmpeg() -> bool:
+    """Return True if ffmpeg is available on PATH."""
+    return shutil.which("ffmpeg") is not None
 
 
 def is_supported_url(text: str) -> bool:
