@@ -5,6 +5,7 @@ entered, yt-dlp downloads the audio before handing it off to the separator.
 """
 
 import os
+import shutil
 import tempfile
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -99,6 +100,7 @@ class ImportDialog(QDialog):
         self._download_worker: _DownloadWorker | None = None
         self._metadata_worker: _MetadataWorker | None = None
         self._selected_path: str = ""
+        self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
         self._setup_ui()
 
@@ -187,6 +189,11 @@ class ImportDialog(QDialog):
         if not is_supported_url(url):
             return
 
+        # Disconnect previous worker signals to prevent stale callbacks.
+        if self._metadata_worker is not None:
+            self._metadata_worker.finished.disconnect()
+            self._metadata_worker.error.disconnect()
+
         self._fetch_btn.setEnabled(False)
         self._status_label.setVisible(True)
         self._status_label.setText("Fetching metadata...")
@@ -238,11 +245,16 @@ class ImportDialog(QDialog):
     def _on_import(self) -> None:
         url = self._url_edit.text().strip()
 
+        # Disable immediately to prevent double-click race.
+        self._button_box.setEnabled(False)
+
         if is_supported_url(url):
             self._start_youtube_import(url)
         elif self._selected_path:
             self._start_local_import(self._selected_path)
-        # else: nothing selected, do nothing.
+        else:
+            # Nothing selected -- re-enable.
+            self._button_box.setEnabled(True)
 
     def _start_youtube_import(self, url: str) -> None:
         """Download audio from YouTube, then hand off to the separator."""
@@ -253,8 +265,8 @@ class ImportDialog(QDialog):
         self._button_box.setEnabled(False)
 
         # Download to a temp file, then import like a local file.
-        tmp_dir = tempfile.mkdtemp(prefix="stemma_yt_")
-        output_path = os.path.join(tmp_dir, "audio.mp3")
+        self._tmp_dir = tempfile.mkdtemp(prefix="stemma_yt_")
+        output_path = os.path.join(self._tmp_dir, "audio.mp3")
 
         self._download_worker = _DownloadWorker(url, output_path, parent=self)
         self._download_worker.progress.connect(self._on_progress)
@@ -263,9 +275,14 @@ class ImportDialog(QDialog):
         self._download_worker.start()
 
     def _on_download_finished(self, path: str) -> None:
-        """After download completes, import the downloaded file."""
+        """After download completes, import the downloaded file.
+
+        The library's add_song copies the file into the song directory,
+        so the temp dir is cleaned up afterwards.
+        """
         self._selected_path = path
         self._start_local_import(path)
+        self._cleanup_tmp_dir()
 
     def _start_local_import(self, path: str) -> None:
         """Import a local audio file into the library and start separation."""
@@ -313,7 +330,16 @@ class ImportDialog(QDialog):
 
     def _on_error(self, message: str) -> None:
         self._status_label.setText(f"Error: {message}")
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(False)
         self._button_box.setEnabled(True)
+        self._cleanup_tmp_dir()
+
+    def _cleanup_tmp_dir(self) -> None:
+        """Remove the temporary download directory if it exists."""
+        if self._tmp_dir is not None and os.path.isdir(self._tmp_dir):
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+            self._tmp_dir = None
 
     def reject(self) -> None:
         """Cancel any running workers before closing."""
@@ -322,4 +348,5 @@ class ImportDialog(QDialog):
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(5000)
+        self._cleanup_tmp_dir()
         super().reject()

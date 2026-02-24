@@ -16,7 +16,7 @@ class DownloadError(Exception):
 
 
 _YOUTUBE_PATTERN = re.compile(
-    r"(https?://)?(www\.)?"
+    r"^(https?://)?(www\.)?"
     r"(youtube\.com/watch\?v=|youtu\.be/|music\.youtube\.com/watch\?v=)"
 )
 
@@ -48,6 +48,9 @@ def extract_metadata(url: str) -> tuple[str, str]:
     except Exception as exc:
         raise DownloadError(str(exc)) from exc
 
+    if info is None:
+        raise DownloadError("Could not retrieve video metadata")
+
     title = info.get("title") or "Untitled"
     artist = info.get("artist") or info.get("uploader") or "Unknown Artist"
     return title, artist
@@ -75,9 +78,14 @@ def download_audio(
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+    # Strip extension from outtmpl because FFmpegExtractAudio appends the
+    # codec extension itself (e.g. ".mp3"). Passing "audio.mp3" would
+    # produce "audio.mp3.mp3".
+    stem = os.path.splitext(output_path)[0]
+
     opts = {
         "format": "bestaudio/best",
-        "outtmpl": output_path,
+        "outtmpl": stem,
         "quiet": True,
         "no_warnings": True,
         "postprocessors": [
