@@ -236,3 +236,57 @@ class TestDownloadAudio:
         # Should have a progress_hooks entry in opts
         opts = mock_ydl_class.call_args[0][0]
         assert len(opts["progress_hooks"]) == 1
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_noplaylist_option_set(self, mock_ydl_class, tmp_path):
+        """Playlist URLs should only download a single video."""
+        output_path = str(tmp_path / "audio.mp3")
+
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+
+        def fake_download(urls):
+            with open(output_path, "wb") as f:
+                f.write(b"fake")
+
+        mock_ydl.download.side_effect = fake_download
+
+        download_audio(
+            "https://www.youtube.com/watch?v=abc123&list=PLxyz",
+            output_path,
+        )
+
+        opts = mock_ydl_class.call_args[0][0]
+        assert opts["noplaylist"] is True
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_download_raises_when_output_file_missing(self, mock_ydl_class, tmp_path):
+        """Raise DownloadError if yt-dlp exits without creating the file."""
+        output_path = str(tmp_path / "audio.mp3")
+
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+
+        # yt-dlp "succeeds" but does not create the output file.
+        mock_ydl.download.side_effect = lambda urls: None
+
+        with pytest.raises(DownloadError, match="not found"):
+            download_audio("https://youtu.be/abc123", output_path)
+
+
+class TestExtractMetadataNoPlaylist:
+    """Test that extract_metadata also sets noplaylist."""
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_noplaylist_in_metadata_opts(self, mock_ydl_class):
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = {"title": "T", "uploader": "U"}
+
+        extract_metadata("https://youtu.be/abc123")
+
+        opts = mock_ydl_class.call_args[0][0]
+        assert opts["noplaylist"] is True
