@@ -47,6 +47,7 @@ def extract_metadata(url: str) -> tuple[str, str]:
         "no_warnings": True,
         "extract_flat": False,
         "skip_download": True,
+        "noplaylist": True,
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -94,6 +95,7 @@ def download_audio(
         "outtmpl": stem,
         "quiet": True,
         "no_warnings": True,
+        "noplaylist": True,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -112,5 +114,10 @@ def download_audio(
             ydl.download([url])
     except Exception as exc:
         raise DownloadError(str(exc)) from exc
+
+    if not os.path.isfile(output_path):
+        raise DownloadError(
+            f"Download finished but output file not found: {output_path}"
+        )
 
     return output_path
