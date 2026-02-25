@@ -1,11 +1,14 @@
-"""Import song dialog -- file browser, metadata, separation trigger.
+"""Import song dialog -- file browser, YouTube URL, metadata, separation trigger.
 
-Full implementation in ticket #11. This provides the minimal working
-dialog needed for the main window's File > Import action.
+Supports importing from a local audio file or a YouTube URL. When a URL is
+entered, yt-dlp downloads the audio before handing it off to the separator.
 """
 
 import os
+import shutil
+import tempfile
 
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -13,18 +16,90 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
 
+from src.downloader import (
+    DownloadError,
+    check_ffmpeg,
+    download_audio,
+    extract_metadata,
+    is_supported_url,
+)
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.separator import SeparatorWorker
 
 
+def _safe_disconnect(signal) -> None:
+    """Disconnect all slots from *signal*, ignoring RuntimeError."""
+    try:
+        signal.disconnect()
+    except RuntimeError:
+        pass
+
+
+class _MetadataWorker(QThread):
+    """Background thread for fetching YouTube metadata."""
+
+    # Named 'completed' to avoid shadowing QThread.finished.
+    completed = Signal(str, str)  # title, artist
+    error = Signal(str)
+
+    def __init__(self, url: str, parent=None) -> None:
+        super().__init__(parent)
+        self._url = url
+
+    def run(self) -> None:
+        try:
+            title, artist = extract_metadata(self._url)
+            self.completed.emit(title, artist)
+        except DownloadError as exc:
+            self.error.emit(str(exc))
+
+
+class _DownloadWorker(QThread):
+    """Background thread for downloading audio from YouTube."""
+
+    progress = Signal(int, str)  # percent, message
+    # Named 'completed' to avoid shadowing QThread.finished.
+    completed = Signal(str)  # output path
+    error = Signal(str)
+
+    def __init__(self, url: str, output_path: str, parent=None) -> None:
+        super().__init__(parent)
+        self._url = url
+        self._output_path = output_path
+
+    def run(self) -> None:
+        try:
+            self.progress.emit(0, "Downloading audio...")
+
+            def on_progress(d):
+                if d.get("status") == "downloading":
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                    downloaded = d.get("downloaded_bytes", 0)
+                    if total > 0:
+                        pct = int(downloaded / total * 100)
+                        self.progress.emit(min(pct, 99), "Downloading audio...")
+
+            download_audio(self._url, self._output_path, progress_callback=on_progress)
+            self.progress.emit(100, "Download complete.")
+            self.completed.emit(self._output_path)
+        except DownloadError as exc:
+            self.error.emit(str(exc))
+
+
 class ImportDialog(QDialog):
-    """Dialog for importing and separating a song."""
+    """Dialog for importing and separating a song.
+
+    Supports two import modes:
+    - Local file: browse for an audio file on disk.
+    - YouTube URL: paste a YouTube link to download and import.
+    """
 
     def __init__(
         self,
@@ -39,14 +114,39 @@ class ImportDialog(QDialog):
         self._library = library
         self._model_manager = model_manager
         self._worker: SeparatorWorker | None = None
+        self._download_worker: _DownloadWorker | None = None
+        self._metadata_worker: _MetadataWorker | None = None
         self._selected_path: str = ""
+        self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # File selection row.
+        # -- YouTube URL row --
+        url_row = QHBoxLayout()
+        url_row.addWidget(QLabel("URL:"))
+        self._url_edit = QLineEdit()
+        self._url_edit.setPlaceholderText("Paste a YouTube URL...")
+        self._url_edit.textChanged.connect(self._on_url_changed)
+        url_row.addWidget(self._url_edit)
+
+        self._fetch_btn = QPushButton("Fetch")
+        self._fetch_btn.setFixedWidth(60)
+        self._fetch_btn.setToolTip("Fetch title and artist from YouTube")
+        self._fetch_btn.clicked.connect(self._on_fetch_metadata)
+        self._fetch_btn.setEnabled(False)
+        url_row.addWidget(self._fetch_btn)
+        layout.addLayout(url_row)
+
+        # -- Separator label --
+        or_label = QLabel("-- or --")
+        or_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        or_label.setStyleSheet("color: #585b70; padding: 4px;")
+        layout.addWidget(or_label)
+
+        # -- File selection row --
         file_row = QHBoxLayout()
         self._path_edit = QLineEdit()
         self._path_edit.setPlaceholderText("Select an audio file...")
@@ -58,7 +158,7 @@ class ImportDialog(QDialog):
         file_row.addWidget(browse_btn)
         layout.addLayout(file_row)
 
-        # Metadata fields.
+        # -- Metadata fields --
         title_row = QHBoxLayout()
         title_row.addWidget(QLabel("Title:"))
         self._title_edit = QLineEdit()
@@ -71,7 +171,7 @@ class ImportDialog(QDialog):
         artist_row.addWidget(self._artist_edit)
         layout.addLayout(artist_row)
 
-        # Progress.
+        # -- Progress --
         self._progress_bar = QProgressBar()
         self._progress_bar.setVisible(False)
         layout.addWidget(self._progress_bar)
@@ -80,7 +180,7 @@ class ImportDialog(QDialog):
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
 
-        # Buttons.
+        # -- Buttons --
         self._button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -92,6 +192,54 @@ class ImportDialog(QDialog):
         self._button_box.rejected.connect(self.reject)
         layout.addWidget(self._button_box)
 
+    # ------------------------------------------------------------------
+    # URL handling
+    # ------------------------------------------------------------------
+
+    def _on_url_changed(self, text: str) -> None:
+        """Enable/disable fetch button based on URL validity."""
+        self._fetch_btn.setEnabled(is_supported_url(text))
+
+    def _on_fetch_metadata(self) -> None:
+        """Fetch title and artist from the YouTube URL in a background thread."""
+        url = self._url_edit.text().strip()
+        if not is_supported_url(url):
+            return
+
+        # Wait for a previous metadata worker to finish before starting
+        # a new one.  Without this, the old QThread would be orphaned.
+        if self._metadata_worker is not None:
+            _safe_disconnect(self._metadata_worker.completed)
+            _safe_disconnect(self._metadata_worker.error)
+            if self._metadata_worker.isRunning():
+                self._metadata_worker.wait(5000)
+
+        self._fetch_btn.setEnabled(False)
+        self._status_label.setVisible(True)
+        self._status_label.setText("Fetching metadata...")
+
+        self._metadata_worker = _MetadataWorker(url, parent=self)
+        self._metadata_worker.completed.connect(self._on_metadata_fetched)
+        self._metadata_worker.error.connect(self._on_metadata_error)
+        self._metadata_worker.start()
+
+    def _on_metadata_fetched(self, title: str, artist: str) -> None:
+        """Populate title and artist fields from YouTube metadata."""
+        if not self._title_edit.text():
+            self._title_edit.setText(title)
+        if not self._artist_edit.text():
+            self._artist_edit.setText(artist)
+        self._status_label.setText("Metadata fetched.")
+        self._fetch_btn.setEnabled(True)
+
+    def _on_metadata_error(self, message: str) -> None:
+        self._status_label.setText(f"Metadata error: {message}")
+        self._fetch_btn.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    # File browsing
+    # ------------------------------------------------------------------
+
     def _on_browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -102,25 +250,85 @@ class ImportDialog(QDialog):
         if path:
             self._selected_path = path
             self._path_edit.setText(path)
+            # Clear URL field when a local file is selected.
+            self._url_edit.clear()
 
             # Auto-fill title from filename.
             basename = os.path.splitext(os.path.basename(path))[0]
             if not self._title_edit.text():
                 self._title_edit.setText(basename)
 
+    # ------------------------------------------------------------------
+    # Import
+    # ------------------------------------------------------------------
+
     def _on_import(self) -> None:
-        if not self._selected_path:
+        url = self._url_edit.text().strip()
+
+        # Disable immediately to prevent double-click race.
+        self._button_box.setEnabled(False)
+
+        if is_supported_url(url):
+            self._start_youtube_import(url)
+        elif self._selected_path:
+            self._start_local_import(self._selected_path)
+        else:
+            # Nothing selected -- re-enable.
+            self._button_box.setEnabled(True)
+
+    def _start_youtube_import(self, url: str) -> None:
+        """Download audio from YouTube, then hand off to the separator."""
+        if not check_ffmpeg():
+            QMessageBox.critical(
+                self,
+                "ffmpeg not found",
+                "YouTube import requires ffmpeg.\n\n"
+                "Install ffmpeg and make sure it is on your PATH.",
+            )
+            self._button_box.setEnabled(True)
             return
 
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setValue(0)
+        self._status_label.setVisible(True)
+        self._status_label.setText("Downloading audio...")
+        self._button_box.setEnabled(False)
+
+        # Download to a temp file, then import like a local file.
+        self._tmp_dir = tempfile.mkdtemp(prefix="stemma_yt_")
+        output_path = os.path.join(self._tmp_dir, "audio.mp3")
+
+        self._download_worker = _DownloadWorker(url, output_path, parent=self)
+        self._download_worker.progress.connect(self._on_progress)
+        self._download_worker.completed.connect(self._on_download_finished)
+        self._download_worker.error.connect(self._on_error)
+        self._download_worker.start()
+
+    def _on_download_finished(self, path: str) -> None:
+        """After download completes, import the downloaded file.
+
+        The library's add_song copies the file into the song directory,
+        so the temp dir is cleaned up afterwards.
+        """
+        self._selected_path = path
+        self._start_local_import(path)
+        self._cleanup_tmp_dir()
+
+    def _start_local_import(self, path: str) -> None:
+        """Import a local audio file into the library and start separation."""
         title = self._title_edit.text() or "Untitled"
         artist = self._artist_edit.text() or "Unknown Artist"
 
-        # Add to library (copies the file).
-        song = self._library.add_song(
-            title=title,
-            artist=artist,
-            original_path=self._selected_path,
-        )
+        try:
+            # Add to library (copies the file).
+            song = self._library.add_song(
+                title=title,
+                artist=artist,
+                original_path=path,
+            )
+        except Exception as exc:
+            self._on_error(str(exc))
+            return
 
         # Start separation.
         model_path = self._model_manager.model_path(is_6_stem=False)
@@ -155,12 +363,58 @@ class ImportDialog(QDialog):
         self.accept()
 
     def _on_error(self, message: str) -> None:
+        self._status_label.setVisible(True)
         self._status_label.setText(f"Error: {message}")
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(False)
         self._button_box.setEnabled(True)
+        self._cleanup_tmp_dir()
+
+    def _cleanup_tmp_dir(self) -> None:
+        """Remove the temporary download directory if it exists."""
+        if self._tmp_dir is not None and os.path.isdir(self._tmp_dir):
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+            self._tmp_dir = None
+
+    def _disconnect_and_detach_workers(self) -> None:
+        """Disconnect all worker signals and detach them from the dialog.
+
+        Workers are detached (setParent(None)) so they are not destroyed
+        when the dialog is deleted. Any still-running thread will finish
+        its work and be cleaned up by Qt's deleteLater mechanism.
+        """
+        if self._metadata_worker is not None:
+            _safe_disconnect(self._metadata_worker.completed)
+            _safe_disconnect(self._metadata_worker.error)
+        if self._download_worker is not None:
+            _safe_disconnect(self._download_worker.progress)
+            _safe_disconnect(self._download_worker.completed)
+            _safe_disconnect(self._download_worker.error)
+        if self._worker is not None:
+            _safe_disconnect(self._worker.progress)
+            _safe_disconnect(self._worker.finished)
+            _safe_disconnect(self._worker.error)
 
     def reject(self) -> None:
-        """Cancel any running separation before closing."""
-        if hasattr(self, "_worker") and self._worker.isRunning():
+        """Cancel any running workers before closing."""
+        # Disconnect all signals first so no callbacks fire into a
+        # partially destroyed dialog.
+        self._disconnect_and_detach_workers()
+
+        # Wait for workers to finish (best-effort; yt-dlp has no cancel).
+        if self._metadata_worker is not None and self._metadata_worker.isRunning():
+            self._metadata_worker.wait(5000)
+        if self._download_worker is not None and self._download_worker.isRunning():
+            self._download_worker.setParent(None)
+            self._download_worker.wait(5000)
+            if self._download_worker.isRunning():
+                # Thread outlived the wait -- schedule deferred cleanup.
+                self._download_worker.finished.connect(
+                    self._download_worker.deleteLater
+                )
+        if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(5000)
+
+        self._cleanup_tmp_dir()
         super().reject()
