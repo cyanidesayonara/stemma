@@ -34,10 +34,19 @@ from src.model_manager import ModelManager
 from src.separator import SeparatorWorker
 
 
+def _safe_disconnect(signal) -> None:
+    """Disconnect all slots from *signal*, ignoring RuntimeError."""
+    try:
+        signal.disconnect()
+    except RuntimeError:
+        pass
+
+
 class _MetadataWorker(QThread):
     """Background thread for fetching YouTube metadata."""
 
-    finished = Signal(str, str)  # title, artist
+    # Named 'completed' to avoid shadowing QThread.finished.
+    completed = Signal(str, str)  # title, artist
     error = Signal(str)
 
     def __init__(self, url: str, parent=None) -> None:
@@ -47,7 +56,7 @@ class _MetadataWorker(QThread):
     def run(self) -> None:
         try:
             title, artist = extract_metadata(self._url)
-            self.finished.emit(title, artist)
+            self.completed.emit(title, artist)
         except DownloadError as exc:
             self.error.emit(str(exc))
 
@@ -56,7 +65,8 @@ class _DownloadWorker(QThread):
     """Background thread for downloading audio from YouTube."""
 
     progress = Signal(int, str)  # percent, message
-    finished = Signal(str)  # output path
+    # Named 'completed' to avoid shadowing QThread.finished.
+    completed = Signal(str)  # output path
     error = Signal(str)
 
     def __init__(self, url: str, output_path: str, parent=None) -> None:
@@ -78,7 +88,7 @@ class _DownloadWorker(QThread):
 
             download_audio(self._url, self._output_path, progress_callback=on_progress)
             self.progress.emit(100, "Download complete.")
-            self.finished.emit(self._output_path)
+            self.completed.emit(self._output_path)
         except DownloadError as exc:
             self.error.emit(str(exc))
 
@@ -196,17 +206,20 @@ class ImportDialog(QDialog):
         if not is_supported_url(url):
             return
 
-        # Disconnect previous worker signals to prevent stale callbacks.
+        # Wait for a previous metadata worker to finish before starting
+        # a new one.  Without this, the old QThread would be orphaned.
         if self._metadata_worker is not None:
-            self._metadata_worker.finished.disconnect()
-            self._metadata_worker.error.disconnect()
+            _safe_disconnect(self._metadata_worker.completed)
+            _safe_disconnect(self._metadata_worker.error)
+            if self._metadata_worker.isRunning():
+                self._metadata_worker.wait(5000)
 
         self._fetch_btn.setEnabled(False)
         self._status_label.setVisible(True)
         self._status_label.setText("Fetching metadata...")
 
         self._metadata_worker = _MetadataWorker(url, parent=self)
-        self._metadata_worker.finished.connect(self._on_metadata_fetched)
+        self._metadata_worker.completed.connect(self._on_metadata_fetched)
         self._metadata_worker.error.connect(self._on_metadata_error)
         self._metadata_worker.start()
 
@@ -287,7 +300,7 @@ class ImportDialog(QDialog):
 
         self._download_worker = _DownloadWorker(url, output_path, parent=self)
         self._download_worker.progress.connect(self._on_progress)
-        self._download_worker.finished.connect(self._on_download_finished)
+        self._download_worker.completed.connect(self._on_download_finished)
         self._download_worker.error.connect(self._on_error)
         self._download_worker.start()
 
@@ -306,12 +319,16 @@ class ImportDialog(QDialog):
         title = self._title_edit.text() or "Untitled"
         artist = self._artist_edit.text() or "Unknown Artist"
 
-        # Add to library (copies the file).
-        song = self._library.add_song(
-            title=title,
-            artist=artist,
-            original_path=path,
-        )
+        try:
+            # Add to library (copies the file).
+            song = self._library.add_song(
+                title=title,
+                artist=artist,
+                original_path=path,
+            )
+        except Exception as exc:
+            self._on_error(str(exc))
+            return
 
         # Start separation.
         model_path = self._model_manager.model_path(is_6_stem=False)
@@ -346,6 +363,7 @@ class ImportDialog(QDialog):
         self.accept()
 
     def _on_error(self, message: str) -> None:
+        self._status_label.setVisible(True)
         self._status_label.setText(f"Error: {message}")
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
@@ -358,12 +376,45 @@ class ImportDialog(QDialog):
             shutil.rmtree(self._tmp_dir, ignore_errors=True)
             self._tmp_dir = None
 
+    def _disconnect_and_detach_workers(self) -> None:
+        """Disconnect all worker signals and detach them from the dialog.
+
+        Workers are detached (setParent(None)) so they are not destroyed
+        when the dialog is deleted. Any still-running thread will finish
+        its work and be cleaned up by Qt's deleteLater mechanism.
+        """
+        if self._metadata_worker is not None:
+            _safe_disconnect(self._metadata_worker.completed)
+            _safe_disconnect(self._metadata_worker.error)
+        if self._download_worker is not None:
+            _safe_disconnect(self._download_worker.progress)
+            _safe_disconnect(self._download_worker.completed)
+            _safe_disconnect(self._download_worker.error)
+        if self._worker is not None:
+            _safe_disconnect(self._worker.progress)
+            _safe_disconnect(self._worker.finished)
+            _safe_disconnect(self._worker.error)
+
     def reject(self) -> None:
         """Cancel any running workers before closing."""
+        # Disconnect all signals first so no callbacks fire into a
+        # partially destroyed dialog.
+        self._disconnect_and_detach_workers()
+
+        # Wait for workers to finish (best-effort; yt-dlp has no cancel).
+        if self._metadata_worker is not None and self._metadata_worker.isRunning():
+            self._metadata_worker.wait(5000)
         if self._download_worker is not None and self._download_worker.isRunning():
+            self._download_worker.setParent(None)
             self._download_worker.wait(5000)
+            if self._download_worker.isRunning():
+                # Thread outlived the wait -- schedule deferred cleanup.
+                self._download_worker.finished.connect(
+                    self._download_worker.deleteLater
+                )
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(5000)
+
         self._cleanup_tmp_dir()
         super().reject()
