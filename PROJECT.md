@@ -93,11 +93,12 @@ stemma/
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_separator.py      # 22 tests
 │   ├── test_model_manager.py  # 9 tests
-│   ├── test_player.py         # 24 tests
+│   ├── test_player.py         # 25 tests
 │   ├── test_library.py        # 22 tests
-│   ├── test_downloader.py     # 23 tests
+│   ├── test_downloader.py     # 26 tests
 │   ├── test_exporter.py       # 18 tests
 │   ├── test_post_processing.py # 17 tests
+│   ├── test_import_dialog.py  # 7 tests
 │   └── test_integration.py    # 13 tests (5 slow, 1 hardware)
 └── data/                      # Created at runtime
     ├── library.json

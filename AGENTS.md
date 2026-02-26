@@ -51,7 +51,7 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (136 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (154 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -60,6 +60,7 @@ stemma/
     test_downloader.py
     test_exporter.py
     test_post_processing.py
+    test_import_dialog.py
     test_integration.py
   data/                # Runtime data (gitignored)
     models/            # Cached ONNX model files
@@ -112,7 +113,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 136 fast tests (~10s)
+pytest                                    # 154 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
