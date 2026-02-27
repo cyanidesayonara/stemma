@@ -82,10 +82,12 @@ stemma/
 │   ├── exporter.py            # Export stems as WAV/MP3
 │   ├── downloader.py          # YouTube audio download (yt-dlp)
 │   ├── post_processing.py     # Wiener filter + soft gate
+│   ├── waveform.py            # Waveform peak computation (numpy)
 │   └── ui/
 │       ├── __init__.py
 │       ├── main_window.py     # Main window layout
-│       ├── player_controls.py # Transport + stem mute/solo + volume
+│       ├── player_controls.py # Transport + waveform + stem mixer
+│       ├── waveform_widget.py # Waveform display (QPainter)
 │       ├── library_panel.py   # Song list with remove
 │       ├── import_dialog.py   # Import songs + YouTube URL dialog
 │       └── styles.py          # Dark theme stylesheet
@@ -98,6 +100,8 @@ stemma/
 │   ├── test_downloader.py     # 26 tests
 │   ├── test_exporter.py       # 18 tests
 │   ├── test_post_processing.py # 17 tests
+│   ├── test_waveform.py       # 9 tests
+│   ├── test_waveform_widget.py # 7 tests
 │   ├── test_import_dialog.py  # 7 tests
 │   └── test_integration.py    # 13 tests (5 slow, 1 hardware)
 └── data/                      # Created at runtime
@@ -156,9 +160,15 @@ stemma/
 - Soft gating: RMS-envelope-driven gate suppresses faint ghost artifacts
 - Chunked processing (~10s windows) to bound memory usage
 
+### `waveform.py` — Waveform Peak Computation
+- Pure numpy, no Qt dependency
+- `compute_peaks()`: sums active stems weighted by volume, computes per-bin peak amplitude
+- Respects mute/solo state (same logic as audio callback)
+
 ### UI Modules
 - **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export. Keyboard shortcuts. Window state persistence via QSettings.
-- **`player_controls.py`** — Transport (Play/Pause/Stop + seek slider + time display). A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray)
+- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform display with click-to-seek, playback cursor, and A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray). Waveform recomputes on mute/solo/volume changes.
+- **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
 - **`library_panel.py`** — Song list with selection and Remove button (with confirmation)
 - **`import_dialog.py`** — File browser or YouTube URL input, metadata fields (auto-filled from YouTube), separation progress bar. ffmpeg availability check for YouTube import. Cancels workers on close.
 
@@ -201,7 +211,7 @@ stemma/
 - [x] YouTube URL import (yt-dlp)
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
-- [ ] Waveform visualization
+- [x] Waveform visualization
 - [x] A-B loop repeat
 
 ### Phase 4 — Sandbox
