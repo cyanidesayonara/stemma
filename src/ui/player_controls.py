@@ -5,6 +5,8 @@ Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
+import numpy as np
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -255,6 +257,7 @@ class PlayerControls(QWidget):
         """Recompute waveform peaks from current stem/mix state."""
         stems = self._player.stems
         if not stems:
+            self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
             return
         peaks = compute_peaks(
             stems=stems,
