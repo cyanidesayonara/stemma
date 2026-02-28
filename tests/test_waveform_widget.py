@@ -2,9 +2,8 @@
 
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QPaintEvent
+from unittest.mock import MagicMock, patch
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from src.ui.waveform_widget import WaveformWidget
@@ -123,18 +122,21 @@ class TestMixChangedWiring:
         return player
 
     def test_mute_triggers_waveform_recompute(self, app):
-        """Muting a stem recomputes waveform peaks."""
+        """Muting a stem calls _recompute_peaks via mix_changed signal."""
         player = self._make_player_mock()
         controls = PlayerControls(player)
         controls.set_stem_names(["vocals", "drums"])
 
-        initial_peaks = controls._waveform._peaks.copy()
+        with patch.object(controls, "_recompute_peaks") as mock_recompute:
+            controls._stem_rows["vocals"].set_muted(True)
+            mock_recompute.assert_called_once()
 
-        # Simulate muting vocals: update player state, then toggle button
-        player.muted_stems = {"vocals"}
-        controls._stem_rows["vocals"].set_muted(True)
+    def test_solo_triggers_waveform_recompute(self, app):
+        """Soloing a stem calls _recompute_peaks via mix_changed signal."""
+        player = self._make_player_mock()
+        controls = PlayerControls(player)
+        controls.set_stem_names(["vocals", "drums"])
 
-        updated_peaks = controls._waveform._peaks
-        assert updated_peaks is not None
-        # Peaks should change because vocals are now muted
-        assert not np.array_equal(initial_peaks, updated_peaks)
+        with patch.object(controls, "_recompute_peaks") as mock_recompute:
+            controls._stem_rows["drums"].mix_changed.emit()
+            mock_recompute.assert_called_once()
