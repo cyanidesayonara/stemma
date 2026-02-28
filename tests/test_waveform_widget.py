@@ -2,12 +2,13 @@
 
 import numpy as np
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPaintEvent
 from PySide6.QtWidgets import QApplication
 
 from src.ui.waveform_widget import WaveformWidget
+from src.ui.player_controls import PlayerControls, StemRow
 
 
 @pytest.fixture(scope="module")
@@ -92,3 +93,48 @@ class TestWaveformWidget:
         widget = WaveformWidget()
         widget.resize(200, 80)
         widget.repaint()  # Force synchronous paint
+
+    def test_paint_no_crash_zero_width(self, app):
+        """paintEvent does not crash when widget has zero width."""
+        widget = WaveformWidget()
+        widget.resize(0, 80)
+        widget.repaint()
+
+
+class TestMixChangedWiring:
+    """Test that mute/solo/volume changes recompute waveform peaks."""
+
+    def _make_player_mock(self):
+        """Create a mock MultiTrackPlayer with stem data."""
+        player = MagicMock()
+        player.stems = {
+            "vocals": np.full((100, 2), 0.5, dtype=np.float32),
+            "drums": np.full((100, 2), 0.3, dtype=np.float32),
+        }
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        player.total_seconds = 2.0
+        player.current_seconds = 0.0
+        player.loop_a = None
+        player.loop_b = None
+        player.is_playing = False
+        player.has_stems = True
+        return player
+
+    def test_mute_triggers_waveform_recompute(self, app):
+        """Muting a stem recomputes waveform peaks."""
+        player = self._make_player_mock()
+        controls = PlayerControls(player)
+        controls.set_stem_names(["vocals", "drums"])
+
+        initial_peaks = controls._waveform._peaks.copy()
+
+        # Simulate muting vocals: update player state, then toggle button
+        player.muted_stems = {"vocals"}
+        controls._stem_rows["vocals"].set_muted(True)
+
+        updated_peaks = controls._waveform._peaks
+        assert updated_peaks is not None
+        # Peaks should change because vocals are now muted
+        assert not np.array_equal(initial_peaks, updated_peaks)

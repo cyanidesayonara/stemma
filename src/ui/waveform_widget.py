@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent, QResizeEvent
+from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent
 from PySide6.QtWidgets import QWidget, QSizePolicy
 
 
@@ -91,29 +91,34 @@ class WaveformWidget(QWidget):
 
     def _draw_waveform(self, painter: QPainter, w: int, h: int) -> None:
         assert self._peaks is not None
+        if w <= 0:
+            return
         num_peaks = len(self._peaks)
         center_y = h / 2
         max_peak = np.max(self._peaks)
         if max_peak <= 0:
             return
 
+        # Vectorized: map each pixel column to a peak index and compute bar heights
+        xs = np.arange(w)
+        indices = np.minimum((xs * num_peaks // w).astype(int), num_peaks - 1)
+        amplitudes = self._peaks[indices] / max_peak
+        bar_heights = amplitudes * (center_y - 2)
+
+        # Only draw columns with visible bars
+        mask = bar_heights >= 0.5
+        visible_xs = xs[mask]
+        visible_heights = bar_heights[mask]
+
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(_WAVEFORM_COLOR)
 
-        for x in range(w):
-            # Map pixel x to peak index
-            idx = int(x * num_peaks / w)
-            idx = min(idx, num_peaks - 1)
-            amplitude = self._peaks[idx] / max_peak  # Normalize to 0-1
-            bar_h = amplitude * (center_y - 2)  # Leave 2px margin
+        tops = (center_y - visible_heights).astype(int)
+        bottoms = (center_y + visible_heights).astype(int)
 
-            if bar_h < 0.5:
-                continue
-
-            # Mirrored bar from center
-            top = int(center_y - bar_h)
-            bottom = int(center_y + bar_h)
-            painter.drawRect(x, top, 1, bottom - top)
+        for i in range(len(visible_xs)):
+            painter.drawRect(int(visible_xs[i]), int(tops[i]),
+                             1, int(bottoms[i] - tops[i]))
 
     def _draw_loop_region(self, painter: QPainter, w: int, h: int) -> None:
         assert self._loop_a_ratio is not None
@@ -130,11 +135,15 @@ class WaveformWidget(QWidget):
         painter.drawLine(x_b, 0, x_b, h)
 
     def _draw_cursor(self, painter: QPainter, w: int, h: int) -> None:
+        if w <= 0:
+            return
         x = int(self._position_ratio * w)
         x = max(0, min(x, w - 1))
         painter.setPen(_CURSOR_COLOR)
         painter.drawLine(x, 0, x, h)
-        painter.drawLine(x + 1, 0, x + 1, h)  # 2px wide cursor
+        x2 = min(x + 1, w - 1)
+        if x2 != x:
+            painter.drawLine(x2, 0, x2, h)  # 2px wide cursor
 
     # -- Mouse interaction --
 
