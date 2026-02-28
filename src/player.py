@@ -184,6 +184,26 @@ class MultiTrackPlayer(QObject):
         """Return the set of currently muted stem names."""
         return set(self._muted_stems)
 
+    @property
+    def soloed_stems(self) -> set[str]:
+        """Return the set of currently soloed stem names."""
+        return set(self._soloed_stems)
+
+    @property
+    def volumes(self) -> dict[str, float]:
+        """Return a copy of per-stem volume settings."""
+        return dict(self._volumes)
+
+    @property
+    def stems(self) -> dict[str, "np.ndarray"]:
+        """Return a shallow copy of the stems dict. Arrays are shared, not copied."""
+        return dict(self._stems)
+
+    @property
+    def sample_rate(self) -> int:
+        """Return the sample rate of loaded audio."""
+        return self._sample_rate
+
     def set_volume(self, stem_name: str, volume: float) -> None:
         """Set the volume (gain) for a stem.
 
