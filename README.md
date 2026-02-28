@@ -12,6 +12,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
 - Import from YouTube URL (requires ffmpeg)
 - Export individual stems or custom mixes as WAV or MP3
+- Waveform visualization with click-to-seek, playback cursor, and loop markers
 - A-B loop for practice sections
 - Keyboard shortcuts for transport and stem control
 - Dark-themed Qt desktop interface with window state persistence
