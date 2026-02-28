@@ -243,7 +243,6 @@ class PlayerControls(QWidget):
         )
         if total > 0:
             self._waveform.set_position(pos_s / total)
-        self._update_waveform_loop_markers()
 
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setText("Pause" if playing else "Play")
