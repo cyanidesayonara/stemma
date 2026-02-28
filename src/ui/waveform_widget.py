@@ -162,7 +162,7 @@ class WaveformWidget(QWidget):
             self._seek_to_x(event.position().x())
 
     def _seek_to_x(self, x: float) -> None:
-        if self._total_seconds <= 0:
+        if self._total_seconds <= 0 or self.width() <= 0:
             return
         ratio = max(0.0, min(1.0, x / self.width()))
         self._position_ratio = ratio
