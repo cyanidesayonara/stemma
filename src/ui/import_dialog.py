@@ -106,6 +106,7 @@ class ImportDialog(QDialog):
         library: SongLibrary,
         model_manager: ModelManager,
         parent=None,
+        file_path: str = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Import Song")
@@ -120,6 +121,13 @@ class ImportDialog(QDialog):
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
         self._setup_ui()
+
+        if file_path:
+            self._selected_path = file_path
+            self._path_edit.setText(file_path)
+            basename = os.path.splitext(os.path.basename(file_path))[0]
+            if not self._title_edit.text():
+                self._title_edit.setText(basename)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
