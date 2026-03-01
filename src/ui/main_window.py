@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
+from src.ui.import_dialog import ImportDialog
+
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._connect_signals()
         self._restore_state()
+        self.setAcceptDrops(True)
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -192,15 +195,49 @@ class MainWindow(QMainWindow):
 
     def _on_import(self) -> None:
         """Open the import dialog."""
-        from src.ui.import_dialog import ImportDialog
+        self._open_import_dialog()
 
+    def _open_import_dialog(self, file_path: str = "") -> None:
+        """Open the import dialog, optionally pre-filled with a file path."""
         dialog = ImportDialog(
             library=self._library,
             model_manager=self._model_manager,
             parent=self,
+            file_path=file_path,
         )
         if dialog.exec():
             self._library_panel.refresh()
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop import
+    # ------------------------------------------------------------------
+
+    _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
+
+    def _is_audio_path(self, path: str) -> bool:
+        """Return True if *path* has an audio file extension."""
+        _, ext = os.path.splitext(path)
+        return ext.lower() in self._AUDIO_EXTENSIONS
+
+    def dragEnterEvent(self, event) -> None:
+        """Accept drag if any dropped URL is an audio file."""
+        mime = event.mimeData()
+        if mime.hasUrls() and any(
+            self._is_audio_path(url.toLocalFile()) for url in mime.urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        """Open ImportDialog for each dropped audio file."""
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return
+        for url in mime.urls():
+            path = url.toLocalFile()
+            if self._is_audio_path(path):
+                self._open_import_dialog(file_path=path)
 
     def _on_export(self) -> None:
         """Export the current mix as a WAV file."""
