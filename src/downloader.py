@@ -9,6 +9,7 @@ import re
 import shutil
 from typing import Callable
 
+import imageio_ffmpeg
 import yt_dlp
 
 
@@ -22,9 +23,22 @@ _YOUTUBE_PATTERN = re.compile(
 )
 
 
+def _get_ffmpeg_exe() -> str | None:
+    """Return a path to an ffmpeg executable, or None if unavailable.
+
+    Prefers the binary bundled with imageio-ffmpeg so the app works
+    without the user installing ffmpeg separately. Falls back to
+    whatever is on PATH.
+    """
+    try:
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except RuntimeError:
+        return shutil.which("ffmpeg")
+
+
 def check_ffmpeg() -> bool:
-    """Return True if ffmpeg is available on PATH."""
-    return shutil.which("ffmpeg") is not None
+    """Return True if ffmpeg is available (bundled or on PATH)."""
+    return _get_ffmpeg_exe() is not None
 
 
 def is_supported_url(text: str) -> bool:
@@ -105,6 +119,10 @@ def download_audio(
         ],
         "progress_hooks": [],
     }
+
+    ffmpeg_exe = _get_ffmpeg_exe()
+    if ffmpeg_exe:
+        opts["ffmpeg_location"] = ffmpeg_exe
 
     if progress_callback is not None:
         opts["progress_hooks"].append(progress_callback)
