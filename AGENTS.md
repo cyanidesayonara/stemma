@@ -53,7 +53,7 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (170 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (173 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -85,10 +85,11 @@ stemma/
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
 12. **Dual-Agent Workflow:** We use a builder/reviewer model. The "Builder" agent implements the feature and opens a PR. Do not merge your own PRs. The user will pass the PR to a "Reviewer" agent to audit the code, catch bugs, suggest improvements, and approve it.
+13. **No inline imports.** All imports belong at the top of the file. Do not place `import` statements inside functions or methods.
 
 ## Current Status
 
-Last updated: 2026-03-21
+Last updated: 2026-03-22
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -118,7 +119,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 170 fast tests (~10s)
+pytest                                    # 173 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
