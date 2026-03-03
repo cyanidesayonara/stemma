@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEvent, QPointF
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from src.ui.waveform_widget import WaveformWidget
@@ -68,10 +69,6 @@ class TestWaveformWidget:
 
         received = []
         widget.seek_requested.connect(lambda s: received.append(s))
-
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QMouseEvent
-        from PySide6.QtCore import QPointF
 
         event = QMouseEvent(
             QEvent.Type.MouseButtonPress,

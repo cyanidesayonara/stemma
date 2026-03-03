@@ -4,6 +4,27 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-22 -- Phase 3: Waveform Visualization
+
+### Done
+- Waveform visualization (#43, PR #58)
+  - Custom QPainter widget replacing seek slider
+  - Mirrored waveform bars, playback cursor, A-B loop region shading and markers
+  - Click/drag-to-seek
+  - Waveform recomputes on mute/solo/volume changes
+  - Vectorized peak computation via numpy (compute_peaks + np.maximum.reduceat)
+  - Three review passes; all findings addressed:
+    - Zero-width guards, cursor bounds clamping, redundant repaint removal
+    - Unused import cleanup, stale waveform cleared on empty stems
+  - 19 new tests (9 peak computation + 10 widget)
+- Inline import rule added to project conventions
+
+### Metrics
+- 173 fast tests, 5 slow ONNX tests, 1 hardware playback test (178 total)
+- Phase 3: 3 of 5 tickets complete
+
+---
+
 ## 2026-03-21 -- Phase 3: A-B Loop and YouTube Import
 
 ### Done
