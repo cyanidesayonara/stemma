@@ -4,6 +4,29 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-22 -- v1.0: Drag-and-Drop Import + ffmpeg Bundling
+
+### Done
+- Drag-and-drop import (#51, PR #60)
+  - Drop .mp3/.wav/.flac files onto the main window to trigger import
+  - ImportDialog gains `file_path` parameter for pre-fill
+  - Multiple dropped files open sequential import dialogs
+  - dragMoveEvent override for correct drop cursor on Windows/Qt6
+  - Inline import of ImportDialog in main_window.py fixed (rule #13)
+  - 17 new tests (3 prefill + 6 drag-enter + 2 drag-move + 6 drop)
+- Bundled ffmpeg via imageio-ffmpeg (PR #60)
+  - YouTube import now works without ffmpeg on PATH
+  - imageio-ffmpeg ships a static ffmpeg binary as package data
+  - _get_ffmpeg_exe() prefers bundled binary, falls back to PATH
+  - ffmpeg_location passed to yt-dlp options
+  - 4 new tests (3 check_ffmpeg fallback + 1 ffmpeg_location in opts)
+
+### Metrics
+- 196 fast tests, 5 slow ONNX tests, 1 hardware playback test (202 total)
+- Phase 3: 4 of 5 tickets complete; v1.0 roadmap: 5 tickets remaining
+
+---
+
 ## 2026-03-22 -- Phase 3: Waveform Visualization
 
 ### Done
