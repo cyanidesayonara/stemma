@@ -20,11 +20,19 @@ from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
+from src.ui.import_dialog import ImportDialog
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls
 
 # Try loading all components in this preferred visual layout order
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
+_AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
+
+
+def _is_audio_path(path: str) -> bool:
+    """Return True if *path* has an audio file extension."""
+    _, ext = os.path.splitext(path)
+    return ext.lower() in _AUDIO_EXTENSIONS
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +61,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._connect_signals()
         self._restore_state()
+        self.setAcceptDrops(True)
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -192,15 +201,54 @@ class MainWindow(QMainWindow):
 
     def _on_import(self) -> None:
         """Open the import dialog."""
-        from src.ui.import_dialog import ImportDialog
+        self._open_import_dialog()
 
+    def _open_import_dialog(self, file_path: str = "") -> None:
+        """Open the import dialog, optionally pre-filled with a file path."""
         dialog = ImportDialog(
             library=self._library,
             model_manager=self._model_manager,
             parent=self,
+            file_path=file_path,
         )
         if dialog.exec():
             self._library_panel.refresh()
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop import
+    # ------------------------------------------------------------------
+
+    def _is_audio_drop(self, event) -> bool:
+        """Return True if the drag event contains at least one audio file."""
+        mime = event.mimeData()
+        return mime.hasUrls() and any(
+            _is_audio_path(url.toLocalFile()) for url in mime.urls()
+        )
+
+    def dragEnterEvent(self, event) -> None:
+        """Accept drag if any dropped URL is an audio file."""
+        if self._is_audio_drop(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        """Keep the drop cursor active while dragging over the window."""
+        if self._is_audio_drop(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        """Open ImportDialog for each dropped audio file."""
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return
+        event.acceptProposedAction()
+        for url in mime.urls():
+            path = url.toLocalFile()
+            if _is_audio_path(path):
+                self._open_import_dialog(file_path=path)
 
     def _on_export(self) -> None:
         """Export the current mix as a WAV file."""
