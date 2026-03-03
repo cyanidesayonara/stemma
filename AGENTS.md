@@ -53,7 +53,7 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (173 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (196 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -65,6 +65,7 @@ stemma/
     test_waveform.py
     test_waveform_widget.py
     test_import_dialog.py
+    test_drag_drop.py
     test_integration.py
   data/                # Runtime data (gitignored)
     models/            # Cached ONNX model files
@@ -111,15 +112,24 @@ All core functionality implemented and tested:
 ### Phase 3 (Advanced) -- In Progress
 - [x] A-B loop repeat (#44, PR #48)
 - [x] YouTube URL import (#41, PR #49)
-- [x] Waveform visualization (#43)
+- [x] Waveform visualization (#43, PR #58)
+- [x] Drag-and-drop import (#51, PR #60)
+- [x] Bundled ffmpeg via imageio-ffmpeg (PR #60)
 - Remaining tickets: real-time streaming (#13), tempo/key (#42)
+
+### v1.0 Release -- In Progress
+- [ ] Library search/filter (#54)
+- [ ] Song metadata editing (#52)
+- [ ] Playback speed control (#53)
+- [ ] App icon and branding (#61)
+- [ ] PyInstaller packaging + GitHub Release (#56)
 
 ### Phase 4 (Sandbox) -- Not Started
 Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 173 fast tests (~10s)
+pytest                                    # 196 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
