@@ -37,6 +37,12 @@ def _make_songs() -> list[Song]:
     ]
 
 
+def _visible_items(panel: LibraryPanel) -> list:
+    """Return the non-hidden items in the panel's list widget."""
+    return [panel._list.item(i) for i in range(panel._list.count())
+            if not panel._list.item(i).isHidden()]
+
+
 class TestSearchFilter:
     """Search box filters the library list as you type."""
 
@@ -47,59 +53,43 @@ class TestSearchFilter:
 
     def test_all_songs_visible_with_empty_query(self, app):
         """All songs are visible when the search box is empty."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
-        assert len(visible) == 3
+        panel = LibraryPanel(_make_library(_make_songs()))
+        assert len(_visible_items(panel)) == 3
 
     def test_filter_by_title(self, app):
         """Typing a title substring hides non-matching songs."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+        panel = LibraryPanel(_make_library(_make_songs()))
         panel._search_edit.setText("bohemian")
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
+        visible = _visible_items(panel)
         assert len(visible) == 1
         assert "Bohemian" in visible[0].text()
 
     def test_filter_by_artist(self, app):
         """Typing an artist name filters correctly."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+        panel = LibraryPanel(_make_library(_make_songs()))
         panel._search_edit.setText("zeppelin")
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
+        visible = _visible_items(panel)
         assert len(visible) == 1
         assert "Zeppelin" in visible[0].text()
 
     def test_filter_is_case_insensitive(self, app):
         """Filter matches regardless of case."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+        panel = LibraryPanel(_make_library(_make_songs()))
         panel._search_edit.setText("QUEEN")
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
-        assert len(visible) == 1
+        assert len(_visible_items(panel)) == 1
 
     def test_no_match_hides_all(self, app):
         """A query matching nothing hides all items."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+        panel = LibraryPanel(_make_library(_make_songs()))
         panel._search_edit.setText("xyznonexistent")
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
-        assert len(visible) == 0
+        assert len(_visible_items(panel)) == 0
 
     def test_clearing_search_shows_all(self, app):
         """Clearing the search box restores all items."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+        panel = LibraryPanel(_make_library(_make_songs()))
         panel._search_edit.setText("queen")
         panel._search_edit.clear()
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
-        assert len(visible) == 3
+        assert len(_visible_items(panel)) == 3
 
     def test_refresh_preserves_filter(self, app):
         """After refresh(), the current filter is reapplied."""
@@ -115,18 +105,15 @@ class TestSearchFilter:
         library.songs = songs
         panel.refresh()
 
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
         # Both Queen songs should be visible.
-        assert len(visible) == 2
+        assert len(_visible_items(panel)) == 2
 
-    def test_clear_button_resets_filter(self, app):
-        """The clear button on the search box resets to show all."""
-        songs = _make_songs()
-        panel = LibraryPanel(_make_library(songs))
+    def test_remove_button_disabled_when_selection_hidden(self, app):
+        """Remove button is disabled when the selected song is filtered out."""
+        panel = LibraryPanel(_make_library(_make_songs()))
+        # Select the second item (Led Zeppelin).
+        panel._list.setCurrentRow(1)
+        assert panel._remove_btn.isEnabled()
+        # Filter to only Queen — Led Zeppelin is hidden.
         panel._search_edit.setText("queen")
-        # QLineEdit with setClearButtonEnabled — simulate clearing.
-        panel._search_edit.clear()
-        visible = [panel._list.item(i) for i in range(panel._list.count())
-                   if not panel._list.item(i).isHidden()]
-        assert len(visible) == 3
+        assert not panel._remove_btn.isEnabled()
