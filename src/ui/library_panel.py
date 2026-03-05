@@ -7,6 +7,7 @@ selected. Full implementation in ticket #10.
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -42,6 +43,12 @@ class LibraryPanel(QWidget):
         header.setObjectName("title-label")
         layout.addWidget(header)
 
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Search songs...")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._search_edit)
+
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_item_changed)
         layout.addWidget(self._list)
@@ -58,6 +65,18 @@ class LibraryPanel(QWidget):
             item = QListWidgetItem(f"{song.artist} - {song.title}")
             item.setData(256, song.id)  # Qt.UserRole = 256
             self._list.addItem(item)
+        self._apply_filter(self._search_edit.text())
+
+    def _apply_filter(self, query: str) -> None:
+        """Show only items matching *query* (case-insensitive substring)."""
+        query = query.lower()
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            item.setHidden(query not in item.text().lower())
+        # Disable Remove if the current selection is hidden or gone.
+        current = self._list.currentItem()
+        if current is None or current.isHidden():
+            self._remove_btn.setEnabled(False)
 
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
