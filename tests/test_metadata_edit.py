@@ -171,3 +171,23 @@ class TestLibraryPanelEdit:
             with patch.object(panel._list, "itemAt", return_value=None):
                 panel._on_context_menu(MagicMock())
             mock_menu.assert_not_called()
+
+    def test_context_menu_selects_right_clicked_item(self, app):
+        """Right-clicking an unselected item edits that item, not the selection."""
+        songs = _make_songs()
+        library = _make_library(songs)
+        panel = LibraryPanel(library)
+        # Select song 1 (index 0).
+        panel._list.setCurrentRow(0)
+
+        song2_item = panel._list.item(1)
+
+        with patch("src.ui.library_panel.QMenu") as mock_menu_cls:
+            mock_menu = MagicMock()
+            mock_menu_cls.return_value = mock_menu
+            with patch.object(panel._list, "itemAt", return_value=song2_item):
+                with patch.object(panel._list, "mapToGlobal", return_value=MagicMock()):
+                    panel._on_context_menu(MagicMock())
+
+        # After the context menu, song 2 should be the current item.
+        assert panel._list.currentItem() is song2_item
