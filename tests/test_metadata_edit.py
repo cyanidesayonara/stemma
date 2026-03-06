@@ -159,3 +159,15 @@ class TestLibraryPanelEdit:
             panel._on_edit_song()
 
         mock_cls.assert_not_called()
+
+    def test_context_menu_only_shows_on_item(self, app):
+        """Right-click on empty space does not show a menu."""
+        songs = _make_songs()
+        library = _make_library(songs)
+        panel = LibraryPanel(library)
+
+        with patch("src.ui.library_panel.QMenu") as mock_menu:
+            # Simulate right-click on empty area (itemAt returns None).
+            with patch.object(panel._list, "itemAt", return_value=None):
+                panel._on_context_menu(MagicMock())
+            mock_menu.assert_not_called()
