@@ -9,6 +9,7 @@ import numpy as np
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.player import MultiTrackPlayer
+from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
@@ -178,6 +179,27 @@ class PlayerControls(QWidget):
         loop_bar.addStretch()
         layout.addLayout(loop_bar)
 
+        # -- Speed control --
+        speed_bar = QHBoxLayout()
+
+        speed_bar.addWidget(QLabel("Speed:"))
+
+        self._speed_combo = QComboBox()
+        for preset in SPEED_PRESETS:
+            self._speed_combo.addItem(f"{preset}x", preset)
+        self._speed_combo.setCurrentText("1.0x")
+        self._speed_combo.setFixedWidth(80)
+        self._speed_combo.setToolTip("Playback speed ([ / ])")
+        self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
+        speed_bar.addWidget(self._speed_combo)
+
+        self._speed_status = QLabel("")
+        self._speed_status.setStyleSheet("color: #585b70;")
+        speed_bar.addWidget(self._speed_status)
+
+        speed_bar.addStretch()
+        layout.addLayout(speed_bar)
+
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
@@ -198,6 +220,7 @@ class PlayerControls(QWidget):
         self._player.position_changed.connect(self._on_position_changed)
         self._player.state_changed.connect(self._on_state_changed)
         self._player.play_finished.connect(self._on_play_finished)
+        self._player.speed_changed.connect(self._on_speed_applied)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
@@ -321,3 +344,35 @@ class PlayerControls(QWidget):
         if b is not None:
             parts.append(f"B: {_format_time(b)}")
         self._loop_label.setText("  ".join(parts))
+
+    # -- Speed control slots --
+
+    def _on_speed_changed(self, index: int) -> None:
+        """User selected a speed preset from the combo box."""
+        speed = self._speed_combo.currentData()
+        if speed is None:
+            return
+        self._speed_status.setText("Stretching..." if speed != 1.0 else "")
+        self._player.set_speed(speed)
+
+    def _on_speed_applied(self, speed: float) -> None:
+        """Player finished stretching; update UI."""
+        self._speed_status.setText("")
+        # Update combo without re-triggering _on_speed_changed.
+        self._speed_combo.blockSignals(True)
+        label = f"{speed}x"
+        idx = self._speed_combo.findText(label)
+        if idx >= 0:
+            self._speed_combo.setCurrentIndex(idx)
+        self._speed_combo.blockSignals(False)
+        self._recompute_peaks()
+
+    def cycle_speed(self, direction: int) -> None:
+        """Cycle to the next/previous speed preset.
+
+        Args:
+            direction: +1 for faster, -1 for slower.
+        """
+        idx = self._speed_combo.currentIndex() + direction
+        idx = max(0, min(idx, self._speed_combo.count() - 1))
+        self._speed_combo.setCurrentIndex(idx)
