@@ -4,6 +4,35 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-22 -- v1.0: Library Search, Metadata Editing, and Playback Speed
+
+### Done
+- Library search/filter (#54, PR #63)
+  - Search bar with clear button in library panel
+  - Real-time filter hides non-matching songs as you type
+  - Remove button disabled when selection is hidden by filter
+  - 9 new tests
+- Song metadata editing (#52, PR #64)
+  - Double-click a song to edit title/artist
+  - Right-click context menu with Edit option
+  - Right-click selects the item before opening menu (fixes wrong-item bug)
+  - Empty fields fall back to original values
+  - 10 new tests
+- Pitch-preserving playback speed control (#53, PR #67)
+  - librosa.effects.time_stretch pre-stretches stems in background QThread
+  - Speed presets: 0.5x, 0.75x, 0.85x, 1.0x, 1.25x, 1.5x, 2.0x
+  - Keyboard shortcuts: [ (slower) and ] (faster)
+  - Frame index and loop points proportionally adjusted on speed change
+  - Peak normalization after stretch fixes volume reduction from phase vocoder
+  - Worker detach pattern prevents stale signal callbacks
+  - 13 new tests
+
+### Metrics
+- 229 fast tests, 5 slow ONNX tests, 1 hardware playback test (235 total)
+- v1.0 roadmap: 2 tickets remaining (#61 branding, #56 packaging)
+
+---
+
 ## 2026-03-22 -- v1.0: Drag-and-Drop Import + ffmpeg Bundling
 
 ### Done

@@ -53,7 +53,7 @@ stemma/
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (196 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (229 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -66,6 +66,9 @@ stemma/
     test_waveform_widget.py
     test_import_dialog.py
     test_drag_drop.py
+    test_library_panel.py
+    test_metadata_edit.py
+    test_speed_control.py
     test_integration.py
   data/                # Runtime data (gitignored)
     models/            # Cached ONNX model files
@@ -118,9 +121,9 @@ All core functionality implemented and tested:
 - Remaining tickets: real-time streaming (#13), tempo/key (#42)
 
 ### v1.0 Release -- In Progress
-- [ ] Library search/filter (#54)
-- [ ] Song metadata editing (#52)
-- [ ] Playback speed control (#53)
+- [x] Library search/filter (#54, PR #63)
+- [x] Song metadata editing (#52, PR #64)
+- [x] Playback speed control (#53, PR #67)
 - [ ] App icon and branding (#61)
 - [ ] PyInstaller packaging + GitHub Release (#56)
 
@@ -129,7 +132,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 196 fast tests (~10s)
+pytest                                    # 229 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
