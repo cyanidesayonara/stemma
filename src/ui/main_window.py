@@ -125,6 +125,14 @@ class MainWindow(QMainWindow):
             self._player_controls.toggle_looping
         )
 
+        # Speed control
+        QShortcut(QKeySequence(Qt.Key.Key_BracketRight), self).activated.connect(
+            lambda: self._player_controls.cycle_speed(1)
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_BracketLeft), self).activated.connect(
+            lambda: self._player_controls.cycle_speed(-1)
+        )
+
         # Number keys 1–6 toggle mute on corresponding stem
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
