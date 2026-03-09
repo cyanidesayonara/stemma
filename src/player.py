@@ -117,7 +117,7 @@ class MultiTrackPlayer(QObject):
 
         # UI updater.
         self._timer = QTimer(self)
-        self._timer.setInterval(33)  # ~30fps
+        self._timer.setInterval(50)  # ~20fps
         self._timer.timeout.connect(self._emit_position)
 
     @property
@@ -407,12 +407,13 @@ class MultiTrackPlayer(QObject):
             _safe_disconnect(self._speed_worker.error)
             _safe_disconnect(self._speed_worker.progress)
             # Let it finish in the background; don't block the UI.
-            self._speed_worker.setParent(None)
-            if self._speed_worker.isRunning():
-                self._speed_worker.finished.connect(
-                    self._speed_worker.deleteLater
-                )
+            worker = self._speed_worker
             self._speed_worker = None
+            worker.setParent(None)
+            if worker.isRunning():
+                worker.finished.connect(worker.deleteLater)
+            else:
+                worker.deleteLater()
 
     def _on_speed_ready(self, stretched: dict) -> None:
         """Swap in stretched stems and adjust frame indices."""
