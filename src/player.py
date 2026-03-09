@@ -15,11 +15,20 @@ from PySide6.QtCore import QObject, QThread, Signal, QTimer
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
 
 
+def _safe_disconnect(signal) -> None:
+    """Disconnect all slots from *signal*, ignoring RuntimeError."""
+    try:
+        signal.disconnect()
+    except RuntimeError:
+        pass
+
+
 class SpeedWorker(QThread):
     """Background thread for pitch-preserving time-stretch of all stems."""
 
     completed = Signal(dict)  # {name: stretched_ndarray}
     progress = Signal(int, int)  # (current_stem, total_stems)
+    error = Signal(str)
 
     def __init__(self, stems: dict[str, np.ndarray], speed: float,
                  parent=None) -> None:
@@ -28,21 +37,38 @@ class SpeedWorker(QThread):
         self._speed = speed
 
     def run(self) -> None:
+        try:
+            self._stretch()
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+    def _stretch(self) -> None:
         total = len(self._stems)
         stretched = {}
         for i, (name, data) in enumerate(self._stems.items()):
+            # Preserve the peak amplitude after phase-vocoder stretch.
+            original_peak = np.max(np.abs(data))
+
             # librosa.effects.time_stretch works on mono; process each channel.
             channels = []
-            for ch in range(data.shape[1]):
-                mono = data[:, ch].astype(np.float32)
+            for ch_idx in range(data.shape[1]):
+                mono = data[:, ch_idx].astype(np.float32)
                 stretched_ch = librosa.effects.time_stretch(
                     mono, rate=self._speed
                 )
                 channels.append(stretched_ch)
             # Recombine to stereo, matching shortest channel.
-            min_len = min(ch.shape[0] for ch in channels)
-            stereo = np.column_stack([ch[:min_len] for ch in channels])
-            stretched[name] = stereo.astype(np.float32)
+            min_len = min(c.shape[0] for c in channels)
+            stereo = np.column_stack([c[:min_len] for c in channels])
+            stereo = stereo.astype(np.float32)
+
+            # Normalize to match original peak level (phase vocoder can
+            # reduce amplitude).
+            stretched_peak = np.max(np.abs(stereo))
+            if stretched_peak > 0 and original_peak > 0:
+                stereo *= original_peak / stretched_peak
+
+            stretched[name] = stereo
             self.progress.emit(i + 1, total)
         self.completed.emit(stretched)
 
@@ -125,6 +151,7 @@ class MultiTrackPlayer(QObject):
             stem_paths: Dictionary mapping stem names to file paths.
         """
         self.stop()
+        self._detach_speed_worker()
         self._stems.clear()
         self._original_stems.clear()
         self._muted_stems.clear()
@@ -349,34 +376,56 @@ class MultiTrackPlayer(QObject):
         audio is ready.
         """
         speed = max(0.5, min(speed, 2.0))
+
+        if speed == self._playback_speed:
+            return
+
         self._playback_speed = speed
 
         if not self._original_stems:
             return
 
-        # Cancel any in-flight stretch.
-        if self._speed_worker is not None and self._speed_worker.isRunning():
-            self._speed_worker.wait(5000)
+        # Detach any in-flight worker so its signals don't fire stale data.
+        self._detach_speed_worker()
 
         if speed == 1.0:
-            self._apply_stretched_stems(dict(self._original_stems), 1.0)
+            self._apply_stretched_stems(dict(self._original_stems))
             self.speed_changed.emit(speed)
             return
 
         self._speed_worker = SpeedWorker(
             self._original_stems, speed, parent=self
         )
-        self._speed_worker.completed.connect(
-            lambda stretched: self._on_speed_ready(stretched, speed)
-        )
+        self._speed_worker.completed.connect(self._on_speed_ready)
+        self._speed_worker.error.connect(self._on_speed_error)
         self._speed_worker.start()
 
-    def _on_speed_ready(self, stretched: dict, speed: float) -> None:
-        """Swap in stretched stems and adjust frame indices."""
-        self._apply_stretched_stems(stretched, speed)
-        self.speed_changed.emit(speed)
+    def _detach_speed_worker(self) -> None:
+        """Disconnect and release the current speed worker, if any."""
+        if self._speed_worker is not None:
+            _safe_disconnect(self._speed_worker.completed)
+            _safe_disconnect(self._speed_worker.error)
+            _safe_disconnect(self._speed_worker.progress)
+            # Let it finish in the background; don't block the UI.
+            self._speed_worker.setParent(None)
+            if self._speed_worker.isRunning():
+                self._speed_worker.finished.connect(
+                    self._speed_worker.deleteLater
+                )
+            self._speed_worker = None
 
-    def _apply_stretched_stems(self, stems: dict, speed: float) -> None:
+    def _on_speed_ready(self, stretched: dict) -> None:
+        """Swap in stretched stems and adjust frame indices."""
+        self._apply_stretched_stems(stretched)
+        self.speed_changed.emit(self._playback_speed)
+
+    def _on_speed_error(self, message: str) -> None:
+        """Handle stretch failure by restoring original speed."""
+        self._playback_speed = 1.0
+        self._apply_stretched_stems(dict(self._original_stems))
+        self.speed_changed.emit(1.0)
+
+    def _apply_stretched_stems(self, stems: dict) -> None:
         """Replace current stems with *stems* and adjust frame indices."""
         old_total = self._total_frames if self._total_frames > 0 else 1
 
