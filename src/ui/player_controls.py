@@ -238,6 +238,12 @@ class PlayerControls(QWidget):
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
 
+        # Reset speed combo to 1.0x (load_stems resets the player speed).
+        self._speed_combo.blockSignals(True)
+        self._speed_combo.setCurrentText("1.0x")
+        self._speed_combo.blockSignals(False)
+        self._speed_status.setText("")
+
         self._recompute_peaks()
 
     def toggle_stem_mute(self, stem_name: str) -> None:

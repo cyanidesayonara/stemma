@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 from PySide6.QtWidgets import QApplication
 
@@ -147,7 +146,7 @@ class TestFrameMapping:
         stretched = {
             "vocals": np.zeros((new_frames, 2), dtype=np.float32),
         }
-        player._apply_stretched_stems(stretched, 0.5)
+        player._apply_stretched_stems(stretched)
 
         assert player._total_frames == new_frames
         expected_pos = int(old_pos / old_total * new_frames)
@@ -164,7 +163,7 @@ class TestFrameMapping:
         stretched = {
             "vocals": np.zeros((new_frames, 2), dtype=np.float32),
         }
-        player._apply_stretched_stems(stretched, 0.5)
+        player._apply_stretched_stems(stretched)
 
         expected_a = int(old_a / old_total * new_frames)
         expected_b = int(old_b / old_total * new_frames)
@@ -180,9 +179,21 @@ class TestFrameMapping:
         stretched = {
             "vocals": np.zeros((original_frames * 2, 2), dtype=np.float32),
         }
-        player._apply_stretched_stems(stretched, 0.5)
+        player._apply_stretched_stems(stretched)
         assert player._total_frames == original_frames * 2
 
         # Restore to 1.0x.
-        player._apply_stretched_stems(dict(player._original_stems), 1.0)
+        player._apply_stretched_stems(dict(player._original_stems))
         assert player._total_frames == original_frames
+
+    def test_speed_changed_emitted_on_restore(self, player):
+        """speed_changed signal fires when restoring to 1.0x."""
+        self._load_fake_stems(player)
+        player._playback_speed = 0.75  # Pretend we were at 0.75x.
+
+        received = []
+        player.speed_changed.connect(lambda s: received.append(s))
+        player.set_speed(1.0)
+
+        assert len(received) == 1
+        assert received[0] == 1.0
