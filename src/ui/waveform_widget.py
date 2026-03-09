@@ -7,7 +7,7 @@ and drag-to-seek. Designed for the Catppuccin Mocha dark theme.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QRect
 from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent
 from PySide6.QtWidgets import QWidget, QSizePolicy
 
@@ -30,11 +30,14 @@ class WaveformWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._peaks: np.ndarray | None = None
+        self._max_peak: float = 0.0
         self._position_ratio: float = 0.0
         self._loop_a_ratio: float | None = None
         self._loop_b_ratio: float | None = None
         self._total_seconds: float = 0.0
         self._seeking: bool = False
+        self._cached_width: int = 0
+        self._cached_rects: list[QRect] = []
 
         self.setFixedHeight(_WAVEFORM_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -46,6 +49,8 @@ class WaveformWidget(QWidget):
     def set_peaks(self, peaks: np.ndarray) -> None:
         """Set the pre-computed peak array and trigger repaint."""
         self._peaks = peaks
+        self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
+        self._cached_width = 0  # Invalidate rect cache
         self.update()
 
     def set_position(self, ratio: float) -> None:
@@ -91,34 +96,40 @@ class WaveformWidget(QWidget):
 
     def _draw_waveform(self, painter: QPainter, w: int, h: int) -> None:
         assert self._peaks is not None
-        if w <= 0:
+        if w <= 0 or self._max_peak <= 0:
             return
+
+        # Rebuild rect cache only when width or peaks change.
+        if self._cached_width != w:
+            self._cached_rects = self._build_waveform_rects(w, h)
+            self._cached_width = w
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_WAVEFORM_COLOR)
+        painter.drawRects(self._cached_rects)
+
+    def _build_waveform_rects(self, w: int, h: int) -> list[QRect]:
+        """Pre-compute waveform bar rectangles for the given width."""
+        assert self._peaks is not None
         num_peaks = len(self._peaks)
         center_y = h / 2
-        max_peak = np.max(self._peaks)
-        if max_peak <= 0:
-            return
 
-        # Vectorized: map each pixel column to a peak index and compute bar heights
         xs = np.arange(w)
         indices = np.minimum((xs * num_peaks // w).astype(int), num_peaks - 1)
-        amplitudes = self._peaks[indices] / max_peak
+        amplitudes = self._peaks[indices] / self._max_peak
         bar_heights = amplitudes * (center_y - 2)
 
-        # Only draw columns with visible bars
         mask = bar_heights >= 0.5
         visible_xs = xs[mask]
         visible_heights = bar_heights[mask]
 
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_WAVEFORM_COLOR)
-
         tops = (center_y - visible_heights).astype(int)
-        bottoms = (center_y + visible_heights).astype(int)
+        heights = ((visible_heights * 2)).astype(int)
 
-        for i in range(len(visible_xs)):
-            painter.drawRect(int(visible_xs[i]), int(tops[i]),
-                             1, int(bottoms[i] - tops[i]))
+        return [
+            QRect(int(visible_xs[i]), int(tops[i]), 1, int(heights[i]))
+            for i in range(len(visible_xs))
+        ]
 
     def _draw_loop_region(self, painter: QPainter, w: int, h: int) -> None:
         assert self._loop_a_ratio is not None
