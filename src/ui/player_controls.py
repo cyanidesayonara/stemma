@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from src.player import SPEED_PRESETS, MultiTrackPlayer
+
+_PEAK_DEBOUNCE_MS = 80
 from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
@@ -113,7 +115,7 @@ class PlayerControls(QWidget):
 
         self._peaks_timer = QTimer(self)
         self._peaks_timer.setSingleShot(True)
-        self._peaks_timer.setInterval(80)
+        self._peaks_timer.setInterval(_PEAK_DEBOUNCE_MS)
         self._peaks_timer.timeout.connect(self._do_recompute_peaks)
 
         self._setup_ui()
