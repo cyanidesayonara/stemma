@@ -469,9 +469,21 @@ class MultiTrackPlayer(QObject):
         When A-B looping is active, playback wraps from loop_b back to loop_a
         instead of stopping at the end of the track.
         """
-        if not self._is_playing or self._current_frame >= self._total_frames:
+        if not self._is_playing:
             outdata.fill(0.0)
             raise sd.CallbackStop
+
+        # If at or past end and not looping, stop playback.
+        looping = (self._looping
+                   and self._loop_a_frame is not None
+                   and self._loop_b_frame is not None
+                   and self._loop_b_frame > self._loop_a_frame)
+        if self._current_frame >= self._total_frames:
+            if looping:
+                self._current_frame = self._loop_a_frame
+            else:
+                outdata.fill(0.0)
+                raise sd.CallbackStop
 
         # Clear the output buffer.
         outdata.fill(0.0)
@@ -485,12 +497,6 @@ class MultiTrackPlayer(QObject):
             active_stems = [
                 name for name in self._stems if name not in self._muted_stems
             ]
-
-        # Determine the effective playback boundary.
-        looping = (self._looping
-                   and self._loop_a_frame is not None
-                   and self._loop_b_frame is not None
-                   and self._loop_b_frame > self._loop_a_frame)
 
         # Fill the output buffer, handling loop wraps as needed.
         buf_offset = 0
