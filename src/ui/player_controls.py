@@ -19,11 +19,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.player import SPEED_PRESETS, MultiTrackPlayer
-
-_PEAK_DEBOUNCE_MS = 80
 from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
+
+_PEAK_DEBOUNCE_MS = 80
 
 
 def _format_time(seconds: float) -> str:
@@ -288,7 +288,14 @@ class PlayerControls(QWidget):
 
     def _on_play_finished(self) -> None:
         self._play_btn.setText("Play")
-        self._waveform.set_position(0.0)
+        # Show cursor at current position (which may be loop-A, not 0).
+        total = self._player.total_seconds
+        if total > 0:
+            self._waveform.set_position(
+                self._player.current_seconds / total
+            )
+        else:
+            self._waveform.set_position(0.0)
 
     def _recompute_peaks(self) -> None:
         """Schedule a debounced waveform peak recomputation.
@@ -300,6 +307,7 @@ class PlayerControls(QWidget):
 
     def _do_recompute_peaks(self) -> None:
         """Perform the actual waveform peak recomputation."""
+        self._peaks_timer.stop()  # Cancel any pending debounced call.
         stems = self._player.stems
         if not stems:
             self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
