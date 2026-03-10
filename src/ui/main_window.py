@@ -116,10 +116,10 @@ class MainWindow(QMainWindow):
 
         # A-B loop
         QShortcut(QKeySequence(Qt.Key.Key_A), self).activated.connect(
-            self._player_controls._on_set_loop_a
+            self._player_controls.set_loop_a
         )
         QShortcut(QKeySequence(Qt.Key.Key_B), self).activated.connect(
-            self._player_controls._on_set_loop_b
+            self._player_controls.set_loop_b
         )
         QShortcut(QKeySequence(Qt.Key.Key_L), self).activated.connect(
             self._player_controls.toggle_looping

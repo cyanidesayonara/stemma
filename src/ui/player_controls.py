@@ -7,7 +7,7 @@ Color-coded stems. Full implementation in ticket #9.
 
 import numpy as np
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -22,6 +22,8 @@ from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
+
+_PEAK_DEBOUNCE_MS = 80
 
 
 def _format_time(seconds: float) -> str:
@@ -111,6 +113,11 @@ class PlayerControls(QWidget):
         self._player = player
         self._stem_rows: dict[str, StemRow] = {}
 
+        self._peaks_timer = QTimer(self)
+        self._peaks_timer.setSingleShot(True)
+        self._peaks_timer.setInterval(_PEAK_DEBOUNCE_MS)
+        self._peaks_timer.timeout.connect(self._do_recompute_peaks)
+
         self._setup_ui()
         self._connect_signals()
 
@@ -150,13 +157,13 @@ class PlayerControls(QWidget):
         self._loop_a_btn = QPushButton("Set A")
         self._loop_a_btn.setFixedWidth(60)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
-        self._loop_a_btn.clicked.connect(self._on_set_loop_a)
+        self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
         self._loop_b_btn.setFixedWidth(60)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
-        self._loop_b_btn.clicked.connect(self._on_set_loop_b)
+        self._loop_b_btn.clicked.connect(self.set_loop_b)
         loop_bar.addWidget(self._loop_b_btn)
 
         self._loop_toggle_btn = QPushButton("Loop")
@@ -244,7 +251,8 @@ class PlayerControls(QWidget):
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
 
-        self._recompute_peaks()
+        self._do_recompute_peaks()
+        self._update_waveform_loop_markers()
 
     def toggle_stem_mute(self, stem_name: str) -> None:
         """Toggle the mute state of a stem and update the UI button."""
@@ -280,10 +288,26 @@ class PlayerControls(QWidget):
 
     def _on_play_finished(self) -> None:
         self._play_btn.setText("Play")
-        self._waveform.set_position(0.0)
+        # Show cursor at current position (which may be loop-A, not 0).
+        total = self._player.total_seconds
+        if total > 0:
+            self._waveform.set_position(
+                self._player.current_seconds / total
+            )
+        else:
+            self._waveform.set_position(0.0)
 
     def _recompute_peaks(self) -> None:
-        """Recompute waveform peaks from current stem/mix state."""
+        """Schedule a debounced waveform peak recomputation.
+
+        Rapid calls (e.g. dragging a volume slider) are batched so that
+        only the final state triggers the expensive numpy computation.
+        """
+        self._peaks_timer.start()
+
+    def _do_recompute_peaks(self) -> None:
+        """Perform the actual waveform peak recomputation."""
+        self._peaks_timer.stop()  # Cancel any pending debounced call.
         stems = self._player.stems
         if not stems:
             self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
@@ -313,13 +337,13 @@ class PlayerControls(QWidget):
 
     # -- A-B loop slots --
 
-    def _on_set_loop_a(self) -> None:
+    def set_loop_a(self) -> None:
         """Set loop A to the current playback position."""
         self._player.set_loop_a(self._player.current_seconds)
         self._update_loop_label()
         self._update_waveform_loop_markers()
 
-    def _on_set_loop_b(self) -> None:
+    def set_loop_b(self) -> None:
         """Set loop B to the current playback position."""
         self._player.set_loop_b(self._player.current_seconds)
         self._update_loop_label()
@@ -371,7 +395,7 @@ class PlayerControls(QWidget):
         if idx >= 0:
             self._speed_combo.setCurrentIndex(idx)
         self._speed_combo.blockSignals(False)
-        self._recompute_peaks()
+        self._do_recompute_peaks()
 
     def cycle_speed(self, direction: int) -> None:
         """Cycle to the next/previous speed preset.
