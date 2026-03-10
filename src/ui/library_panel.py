@@ -114,7 +114,7 @@ class LibraryPanel(QWidget):
         self._list.clear()
         for song in self._library.songs:
             item = QListWidgetItem(f"{song.artist} - {song.title}")
-            item.setData(256, song.id)  # Qt.UserRole = 256
+            item.setData(Qt.ItemDataRole.UserRole, song.id)
             self._list.addItem(item)
         self._apply_filter(self._search_edit.text())
 
@@ -131,7 +131,7 @@ class LibraryPanel(QWidget):
 
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
-            song_id = current.data(256)
+            song_id = current.data(Qt.ItemDataRole.UserRole)
             if song_id:
                 self.song_selected.emit(song_id)
                 self._remove_btn.setEnabled(True)
@@ -155,7 +155,7 @@ class LibraryPanel(QWidget):
         current = self._list.currentItem()
         if current is None:
             return
-        song_id = current.data(256)
+        song_id = current.data(Qt.ItemDataRole.UserRole)
         if not song_id:
             return
         song = self._library.get_song(song_id)
@@ -169,7 +169,7 @@ class LibraryPanel(QWidget):
     def _on_remove_clicked(self) -> None:
         current = self._list.currentItem()
         if current is not None:
-            song_id = current.data(256)
+            song_id = current.data(Qt.ItemDataRole.UserRole)
             if song_id:
                 reply = QMessageBox.question(
                     self,
