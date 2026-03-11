@@ -1,5 +1,6 @@
 """QApplication setup for stemma."""
 
+import ctypes
 import os
 import sys
 
@@ -20,6 +21,11 @@ _ICON_PATH = os.path.join(_ROOT_DIR, "assets", "icons", "stemma.ico")
 
 def run() -> int:
     """Create and run the stemma application. Returns the exit code."""
+    # Tell Windows this is its own app, not a child of python.exe.
+    # Without this, Windows uses Python's icon in the taskbar.
+    if sys.platform == "win32":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("stemma.app")
+
     app = QApplication(sys.argv)
     app.setApplicationName("stemma")
     app.setApplicationVersion(__version__)
