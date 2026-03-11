@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
+from src.version import __version__
+
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
@@ -96,6 +98,10 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("&Quit")
         quit_action.triggered.connect(self.close)
 
+        help_menu = menu_bar.addMenu("&Help")
+        about_action = help_menu.addAction("&About stemma")
+        about_action.triggered.connect(self._on_about)
+
     def _setup_shortcuts(self) -> None:
         """Register global keyboard shortcuts."""
         # Transport
@@ -156,6 +162,21 @@ class MainWindow(QMainWindow):
             self._player.pause()
         else:
             self._player.play()
+
+    def _on_about(self) -> None:
+        """Show the About dialog."""
+        QMessageBox.about(
+            self,
+            "About stemma",
+            f"<h2>stemma</h2>"
+            f"<p>Version {__version__}</p>"
+            f"<p>A music player with AI stem separation.</p>"
+            f"<p>Separate songs into vocals, drums, bass, and more — "
+            f"then mute, solo, and remix in real time.</p>"
+            f'<p><a href="https://github.com/cyanidesayonara/stemma">'
+            f"github.com/cyanidesayonara/stemma</a></p>"
+            f"<p>MIT License</p>",
+        )
 
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""

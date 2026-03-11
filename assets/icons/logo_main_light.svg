@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="185" viewBox="0 0 300 185">
+  <!-- stemma main logo — light variant -->
+  <text x="124" y="28" font-family="Palatino Linotype, Palatino, Georgia, serif" font-size="28" font-style="italic" fill="#777" letter-spacing="1.5" text-anchor="middle">stemma</text>
+  <line x1="18" y1="48" x2="228" y2="48" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <line x1="18" y1="63" x2="228" y2="63" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <line x1="18" y1="78" x2="228" y2="78" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <line x1="18" y1="93" x2="228" y2="93" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <line x1="18" y1="108" x2="228" y2="108" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <text x="22" y="93" font-family="Bravura" font-size="56" fill="#777">&#xE050;</text>
+  <line x1="80" y1="123" x2="112" y2="123" stroke="#777" stroke-width="1.0" opacity="0.35"/>
+  <ellipse cx="94" cy="78" rx="10.5" ry="6.5" transform="rotate(-20,94,78)" fill="#9878b8"/>
+  <ellipse cx="94" cy="93" rx="10.5" ry="6.5" transform="rotate(-20,94,93)" fill="#c89040"/>
+  <ellipse cx="94" cy="108" rx="10.5" ry="6.5" transform="rotate(-20,94,108)" fill="#c0707e"/>
+  <ellipse cx="94" cy="123" rx="10.5" ry="6.5" transform="rotate(-20,94,123)" fill="#3da8a8"/>
+  <line x1="104" y1="42" x2="104" y2="125" stroke="#777" stroke-width="2.0"/>
+  <path d="M105,78 Q111,69 117,78 Q123,87 129,78 Q135,69 141,78 Q147,87 153,78 Q159,69 165,78 Q171,87 177,78 Q183,69 189,78 Q195,87 201,78 Q207,69 213,78 Q219,87 225,78" fill="none" stroke="#9878b8" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M105,93 Q115,80 125,93 Q135,106 145,93 Q155,80 165,93 Q175,106 185,93 Q195,80 205,93 Q215,106 225,93" fill="none" stroke="#c89040" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M105,108 Q112.5,97 120,108 Q127.5,119 135,108 Q142.5,97 150,108 Q157.5,119 165,108 Q172.5,97 180,108 Q187.5,119 195,108 Q202.5,97 210,108 Q217.5,119 225,108" fill="none" stroke="#c0707e" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M105,123 Q120,106 135,123 Q150,140 165,123 Q180,106 195,123 Q210,140 225,123" fill="none" stroke="#3da8a8" stroke-width="2.2" stroke-linecap="round"/>
+</svg>
