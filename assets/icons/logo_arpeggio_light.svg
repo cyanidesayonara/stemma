@@ -1,11 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="120" viewBox="0 0 420 120">
   <!-- stemma arpeggio logo — light variant. Bass clef, Cmaj7: C→E→G→B→G→E -->
-  <line x1="12" y1="20" x2="408" y2="20" stroke="#777" stroke-width="1.0" opacity="0.35"/>
-  <line x1="12" y1="35" x2="408" y2="35" stroke="#777" stroke-width="1.0" opacity="0.35"/>
-  <line x1="12" y1="50" x2="408" y2="50" stroke="#777" stroke-width="1.0" opacity="0.35"/>
-  <line x1="12" y1="65" x2="408" y2="65" stroke="#777" stroke-width="1.0" opacity="0.35"/>
-  <line x1="12" y1="80" x2="408" y2="80" stroke="#777" stroke-width="1.0" opacity="0.35"/>
-  <text x="16" y="35" font-family="Bravura" font-size="48" fill="#777">&#xE062;</text>
+  <line x1="12" y1="20" x2="408" y2="20" stroke="#555" stroke-width="1.0" opacity="0.35"/>
+  <line x1="12" y1="35" x2="408" y2="35" stroke="#555" stroke-width="1.0" opacity="0.35"/>
+  <line x1="12" y1="50" x2="408" y2="50" stroke="#555" stroke-width="1.0" opacity="0.35"/>
+  <line x1="12" y1="65" x2="408" y2="65" stroke="#555" stroke-width="1.0" opacity="0.35"/>
+  <line x1="12" y1="80" x2="408" y2="80" stroke="#555" stroke-width="1.0" opacity="0.35"/>
+  <g transform="translate(16,35) scale(0.048,-0.048)" fill="#555">
+    <path d="M252 262Q122 257 61 187Q-1 116 0 39Q0 -23 31 -65Q62 -108 123 -110Q171 -109 200 -80Q228 -51 229 -4Q228 45 199 72Q171 100 133 100Q113 100 103 97Q92 93 83 93Q73 93 70 98Q67 103 67 111Q68 144 110 183Q152 221 229 224Q308 222 345 152Q381 82 381 -37Q380 -243 283 -376Q186 -508 10 -605Q3 -609 -1 -613Q-5 -617 -5 -623Q-5 -628 -2 -631Q1 -635 8 -635Q16 -635 25 -630Q218 -542 370 -398Q522 -254 531 -28Q530 104 456 182Q383 260 252 262ZM629 180Q605 179 590 164Q575 149 574 125Q575 101 590 86Q605 71 629 70Q653 71 668 86Q683 101 684 125Q683 149 668 164Q653 179 629 180ZM630 -71Q606 -71 591 -86Q576 -101 576 -125Q576 -149 591 -164Q606 -179 630 -179Q654 -179 669 -164Q684 -149 684 -125Q684 -101 669 -86Q654 -71 630 -71Z"/>
+  </g>
   <text x="95" y="82" font-family="Palatino Linotype, Palatino, Georgia, serif" font-size="30" font-style="italic" font-weight="600" fill="#3da8a8" text-anchor="middle">s</text>
   <text x="155" y="67" font-family="Palatino Linotype, Palatino, Georgia, serif" font-size="30" font-style="italic" font-weight="600" fill="#c0707e" text-anchor="middle">t</text>
   <text x="215" y="52" font-family="Palatino Linotype, Palatino, Georgia, serif" font-size="30" font-style="italic" font-weight="600" fill="#c89040" text-anchor="middle">e</text>
