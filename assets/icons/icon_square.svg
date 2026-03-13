@@ -1,20 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- stemma icon — square, for .ico / taskbar / store tile -->
+  <!-- stemma icon — square, for .ico / taskbar / store tile.
+       Palatino italic 's' in turquoise on dark background.
+       The .ico and .png icons are generated from Pillow to match this design. -->
   <rect width="256" height="256" rx="32" fill="#1e1e2e"/>
-  <!-- Staff lines -->
-  <line x1="16" y1="20" x2="228" y2="20" stroke="#b4bcd0" stroke-width="1.2" opacity="0.35"/>
-  <line x1="16" y1="56" x2="228" y2="56" stroke="#b4bcd0" stroke-width="1.2" opacity="0.35"/>
-  <line x1="16" y1="92" x2="228" y2="92" stroke="#b4bcd0" stroke-width="1.2" opacity="0.35"/>
-  <line x1="16" y1="128" x2="228" y2="128" stroke="#b4bcd0" stroke-width="1.2" opacity="0.35"/>
-  <line x1="16" y1="164" x2="228" y2="164" stroke="#b4bcd0" stroke-width="1.2" opacity="0.35"/>
-  <!-- Noteheads -->
-  <ellipse cx="48" cy="56" rx="18" ry="11" transform="rotate(-20,48,56)" fill="#bfa3dc"/>
-  <ellipse cx="48" cy="92" rx="18" ry="11" transform="rotate(-20,48,92)" fill="#e4ad6e"/>
-  <ellipse cx="48" cy="128" rx="18" ry="11" transform="rotate(-20,48,128)" fill="#d4849a"/>
-  <ellipse cx="48" cy="164" rx="18" ry="11" transform="rotate(-20,48,164)" fill="#4fb8b8"/>
-  <line x1="65" y1="16" x2="65" y2="166" stroke="#b4bcd0" stroke-width="3"/>
-  <path d="M67,56 Q73,43 79,56 Q85,69 91,56 Q97,43 103,56 Q109,69 115,56 Q121,43 127,56 Q133,69 139,56 Q145,43 151,56 Q157,69 163,56 Q169,43 175,56 Q181,69 187,56 Q193,43 199,56 Q205,69 211,56 Q217,43 223,56" fill="none" stroke="#bfa3dc" stroke-width="3" stroke-linecap="round"/>
-  <path d="M67,92 Q80,72 93,92 Q106,112 119,92 Q132,72 145,92 Q158,112 171,92 Q184,72 197,92 Q210,112 223,92" fill="none" stroke="#e4ad6e" stroke-width="3" stroke-linecap="round"/>
-  <path d="M67,128 Q76.5,113 86.5,128 Q96,143 106,128 Q115.5,113 125.5,128 Q135,143 145,128 Q154.5,113 164.5,128 Q174,143 184,128 Q193.5,113 203.5,128 Q213,143 223,128" fill="none" stroke="#d4849a" stroke-width="3" stroke-linecap="round"/>
-  <path d="M67,164 Q86.5,138 106,164 Q125.5,190 145,164 Q164.5,138 184,164 Q203.5,190 223,164" fill="none" stroke="#4fb8b8" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="128" y="200" font-family="Palatino Linotype, Palatino, Georgia, serif"
+        font-size="280" font-style="italic" fill="#4fb8b8"
+        text-anchor="middle">s</text>
 </svg>
