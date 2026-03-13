@@ -173,7 +173,7 @@ class MainWindow(QMainWindow):
         """Show the About dialog with the main logo rendered from SVG."""
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
-        dlg.setFixedSize(480, 220)
+        dlg.setFixedSize(540, 280)
 
         svg_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -185,7 +185,7 @@ class MainWindow(QMainWindow):
 
         logo_label = QLabel()
         # Render SVG at 2x for crisp display, then scale down
-        render_w, render_h = 480, 296
+        render_w, render_h = 600, 370
         renderer = QSvgRenderer(svg_path)
         if renderer.isValid():
             image = QImage(render_w, render_h, QImage.Format.Format_ARGB32_Premultiplied)
@@ -194,11 +194,11 @@ class MainWindow(QMainWindow):
             renderer.render(painter)
             painter.end()
             pixmap = QPixmap.fromImage(image).scaled(
-                240, 148, Qt.AspectRatioMode.KeepAspectRatio,
+                300, 240, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             logo_label.setPixmap(pixmap)
-        logo_label.setFixedSize(240, 150)
+        logo_label.setFixedSize(300, 240)
         outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         right = QVBoxLayout()
