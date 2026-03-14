@@ -10,6 +10,7 @@ import tempfile
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -179,6 +180,16 @@ class ImportDialog(QDialog):
         artist_row.addWidget(self._artist_edit)
         layout.addLayout(artist_row)
 
+        # -- Model selection --
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("Model:"))
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("4-stem (vocals, drums, bass, other)", False)
+        self._model_combo.addItem("6-stem (+ guitar, piano)", True)
+        self._model_combo.setToolTip("Choose separation model")
+        model_row.addWidget(self._model_combo)
+        layout.addLayout(model_row)
+
         # -- Progress --
         self._progress_bar = QProgressBar()
         self._progress_bar.setVisible(False)
@@ -339,7 +350,8 @@ class ImportDialog(QDialog):
             return
 
         # Start separation.
-        model_path = self._model_manager.model_path(is_6_stem=False)
+        is_6_stem = self._model_combo.currentData()
+        model_path = self._model_manager.model_path(is_6_stem=is_6_stem)
 
         if not os.path.isfile(model_path):
             # Model not downloaded yet -- skip separation for now.
@@ -355,7 +367,7 @@ class ImportDialog(QDialog):
             input_path=song.original_path,
             output_dir=song.stems_path,
             model_path=model_path,
-            is_6_stem=False,
+            is_6_stem=is_6_stem,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(lambda _: self._on_finished(song.id))
