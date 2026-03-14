@@ -8,12 +8,18 @@ Menu bar: File > Import / Export.
 import os
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QVBoxLayout,
 )
 
 from src.exporter import ExportWorker, StemExporter
@@ -23,6 +29,7 @@ from src.player import MultiTrackPlayer
 from src.ui.import_dialog import ImportDialog
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls
+from src.version import __version__
 
 # Try loading all components in this preferred visual layout order
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
@@ -96,6 +103,10 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("&Quit")
         quit_action.triggered.connect(self.close)
 
+        help_menu = menu_bar.addMenu("&Help")
+        about_action = help_menu.addAction("&About stemma")
+        about_action.triggered.connect(self._on_about)
+
     def _setup_shortcuts(self) -> None:
         """Register global keyboard shortcuts."""
         # Transport
@@ -156,6 +167,60 @@ class MainWindow(QMainWindow):
             self._player.pause()
         else:
             self._player.play()
+
+    def _on_about(self) -> None:
+        """Show the About dialog with the main logo rendered from SVG."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About stemma")
+        dlg.setFixedSize(540, 280)
+
+        root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        )))
+        svg_path = os.path.join(root, "assets", "icons", "logo_main_dark.svg")
+
+        outer = QHBoxLayout(dlg)
+        outer.setContentsMargins(20, 20, 20, 20)
+
+        logo_label = QLabel()
+        # Render SVG at 2x for crisp display, then scale down
+        render_w, render_h = 600, 370
+        renderer = QSvgRenderer(svg_path)
+        if renderer.isValid():
+            image = QImage(render_w, render_h, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(0)
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+            pixmap = QPixmap.fromImage(image).scaled(
+                300, 240, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            logo_label.setPixmap(pixmap)
+        logo_label.setFixedSize(300, 240)
+        outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        right = QVBoxLayout()
+        right.setSpacing(6)
+
+        info = QLabel(
+            f"<h2 style='margin:0'>stemma</h2>"
+            f"<p>Version {__version__}</p>"
+            f"<p>A music player with AI stem separation.</p>"
+            f'<p><a href="https://github.com/cyanidesayonara/stemma">'
+            f"github.com/cyanidesayonara/stemma</a></p>"
+            f"<p>MIT License</p>"
+        )
+        info.setOpenExternalLinks(True)
+        info.setWordWrap(True)
+        right.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(dlg.accept)
+        right.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
+
+        outer.addLayout(right)
+        dlg.exec()
 
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
