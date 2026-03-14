@@ -9,8 +9,8 @@ import os
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox,
@@ -28,6 +28,42 @@ from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
 _PEAK_DEBOUNCE_MS = 80
+_ICON_SIZE = 24
+_ICON_COLOR = QColor("#cdd6f4")
+
+
+def _make_icon(draw_fn) -> QIcon:
+    """Create a crisp QIcon by painting with *draw_fn(painter, size)*."""
+    pixmap = QPixmap(QSize(_ICON_SIZE, _ICON_SIZE))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_ICON_COLOR)
+    draw_fn(p, _ICON_SIZE)
+    p.end()
+    return QIcon(pixmap)
+
+
+def _draw_play(p: QPainter, s: int) -> None:
+    m = int(s * 0.2)
+    from PySide6.QtGui import QPolygonF
+    from PySide6.QtCore import QPointF
+    p.drawPolygon(QPolygonF([
+        QPointF(m + 2, m), QPointF(s - m, s / 2), QPointF(m + 2, s - m),
+    ]))
+
+
+def _draw_pause(p: QPainter, s: int) -> None:
+    m = int(s * 0.22)
+    w = int(s * 0.18)
+    p.drawRect(m, m, w, s - 2 * m)
+    p.drawRect(s - m - w, m, w, s - 2 * m)
+
+
+def _draw_stop(p: QPainter, s: int) -> None:
+    m = int(s * 0.22)
+    p.drawRect(m, m, s - 2 * m, s - 2 * m)
 
 
 def _format_time(seconds: float) -> str:
@@ -80,8 +116,9 @@ class StemRow(QWidget):
         self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
-        self._volume_slider.setToolTip(f"{stem_name} volume (0–200%)")
+        self._volume_slider.setToolTip(f"{stem_name} volume (0–200%, double-click to reset)")
         self._volume_slider.valueChanged.connect(self._on_volume)
+        self._volume_slider.mouseDoubleClickEvent = lambda _: self._volume_slider.setValue(100)
         layout.addWidget(self._volume_slider)
 
         self._vol_label = QLabel("100%")
@@ -134,17 +171,23 @@ class PlayerControls(QWidget):
         # -- Transport bar --
         transport = QHBoxLayout()
 
-        self._play_btn = QPushButton("\u25B6")
-        self._play_btn.setFixedWidth(40)
-        self._play_btn.setStyleSheet("font-size: 16px;")
+        self._play_icon = _make_icon(_draw_play)
+        self._pause_icon = _make_icon(_draw_pause)
+        self._stop_icon = _make_icon(_draw_stop)
+
+        self._play_btn = QPushButton()
+        self._play_btn.setIcon(self._play_icon)
+        self._play_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._play_btn.setFixedSize(36, 36)
         self._play_btn.setToolTip("Play / Pause (Space)")
         self._play_btn.setAccessibleName("Play")
         self._play_btn.clicked.connect(self._on_play_pause)
         transport.addWidget(self._play_btn)
 
-        self._stop_btn = QPushButton("\u23F9")
-        self._stop_btn.setFixedWidth(40)
-        self._stop_btn.setStyleSheet("font-size: 16px;")
+        self._stop_btn = QPushButton()
+        self._stop_btn.setIcon(self._stop_icon)
+        self._stop_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._stop_btn.setFixedSize(36, 36)
         self._stop_btn.setToolTip("Stop (S)")
         self._stop_btn.setAccessibleName("Stop")
         self._stop_btn.clicked.connect(self._on_stop)
@@ -235,17 +278,17 @@ class PlayerControls(QWidget):
         self._empty_logo = QLabel()
         logo_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_arpeggio_dark.svg",
+            "assets", "icons", "logo_main_dark.svg",
         )
         renderer = QSvgRenderer(logo_path)
         if renderer.isValid():
-            image = QImage(840, 240, QImage.Format.Format_ARGB32_Premultiplied)
+            image = QImage(600, 370, QImage.Format.Format_ARGB32_Premultiplied)
             image.fill(0)
             painter = QPainter(image)
             renderer.render(painter)
             painter.end()
             pixmap = QPixmap.fromImage(image).scaled(
-                420, 120, Qt.AspectRatioMode.KeepAspectRatio,
+                300, 185, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             self._empty_logo.setPixmap(pixmap)
@@ -322,11 +365,11 @@ class PlayerControls(QWidget):
             self._waveform.set_position(pos_s / total)
 
     def _on_state_changed(self, playing: bool) -> None:
-        self._play_btn.setText("\u23F8" if playing else "\u25B6")
+        self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
         self._play_btn.setAccessibleName("Pause" if playing else "Play")
 
     def _on_play_finished(self) -> None:
-        self._play_btn.setText("\u25B6")
+        self._play_btn.setIcon(self._play_icon)
         self._play_btn.setAccessibleName("Play")
         # Show cursor at current position (which may be loop-A, not 0).
         total = self._player.total_seconds
