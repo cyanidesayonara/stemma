@@ -79,7 +79,7 @@ QPushButton:pressed {
 
 QPushButton:checked {
     background-color: #585b70;
-    border: 1px solid #89b4fa;
+    border: 1px solid #4fb8b8;
 }
 
 QPushButton:disabled {
@@ -95,7 +95,7 @@ QSlider::groove:horizontal {
 }
 
 QSlider::handle:horizontal {
-    background: #89b4fa;
+    background: #4fb8b8;
     width: 14px;
     height: 14px;
     margin: -4px 0;
@@ -103,7 +103,7 @@ QSlider::handle:horizontal {
 }
 
 QSlider::sub-page:horizontal {
-    background: #89b4fa;
+    background: #4fb8b8;
     border-radius: 3px;
 }
 
@@ -138,7 +138,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background-color: #89b4fa;
+    background-color: #4fb8b8;
     border-radius: 3px;
 }
 
@@ -156,5 +156,52 @@ QScrollBar::handle:vertical {
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
+}
+
+QPushButton:focus {
+    border: 1px solid #4fb8b8;
+}
+
+QSlider:focus {
+    border: 1px solid #4fb8b8;
+    border-radius: 3px;
+}
+
+QListWidget:focus {
+    border: 1px solid #4fb8b8;
+}
+
+QLineEdit {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QLineEdit:focus {
+    border: 1px solid #4fb8b8;
+}
+
+QComboBox {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QComboBox:focus {
+    border: 1px solid #4fb8b8;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    selection-background-color: #313244;
 }
 """

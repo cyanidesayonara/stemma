@@ -96,6 +96,7 @@ class LibraryPanel(QWidget):
         layout.addWidget(self._search_edit)
 
         self._list = QListWidget()
+        self._list.setAccessibleName("Song library")
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
         self._list.setContextMenuPolicy(
@@ -106,6 +107,8 @@ class LibraryPanel(QWidget):
 
         self._remove_btn = QPushButton("Remove Selected")
         self._remove_btn.setEnabled(False)
+        self._remove_btn.setToolTip("Remove selected song from library")
+        self._remove_btn.setAccessibleName("Remove selected song")
         self._remove_btn.clicked.connect(self._on_remove_clicked)
         layout.addWidget(self._remove_btn)
 
