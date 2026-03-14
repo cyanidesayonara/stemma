@@ -144,18 +144,28 @@ QProgressBar::chunk {
 
 QScrollBar:vertical {
     background: #181825;
-    width: 8px;
+    width: 10px;
     border: none;
+    margin: 0;
 }
 
 QScrollBar::handle:vertical {
     background: #45475a;
-    border-radius: 4px;
-    min-height: 20px;
+    border-radius: 5px;
+    min-height: 24px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #585b70;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
 }
 
 QPushButton:focus {
