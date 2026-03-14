@@ -271,6 +271,7 @@ class MainWindow(QMainWindow):
             self._player.load_stems(stem_paths)
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
+            self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
 
     def _on_import(self) -> None:
         """Open the import dialog."""

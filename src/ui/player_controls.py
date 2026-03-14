@@ -5,9 +5,13 @@ Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
+import os
+
 import numpy as np
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -59,6 +63,7 @@ class StemRow(QWidget):
         self._mute_btn.setFixedSize(32, 28)
         self._mute_btn.setStyleSheet("padding: 2px;")
         self._mute_btn.setToolTip(f"Mute {stem_name}")
+        self._mute_btn.setAccessibleName(f"Mute {stem_name}")
         self._mute_btn.toggled.connect(self._on_mute)
         layout.addWidget(self._mute_btn)
 
@@ -67,19 +72,20 @@ class StemRow(QWidget):
         self._solo_btn.setFixedSize(32, 28)
         self._solo_btn.setStyleSheet("padding: 2px;")
         self._solo_btn.setToolTip(f"Solo {stem_name}")
+        self._solo_btn.setAccessibleName(f"Solo {stem_name}")
         self._solo_btn.toggled.connect(self._on_solo)
         layout.addWidget(self._solo_btn)
 
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
-        self._volume_slider.setToolTip(f"{stem_name} volume")
+        self._volume_slider.setToolTip(f"{stem_name} volume (0–200%)")
         self._volume_slider.valueChanged.connect(self._on_volume)
         layout.addWidget(self._volume_slider)
 
         self._vol_label = QLabel("100%")
-        self._vol_label.setFixedWidth(40)
+        self._vol_label.setFixedWidth(45)
         self._vol_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self._vol_label)
 
@@ -128,13 +134,19 @@ class PlayerControls(QWidget):
         # -- Transport bar --
         transport = QHBoxLayout()
 
-        self._play_btn = QPushButton("Play")
-        self._play_btn.setFixedWidth(70)
+        self._play_btn = QPushButton("\u25B6")
+        self._play_btn.setFixedWidth(40)
+        self._play_btn.setStyleSheet("font-size: 16px;")
+        self._play_btn.setToolTip("Play / Pause (Space)")
+        self._play_btn.setAccessibleName("Play")
         self._play_btn.clicked.connect(self._on_play_pause)
         transport.addWidget(self._play_btn)
 
-        self._stop_btn = QPushButton("Stop")
-        self._stop_btn.setFixedWidth(60)
+        self._stop_btn = QPushButton("\u23F9")
+        self._stop_btn.setFixedWidth(40)
+        self._stop_btn.setStyleSheet("font-size: 16px;")
+        self._stop_btn.setToolTip("Stop (S)")
+        self._stop_btn.setAccessibleName("Stop")
         self._stop_btn.clicked.connect(self._on_stop)
         transport.addWidget(self._stop_btn)
 
@@ -216,10 +228,36 @@ class PlayerControls(QWidget):
         layout.addLayout(self._stem_container)
 
         # Placeholder when no stems are loaded.
-        self._empty_label = QLabel("Import a song to get started.")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet("color: #585b70; padding: 40px;")
-        layout.addWidget(self._empty_label)
+        self._empty_widget = QWidget()
+        empty_layout = QVBoxLayout(self._empty_widget)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._empty_logo = QLabel()
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icons", "logo_arpeggio_dark.svg",
+        )
+        renderer = QSvgRenderer(logo_path)
+        if renderer.isValid():
+            image = QImage(840, 240, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(0)
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+            pixmap = QPixmap.fromImage(image).scaled(
+                420, 120, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._empty_logo.setPixmap(pixmap)
+        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self._empty_logo)
+
+        hint = QLabel("Drop an audio file or use File > Import")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color: #585b70; padding: 10px;")
+        empty_layout.addWidget(hint)
+
+        layout.addWidget(self._empty_widget)
 
         layout.addStretch()
 
@@ -237,7 +275,7 @@ class PlayerControls(QWidget):
             row.deleteLater()
         self._stem_rows.clear()
 
-        self._empty_label.setVisible(not stem_names)
+        self._empty_widget.setVisible(not stem_names)
 
         for name in stem_names:
             row = StemRow(name, self._player)
@@ -284,10 +322,12 @@ class PlayerControls(QWidget):
             self._waveform.set_position(pos_s / total)
 
     def _on_state_changed(self, playing: bool) -> None:
-        self._play_btn.setText("Pause" if playing else "Play")
+        self._play_btn.setText("\u23F8" if playing else "\u25B6")
+        self._play_btn.setAccessibleName("Pause" if playing else "Play")
 
     def _on_play_finished(self) -> None:
-        self._play_btn.setText("Play")
+        self._play_btn.setText("\u25B6")
+        self._play_btn.setAccessibleName("Play")
         # Show cursor at current position (which may be loop-A, not 0).
         total = self._player.total_seconds
         if total > 0:
