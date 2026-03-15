@@ -120,6 +120,9 @@ class MainWindow(QMainWindow):
         export_action = file_menu.addAction("&Export Mix...")
         export_action.triggered.connect(self._on_export)
 
+        close_song_action = file_menu.addAction("&Close Song")
+        close_song_action.triggered.connect(self._on_close_song)
+
         file_menu.addSeparator()
 
         quit_action = file_menu.addAction("&Quit")
@@ -294,6 +297,13 @@ class MainWindow(QMainWindow):
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
             self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
+
+    def _on_close_song(self) -> None:
+        """Stop playback and return to the empty logo state."""
+        self._player.stop()
+        self._player_controls.clear_song()
+        self._current_song_id = None
+        self.setWindowTitle("stemma")
 
     def _on_import(self) -> None:
         """Open the import dialog."""

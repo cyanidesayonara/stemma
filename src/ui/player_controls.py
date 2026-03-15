@@ -168,6 +168,43 @@ class PlayerControls(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
 
+        # ── Empty state (shown when no song is loaded) ──
+        self._empty_widget = QWidget()
+        empty_layout = QVBoxLayout(self._empty_widget)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._empty_logo = QLabel()
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icons", "logo_main_dark.svg",
+        )
+        renderer = QSvgRenderer(logo_path)
+        if renderer.isValid():
+            image = QImage(600, 370, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(0)
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+            pixmap = QPixmap.fromImage(image).scaled(
+                300, 185, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._empty_logo.setPixmap(pixmap)
+        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self._empty_logo)
+
+        hint = QLabel("Drop an audio file or use File > Import")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color: #585b70; padding: 10px;")
+        empty_layout.addWidget(hint)
+
+        layout.addWidget(self._empty_widget)
+
+        # ── Player controls (hidden until a song is loaded) ──
+        self._controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self._controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+
         # -- Transport bar --
         transport = QHBoxLayout()
 
@@ -199,12 +236,12 @@ class PlayerControls(QWidget):
         transport.addWidget(self._time_label)
 
         transport.addStretch()
-        layout.addLayout(transport)
+        controls_layout.addLayout(transport)
 
-        # -- Waveform display (replaces seek slider) --
+        # -- Waveform display --
         self._waveform = WaveformWidget()
         self._waveform.seek_requested.connect(self._on_waveform_seek)
-        layout.addWidget(self._waveform)
+        controls_layout.addWidget(self._waveform)
 
         # -- A-B loop controls --
         loop_bar = QHBoxLayout()
@@ -239,7 +276,7 @@ class PlayerControls(QWidget):
         loop_bar.addWidget(self._loop_label)
 
         loop_bar.addStretch()
-        layout.addLayout(loop_bar)
+        controls_layout.addLayout(loop_bar)
 
         # -- Speed control --
         speed_bar = QHBoxLayout()
@@ -260,49 +297,20 @@ class PlayerControls(QWidget):
         speed_bar.addWidget(self._speed_status)
 
         speed_bar.addStretch()
-        layout.addLayout(speed_bar)
+        controls_layout.addLayout(speed_bar)
 
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
-        layout.addWidget(self._mixer_label)
+        controls_layout.addWidget(self._mixer_label)
 
         self._stem_container = QVBoxLayout()
-        layout.addLayout(self._stem_container)
+        controls_layout.addLayout(self._stem_container)
 
-        # Placeholder when no stems are loaded.
-        self._empty_widget = QWidget()
-        empty_layout = QVBoxLayout(self._empty_widget)
-        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls_layout.addStretch()
 
-        self._empty_logo = QLabel()
-        logo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_main_dark.svg",
-        )
-        renderer = QSvgRenderer(logo_path)
-        if renderer.isValid():
-            image = QImage(600, 370, QImage.Format.Format_ARGB32_Premultiplied)
-            image.fill(0)
-            painter = QPainter(image)
-            renderer.render(painter)
-            painter.end()
-            pixmap = QPixmap.fromImage(image).scaled(
-                300, 185, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._empty_logo.setPixmap(pixmap)
-        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(self._empty_logo)
-
-        hint = QLabel("Drop an audio file or use File > Import")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color: #585b70; padding: 10px;")
-        empty_layout.addWidget(hint)
-
-        layout.addWidget(self._empty_widget)
-
-        layout.addStretch()
+        self._controls_widget.setVisible(False)
+        layout.addWidget(self._controls_widget)
 
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
@@ -318,7 +326,9 @@ class PlayerControls(QWidget):
             row.deleteLater()
         self._stem_rows.clear()
 
-        self._empty_widget.setVisible(not stem_names)
+        has_stems = bool(stem_names)
+        self._empty_widget.setVisible(not has_stems)
+        self._controls_widget.setVisible(has_stems)
 
         for name in stem_names:
             row = StemRow(name, self._player)
@@ -331,6 +341,13 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
+
+    def clear_song(self) -> None:
+        """Return to the empty logo state."""
+        self.set_stem_names([])
+        self._waveform.set_peaks([])
+        self._waveform.set_position(0.0)
+        self._time_label.setText("0:00 / 0:00")
 
         self._do_recompute_peaks()
         self._update_waveform_loop_markers()
