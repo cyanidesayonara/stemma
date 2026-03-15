@@ -312,9 +312,11 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(False)
         layout.addWidget(self._controls_widget)
 
-        # ── Footer bar (always visible) ──
+        layout.addStretch()
+
+        # ── Footer bar (pinned to bottom, always visible) ──
         footer = QHBoxLayout()
-        footer.setContentsMargins(0, 4, 0, 4)
+        footer.setContentsMargins(0, 6, 0, 6)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
         copyright_label.setStyleSheet("color: #45475a; font-size: 9pt;")
