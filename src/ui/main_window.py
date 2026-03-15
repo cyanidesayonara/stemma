@@ -86,28 +86,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 3)
 
         self.setCentralWidget(splitter)
-
-        # Arpeggio logo in status bar
-        status_bar = self.statusBar()
-        status_bar.setStyleSheet("QStatusBar { border-top: 1px solid #313244; }")
-        arpeggio_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_arpeggio_dark.svg",
-        )
-        renderer = QSvgRenderer(arpeggio_path)
-        if renderer.isValid():
-            image = QImage(840, 240, QImage.Format.Format_ARGB32_Premultiplied)
-            image.fill(0)
-            painter = QPainter(image)
-            renderer.render(painter)
-            painter.end()
-            pixmap = QPixmap.fromImage(image).scaled(
-                168, 48, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            logo_label = QLabel()
-            logo_label.setPixmap(pixmap)
-            status_bar.addPermanentWidget(logo_label)
+        self.setStatusBar(None)  # No global status bar
 
     def _setup_menu(self) -> None:
         """Create the menu bar."""
