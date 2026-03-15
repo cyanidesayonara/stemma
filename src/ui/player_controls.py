@@ -312,6 +312,37 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(False)
         layout.addWidget(self._controls_widget)
 
+        # ── Footer bar (always visible) ──
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 4, 0, 4)
+
+        copyright_label = QLabel("\u00A9 2026 stemma")
+        copyright_label.setStyleSheet("color: #45475a; font-size: 9pt;")
+        footer.addWidget(copyright_label)
+
+        footer.addStretch()
+
+        root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        )))
+        arpeggio_path = os.path.join(root, "assets", "icons", "logo_arpeggio_dark.svg")
+        renderer2 = QSvgRenderer(arpeggio_path)
+        if renderer2.isValid():
+            img2 = QImage(840, 240, QImage.Format.Format_ARGB32_Premultiplied)
+            img2.fill(0)
+            p2 = QPainter(img2)
+            renderer2.render(p2)
+            p2.end()
+            arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
+                120, 28, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            arpeggio_label = QLabel()
+            arpeggio_label.setPixmap(arpeggio_pixmap)
+            footer.addWidget(arpeggio_label)
+
+        layout.addLayout(footer)
+
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
         self._player.state_changed.connect(self._on_state_changed)
