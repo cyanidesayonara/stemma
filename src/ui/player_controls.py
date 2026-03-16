@@ -200,7 +200,7 @@ class PlayerControls(QWidget):
 
         empty_layout.addStretch(1)  # Bottom spacer (centers content vertically)
 
-        layout.addWidget(self._empty_widget)
+        layout.addWidget(self._empty_widget, 1)
 
         # ── Player controls (hidden until a song is loaded) ──
         self._controls_widget = QWidget()
@@ -312,17 +312,15 @@ class PlayerControls(QWidget):
         controls_layout.addStretch()
 
         self._controls_widget.setVisible(False)
-        layout.addWidget(self._controls_widget)
-
-        layout.addStretch()
+        layout.addWidget(self._controls_widget, 1)
 
         # ── Footer bar (pinned to bottom, always visible) ──
         footer = QHBoxLayout()
-        footer.setContentsMargins(0, 6, 0, 6)
+        footer.setContentsMargins(0, 0, 0, 0)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
-        copyright_label.setStyleSheet("color: #45475a; font-size: 9pt;")
-        footer.addWidget(copyright_label)
+        copyright_label.setStyleSheet("color: #45475a; font-size: 10pt;")
+        footer.addWidget(copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         footer.addStretch()
 
@@ -338,12 +336,12 @@ class PlayerControls(QWidget):
             renderer2.render(p2)
             p2.end()
             arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                200, 42, Qt.AspectRatioMode.KeepAspectRatio,
+                300, 60, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             arpeggio_label = QLabel()
             arpeggio_label.setPixmap(arpeggio_pixmap)
-            footer.addWidget(arpeggio_label)
+            footer.addWidget(arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(footer)
 
