@@ -171,7 +171,7 @@ class PlayerControls(QWidget):
         # ── Empty state (shown when no song is loaded) ──
         self._empty_widget = QWidget()
         empty_layout = QVBoxLayout(self._empty_widget)
-        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addStretch(1)  # Top spacer
 
         self._empty_logo = QLabel()
         logo_path = os.path.join(
@@ -197,6 +197,8 @@ class PlayerControls(QWidget):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #585b70; padding: 10px;")
         empty_layout.addWidget(hint)
+
+        empty_layout.addStretch(1)  # Bottom spacer (centers content vertically)
 
         layout.addWidget(self._empty_widget)
 
@@ -336,7 +338,7 @@ class PlayerControls(QWidget):
             renderer2.render(p2)
             p2.end()
             arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                120, 28, Qt.AspectRatioMode.KeepAspectRatio,
+                200, 42, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             arpeggio_label = QLabel()
@@ -374,6 +376,9 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
+
+        if stem_names:
+            self._do_recompute_peaks()
 
     def clear_song(self) -> None:
         """Return to the empty logo state."""
