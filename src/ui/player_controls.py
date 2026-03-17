@@ -314,20 +314,17 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(False)
         layout.addWidget(self._controls_widget, 1)
 
-        # ── Footer bar (pinned to bottom, always visible) ──
-        footer_separator = QLabel()
-        footer_separator.setFixedHeight(1)
-        footer_separator.setStyleSheet("background-color: #313244;")
-        layout.addWidget(footer_separator)
-
-        footer = QHBoxLayout()
-        footer.setContentsMargins(0, 8, 0, 8)
+        # ── Footer bar (matches library panel's Remove button row) ──
+        footer_widget = QWidget()
+        footer_widget.setStyleSheet("border-top: 1px solid #313244;")
+        footer_layout = QHBoxLayout(footer_widget)
+        footer_layout.setContentsMargins(0, 4, 0, 4)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
-        copyright_label.setStyleSheet("color: #45475a; font-size: 10pt;")
-        footer.addWidget(copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        copyright_label.setStyleSheet("color: #45475a; font-size: 9pt; border: none;")
+        footer_layout.addWidget(copyright_label)
 
-        footer.addStretch()
+        footer_layout.addStretch()
 
         root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__)
@@ -341,14 +338,15 @@ class PlayerControls(QWidget):
             renderer2.render(p2)
             p2.end()
             arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                300, 60, Qt.AspectRatioMode.KeepAspectRatio,
+                180, 30, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             arpeggio_label = QLabel()
             arpeggio_label.setPixmap(arpeggio_pixmap)
-            footer.addWidget(arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+            arpeggio_label.setStyleSheet("border: none;")
+            footer_layout.addWidget(arpeggio_label)
 
-        layout.addLayout(footer)
+        layout.addWidget(footer_widget)
 
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
