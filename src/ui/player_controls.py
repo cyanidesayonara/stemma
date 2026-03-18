@@ -9,8 +9,8 @@ import os
 
 import numpy as np
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap, QPolygonF
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,6 +27,7 @@ from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
 _ICON_COLOR = QColor("#cdd6f4")
@@ -47,8 +48,6 @@ def _make_icon(draw_fn) -> QIcon:
 
 def _draw_play(p: QPainter, s: int) -> None:
     m = int(s * 0.2)
-    from PySide6.QtGui import QPolygonF
-    from PySide6.QtCore import QPointF
     p.drawPolygon(QPolygonF([
         QPointF(m + 2, m), QPointF(s - m, s / 2), QPointF(m + 2, s - m),
     ]))
@@ -64,6 +63,24 @@ def _draw_pause(p: QPainter, s: int) -> None:
 def _draw_stop(p: QPainter, s: int) -> None:
     m = int(s * 0.22)
     p.drawRect(m, m, s - 2 * m, s - 2 * m)
+
+
+def _render_svg(svg_path: str, width: int, height: int) -> QPixmap | None:
+    """Render an SVG file to a QPixmap at the given size, or None on failure."""
+    renderer = QSvgRenderer(svg_path)
+    if not renderer.isValid():
+        return None
+    # Render at 2x for crisp display, then scale down.
+    img = QImage(width * 2, height * 2, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    painter = QPainter(img)
+    renderer.render(painter)
+    painter.end()
+    return QPixmap.fromImage(img).scaled(
+        width, height,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 def _format_time(seconds: float) -> str:
@@ -117,6 +134,7 @@ class StemRow(QWidget):
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
         self._volume_slider.setToolTip(f"{stem_name} volume (0–200%, double-click to reset)")
+        self._volume_slider.setAccessibleName(f"{stem_name} volume")
         self._volume_slider.valueChanged.connect(self._on_volume)
         self._volume_slider.mouseDoubleClickEvent = lambda _: self._volume_slider.setValue(100)
         layout.addWidget(self._volume_slider)
@@ -174,21 +192,9 @@ class PlayerControls(QWidget):
         empty_layout.addStretch(1)  # Top spacer
 
         self._empty_logo = QLabel()
-        logo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_main_dark.svg",
-        )
-        renderer = QSvgRenderer(logo_path)
-        if renderer.isValid():
-            image = QImage(600, 370, QImage.Format.Format_ARGB32_Premultiplied)
-            image.fill(0)
-            painter = QPainter(image)
-            renderer.render(painter)
-            painter.end()
-            pixmap = QPixmap.fromImage(image).scaled(
-                300, 185, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+        logo_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_main_dark.svg")
+        pixmap = _render_svg(logo_path, 300, 185)
+        if pixmap:
             self._empty_logo.setPixmap(pixmap)
         self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -251,12 +257,14 @@ class PlayerControls(QWidget):
         self._loop_a_btn = QPushButton("Set A")
         self._loop_a_btn.setFixedWidth(60)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
+        self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
         self._loop_b_btn.setFixedWidth(60)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
+        self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
         loop_bar.addWidget(self._loop_b_btn)
 
@@ -264,12 +272,14 @@ class PlayerControls(QWidget):
         self._loop_toggle_btn.setCheckable(True)
         self._loop_toggle_btn.setFixedWidth(60)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
+        self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
         loop_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
         self._loop_clear_btn.setFixedWidth(60)
         self._loop_clear_btn.setToolTip("Clear loop points")
+        self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
         loop_bar.addWidget(self._loop_clear_btn)
 
@@ -291,6 +301,7 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.setFixedWidth(80)
         self._speed_combo.setToolTip("Playback speed ([ / ])")
+        self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
         speed_bar.addWidget(self._speed_combo)
 
@@ -327,21 +338,9 @@ class PlayerControls(QWidget):
 
         footer_layout.addStretch()
 
-        root = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)
-        )))
-        arpeggio_path = os.path.join(root, "assets", "icons", "logo_arpeggio_dark.svg")
-        renderer2 = QSvgRenderer(arpeggio_path)
-        if renderer2.isValid():
-            img2 = QImage(840, 150, QImage.Format.Format_ARGB32_Premultiplied)
-            img2.fill(0)
-            p2 = QPainter(img2)
-            renderer2.render(p2)
-            p2.end()
-            arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                220, 36, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+        arpeggio_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_arpeggio_dark.svg")
+        arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
+        if arpeggio_pixmap:
             arpeggio_label = QLabel()
             arpeggio_label.setPixmap(arpeggio_pixmap)
             arpeggio_label.setStyleSheet("border: none;")
@@ -385,12 +384,9 @@ class PlayerControls(QWidget):
     def clear_song(self) -> None:
         """Return to the empty logo state."""
         self.set_stem_names([])
-        self._waveform.set_peaks([])
+        self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
         self._waveform.set_position(0.0)
         self._time_label.setText("0:00 / 0:00")
-
-        self._do_recompute_peaks()
-        self._update_waveform_loop_markers()
 
     def toggle_stem_mute(self, stem_name: str) -> None:
         """Toggle the mute state of a stem and update the UI button."""
