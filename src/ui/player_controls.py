@@ -319,7 +319,7 @@ class PlayerControls(QWidget):
         footer_widget = QWidget()
         footer_widget.setStyleSheet("border-top: 1px solid #313244;")
         footer_layout = QHBoxLayout(footer_widget)
-        footer_layout.setContentsMargins(0, 8, 0, 8)
+        footer_layout.setContentsMargins(0, 4, 0, 4)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
         copyright_label.setStyleSheet("color: #45475a; font-size: 9pt; border: none;")
@@ -333,13 +333,13 @@ class PlayerControls(QWidget):
         arpeggio_path = os.path.join(root, "assets", "icons", "logo_arpeggio_dark.svg")
         renderer2 = QSvgRenderer(arpeggio_path)
         if renderer2.isValid():
-            img2 = QImage(840, 240, QImage.Format.Format_ARGB32_Premultiplied)
+            img2 = QImage(840, 150, QImage.Format.Format_ARGB32_Premultiplied)
             img2.fill(0)
             p2 = QPainter(img2)
             renderer2.render(p2)
             p2.end()
             arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                260, 46, Qt.AspectRatioMode.KeepAspectRatio,
+                220, 36, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             arpeggio_label = QLabel()
