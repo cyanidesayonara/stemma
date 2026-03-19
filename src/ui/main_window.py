@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QVBoxLayout,
 )
@@ -118,6 +119,19 @@ class MainWindow(QMainWindow):
         self._theme_action.toggled.connect(self._on_theme_toggled)
 
         help_menu = menu_bar.addMenu("&Help")
+
+        # Corner toggle button (right side of menu bar)
+        self._theme_btn = QPushButton()
+        self._theme_btn.setObjectName("theme-toggle")
+        self._theme_btn.setAccessibleName("Toggle theme")
+        self._theme_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._theme_btn.clicked.connect(
+            lambda: self._theme_action.setChecked(
+                not self._theme_action.isChecked()
+            )
+        )
+        self._update_theme_btn()
+        menu_bar.setCornerWidget(self._theme_btn)
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
 
@@ -178,6 +192,15 @@ class MainWindow(QMainWindow):
         else:
             self._player.play()
 
+    def _update_theme_btn(self) -> None:
+        """Update the corner toggle button text and tooltip for the active theme."""
+        if self._theme == "dark":
+            self._theme_btn.setText("\u2600")
+            self._theme_btn.setToolTip("Switch to light theme")
+        else:
+            self._theme_btn.setText("\u263D")
+            self._theme_btn.setToolTip("Switch to dark theme")
+
     def _on_theme_toggled(self, checked: bool) -> None:
         """Switch between light and dark themes."""
         self._theme = "light" if checked else "dark"
@@ -189,6 +212,7 @@ class MainWindow(QMainWindow):
 
         colors = get_colors(self._theme)
         self._player_controls.apply_theme(self._theme, colors)
+        self._update_theme_btn()
 
     def _on_about(self) -> None:
         """Show the About dialog with the main logo rendered from SVG."""
