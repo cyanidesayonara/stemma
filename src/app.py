@@ -45,7 +45,7 @@ def run() -> int:
     window = MainWindow(library, player, model_manager)
 
     colors = get_colors(theme)
-    window._player_controls.apply_theme(theme, colors)
+    window.apply_theme(theme, colors)
 
     window.show()
 
