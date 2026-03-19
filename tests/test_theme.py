@@ -16,6 +16,7 @@ from src.ui.styles import (
     get_colors,
     get_stylesheet,
 )
+from src.ui.main_window import MainWindow
 from src.ui.waveform_widget import WaveformWidget
 from src.ui.player_controls import PlayerControls
 
@@ -97,6 +98,7 @@ class TestThemeColors:
             assert "QComboBox" in ss
             assert "QLabel#title-label" in ss
             assert "QLabel#subtle-label" in ss
+            assert "QPushButton#theme-toggle" in ss
 
     def test_title_label_uses_pt_sizing(self):
         """Title label font-size uses pt, not px."""
@@ -192,3 +194,64 @@ class TestPlayerControlsTheme:
         controls.apply_theme("dark", DARK_COLORS)
         assert controls._theme == "dark"
         assert controls._waveform._bg_color == QColor(DARK_COLORS["base"])
+
+
+class TestThemeToggleButton:
+    """Tests for the theme toggle button in the menu bar."""
+
+    def _make_window(self, theme="dark"):
+        from PySide6.QtCore import QSettings
+        settings = QSettings("stemma", "stemma")
+        settings.setValue("theme", theme)
+
+        player = MagicMock()
+        player.stems = {}
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        player.total_seconds = 0.0
+        player.current_seconds = 0.0
+        player.loop_a = None
+        player.loop_b = None
+        player.is_playing = False
+        player.has_stems = False
+
+        library = MagicMock()
+        library.songs = []
+        model_mgr = MagicMock()
+        return MainWindow(library, player, model_mgr)
+
+    def test_toggle_button_exists(self, app):
+        """Menu bar has a corner theme toggle button."""
+        win = self._make_window()
+        assert win._theme_btn is not None
+        assert win._theme_btn.objectName() == "theme-toggle"
+
+    def test_toggle_button_shows_sun_in_dark_mode(self, app):
+        """In dark mode the button shows a sun (switch to light)."""
+        win = self._make_window()
+        assert win._theme == "dark"
+        assert "\u2600" in win._theme_btn.text()
+
+    def test_toggle_button_shows_moon_in_light_mode(self, app):
+        """In light mode the button shows a crescent moon (switch to dark)."""
+        win = self._make_window()
+        win._theme_action.setChecked(True)
+        assert win._theme == "light"
+        assert "\u263D" in win._theme_btn.text()
+
+    def test_toggle_button_syncs_with_menu_action(self, app):
+        """Clicking the toggle button toggles the menu action."""
+        win = self._make_window()
+        assert not win._theme_action.isChecked()
+        win._theme_btn.click()
+        assert win._theme_action.isChecked()
+        assert win._theme == "light"
+
+    def test_menu_action_syncs_with_toggle_button(self, app):
+        """Toggling the menu action updates the button text."""
+        win = self._make_window()
+        win._theme_action.setChecked(True)
+        assert "\u263D" in win._theme_btn.text()
+        win._theme_action.setChecked(False)
+        assert "\u2600" in win._theme_btn.text()
