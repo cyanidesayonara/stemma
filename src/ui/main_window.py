@@ -29,7 +29,7 @@ from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
 from src.ui.import_dialog import ImportDialog
 from src.ui.library_panel import LibraryPanel
-from src.ui.player_controls import PlayerControls
+from src.ui.player_controls import PlayerControls, _ROOT_DIR, _logo_variant, _render_svg
 from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
 
@@ -192,6 +192,10 @@ class MainWindow(QMainWindow):
         else:
             self._player.play()
 
+    def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
+        """Apply a theme to all child widgets that need explicit updates."""
+        self._player_controls.apply_theme(theme, colors)
+
     def _update_theme_btn(self) -> None:
         """Update the corner toggle button text and tooltip for the active theme."""
         if self._theme == "dark":
@@ -211,7 +215,7 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(get_stylesheet(self._theme))
 
         colors = get_colors(self._theme)
-        self._player_controls.apply_theme(self._theme, colors)
+        self.apply_theme(self._theme, colors)
         self._update_theme_btn()
 
     def _on_about(self) -> None:
@@ -219,8 +223,6 @@ class MainWindow(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
-
-        from src.ui.player_controls import _ROOT_DIR, _logo_variant, _render_svg
 
         variant = _logo_variant(self._theme)
         svg_path = os.path.join(
