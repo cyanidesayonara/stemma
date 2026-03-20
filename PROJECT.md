@@ -189,6 +189,6 @@ stemma/
 
 ## Audio Quality Notes
 
-- Bass and drums separate cleanly (primary use case ✅)
+- Bass and drums separate cleanly (primary use case supported)
 - Guitar separation (6-stem) is good but not perfect — some bleed is normal
 - For practice/busking purposes, quality is more than sufficient
