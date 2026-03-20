@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -72,5 +73,13 @@ class LibraryPanel(QWidget):
         if current is not None:
             song_id = current.data(256)
             if song_id:
-                self._library.remove_song(song_id)
-                self.refresh()
+                reply = QMessageBox.question(
+                    self,
+                    "Remove Song",
+                    f"Are you sure you want to remove '{current.text()}' and delete its separated audio files?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._library.remove_song(song_id)
+                    self.refresh()
