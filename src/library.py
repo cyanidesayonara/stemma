@@ -158,10 +158,19 @@ class SongLibrary:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        """Read the JSON index from disk."""
-        with open(self._json_path, encoding="utf-8") as f:
-            data = json.load(f)
-        self._songs = [Song.from_dict(entry) for entry in data]
+        """Read the JSON index from disk.
+
+        If the file is corrupted or contains malformed entries, starts
+        with an empty library rather than crashing.
+        """
+        try:
+            with open(self._json_path, encoding="utf-8") as f:
+                data = json.load(f)
+            self._songs = [Song.from_dict(entry) for entry in data]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            # Corrupted or malformed — start fresh and overwrite.
+            self._songs = []
+            self._save()
 
     def _save(self) -> None:
         """Write the current song list to the JSON index atomically."""
