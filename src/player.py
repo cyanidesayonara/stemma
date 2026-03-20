@@ -32,8 +32,8 @@ class MultiTrackPlayer(QObject):
         self._total_frames: int = 0
         self._current_frame: int = 0
 
-        # Mixing state. Muting/soloing is thread-safe enough for this use case
-        # because dict/set reads in Python are GIL-atomic.
+        # Mixing state. State tracking is safe because sounddevice acquires
+        # the GIL before invoking the Python audio callback, ensuring atomicity.
         self._is_playing: bool = False
         self._muted_stems: set[str] = set()
         self._soloed_stems: set[str] = set()
@@ -163,19 +163,22 @@ class MultiTrackPlayer(QObject):
 
     def _emit_position(self) -> None:
         """Emit the current playback position for UI updates."""
+        if not self._is_playing and self._timer.isActive():
+            self._timer.stop()
+            if self._stream is not None:
+                self._stream.stop()
+                self._stream.close()
+                self._stream = None
+            self.state_changed.emit(False)
+            self.play_finished.emit()
+            return
+
         pos_s = self._current_frame / self._sample_rate
         self.position_changed.emit(pos_s)
 
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags) -> None:
-        """PortAudio callback for pushing mixed audio to the hardware.
-
-        This runs on a high-priority C thread. It must not block or allocate
-        significant memory.
-        """
-        if status:
-            print(f"Audio callback status: {status}")
-
+        """PortAudio callback for pushing mixed audio to the hardware."""
         if not self._is_playing or self._current_frame >= self._total_frames:
             outdata.fill(0.0)
             raise sd.CallbackStop
@@ -215,16 +218,11 @@ class MultiTrackPlayer(QObject):
 
         self._current_frame += frames_to_read
 
+        # Apply clipping protection.
+        np.clip(outdata, -1.0, 1.0, out=outdata)
+
         # If we reached the end of the track, pad the rest of the buffer
         # with silence and raise the stop signal for PortAudio.
         if frames_to_read < frames:
-            # Remaining buffer is already filled with 0.0 from clear.
-            # We schedule the stop flag internally, but sd.CallbackStop
-            # is the proper way to tell PortAudio we are done.
             self._is_playing = False
-            # We cannot emit Qt signals directly from this C thread reliably
-            # depending on the OS, so we trigger QMetaObject.invokeMethod or
-            # just let the timer catch it.
-            # A safe way is to let the play() or QTimer detect EOF next tick,
-            # but raising CallbackStop handles the hardware correctly.
             raise sd.CallbackStop
