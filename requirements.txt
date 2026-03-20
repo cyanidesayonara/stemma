@@ -4,5 +4,8 @@ sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26.0
 pydub>=0.25.1
-pyinstaller>=6.15.0
 librosa>=0.10.1
+
+# Development dependencies
+pytest>=8.0.0
+pytest-cov>=4.1.0
