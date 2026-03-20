@@ -19,8 +19,11 @@ from src.exporter import StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
+from src.separator import STEMS_4, STEMS_6
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls
+
+ALL_STEM_NAMES = STEMS_6  # Superset: try loading all possible stems.
 
 
 class MainWindow(QMainWindow):
@@ -92,7 +95,7 @@ class MainWindow(QMainWindow):
         if song is None:
             return
 
-        stem_names = ("vocals", "drums", "bass", "other", "guitar", "piano")
+        stem_names = ALL_STEM_NAMES
         stem_paths = {}
         for name in stem_names:
             path = os.path.join(song.stems_path, f"{name}.wav")
@@ -119,7 +122,7 @@ class MainWindow(QMainWindow):
 
     def _on_export(self) -> None:
         """Export the current mix as a WAV file."""
-        if not self._player._stems:
+        if not self._player.has_stems:
             QMessageBox.information(
                 self, "Export", "No stems loaded. Import and separate a song first."
             )
@@ -130,7 +133,7 @@ class MainWindow(QMainWindow):
             return
 
         stem_paths = {}
-        for name in ("vocals", "drums", "bass", "other", "guitar", "piano"):
+        for name in ALL_STEM_NAMES:
             path = os.path.join(song.stems_path, f"{name}.wav")
             if os.path.isfile(path):
                 stem_paths[name] = path
@@ -143,5 +146,5 @@ class MainWindow(QMainWindow):
         )
         if path:
             exporter = StemExporter(stem_paths)
-            exporter.export_mix(path, muted_stems=self._player._muted_stems)
+            exporter.export_mix(path, muted_stems=self._player.muted_stems)
             QMessageBox.information(self, "Export", f"Mix exported to {path}")
