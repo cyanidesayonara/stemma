@@ -116,6 +116,31 @@ class TestSongLibraryInit:
         assert len(lib.songs) == 1
         assert lib.songs[0].title == "Old Song"
 
+    def test_recovers_from_corrupted_json(self, library_dir):
+        """Corrupted library.json should not crash — starts empty instead."""
+        os.makedirs(library_dir, exist_ok=True)
+        json_path = os.path.join(library_dir, "library.json")
+        with open(json_path, "w") as f:
+            f.write("{invalid json content")
+
+        lib = SongLibrary(data_dir=library_dir)
+        assert len(lib.songs) == 0
+
+        # The corrupted file should be overwritten with valid empty JSON.
+        with open(json_path) as f:
+            data = json.load(f)
+        assert data == []
+
+    def test_recovers_from_malformed_entries(self, library_dir):
+        """Entries with missing fields should not crash the library."""
+        os.makedirs(library_dir, exist_ok=True)
+        json_path = os.path.join(library_dir, "library.json")
+        with open(json_path, "w") as f:
+            json.dump([{"bad": "data"}], f)
+
+        lib = SongLibrary(data_dir=library_dir)
+        assert len(lib.songs) == 0
+
 
 class TestSongLibraryCRUD:
 
