@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         )
         self._update_theme_btn()
         menu_bar.setCornerWidget(self._theme_btn)
+
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
 
