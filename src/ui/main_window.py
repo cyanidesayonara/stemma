@@ -2,14 +2,22 @@
 
 Left panel: song library list.
 Center: player controls and stem mixer.
-Menu bar: File > Import / Export.
+Menu bar: File / Help; theme toggle in the menu bar corner.
 """
 
 import os
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QPointF, QSettings, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -17,8 +25,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.exporter import ExportWorker, StemExporter
@@ -27,7 +37,8 @@ from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
 from src.ui.import_dialog import ImportDialog
 from src.ui.library_panel import LibraryPanel
-from src.ui.player_controls import PlayerControls
+from src.ui.player_controls import PlayerControls, _ROOT_DIR, _logo_variant, _render_svg
+from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
 
 # Try loading all components in this preferred visual layout order
@@ -39,6 +50,30 @@ def _is_audio_path(path: str) -> bool:
     """Return True if *path* has an audio file extension."""
     _, ext = os.path.splitext(path)
     return ext.lower() in _AUDIO_EXTENSIONS
+
+
+_THEME_TOGGLE_ICON_PX = 18
+
+
+def _moon_icon(color: QColor) -> QIcon:
+    """Crisp crescent moon for the theme button (avoids weak font glyphs on Windows)."""
+    s = _THEME_TOGGLE_ICON_PX
+    pix = QPixmap(s, s)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    cx = s * 0.5
+    cy = s * 0.5
+    r_outer = s * 0.42
+    p.drawEllipse(QPointF(cx, cy), r_outer, r_outer)
+    p.setCompositionMode(
+        QPainter.CompositionMode.CompositionMode_DestinationOut
+    )
+    p.drawEllipse(QPointF(cx + s * 0.20, cy), r_outer * 0.90, r_outer * 0.90)
+    p.end()
+    return QIcon(pix)
 
 
 class MainWindow(QMainWindow):
@@ -61,6 +96,9 @@ class MainWindow(QMainWindow):
         self._export_worker: ExportWorker | None = None
 
         self._settings = QSettings("stemma", "stemma")
+        self._theme = self._settings.value("theme", "dark")
+        if self._theme not in ("dark", "light"):
+            self._theme = "dark"
 
         self._setup_ui()
         self._setup_menu()
@@ -107,12 +145,30 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
 
         help_menu = menu_bar.addMenu("&Help")
+
+        self._theme_btn = QPushButton()
+        self._theme_btn.setObjectName("theme-toggle")
+        self._theme_btn.setAccessibleName("Toggle theme")
+        self._theme_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._theme_btn.setIconSize(
+            QSize(_THEME_TOGGLE_ICON_PX, _THEME_TOGGLE_ICON_PX)
+        )
+        self._theme_btn.setFixedSize(30, 26)
+        self._theme_btn.clicked.connect(self._toggle_theme)
+
+        self._theme_corner = QWidget(menu_bar)
+        corner_l = QHBoxLayout(self._theme_corner)
+        corner_l.setContentsMargins(0, 4, 10, 0)
+        corner_l.setSpacing(0)
+        corner_l.addWidget(self._theme_btn)
+        self._update_theme_btn()
+        menu_bar.setCornerWidget(self._theme_corner)
+
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
 
     def _setup_shortcuts(self) -> None:
         """Register global keyboard shortcuts."""
-        # Transport
         QShortcut(QKeySequence(Qt.Key.Key_Space), self).activated.connect(
             self._on_shortcut_play_pause
         )
@@ -128,7 +184,6 @@ class MainWindow(QMainWindow):
             lambda: self._player.seek(self._player.current_seconds + 5.0)
         )
 
-        # A-B loop
         QShortcut(QKeySequence(Qt.Key.Key_A), self).activated.connect(
             self._player_controls.set_loop_a
         )
@@ -139,7 +194,6 @@ class MainWindow(QMainWindow):
             self._player_controls.toggle_looping
         )
 
-        # Speed control
         QShortcut(QKeySequence(Qt.Key.Key_BracketRight), self).activated.connect(
             lambda: self._player_controls.cycle_speed(1)
         )
@@ -147,7 +201,6 @@ class MainWindow(QMainWindow):
             lambda: self._player_controls.cycle_speed(-1)
         )
 
-        # Number keys 1–6 toggle mute on corresponding stem
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
             Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
@@ -171,15 +224,45 @@ class MainWindow(QMainWindow):
         else:
             self._player.play()
 
+    def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
+        """Apply a theme to all child widgets that need explicit updates."""
+        self._player_controls.apply_theme(theme, colors)
+
+    def _update_theme_btn(self) -> None:
+        """Update the corner toggle (sun glyph in dark mode, drawn moon in light)."""
+        if self._theme == "dark":
+            self._theme_btn.setIcon(QIcon())
+            self._theme_btn.setText("\u2600")
+            self._theme_btn.setToolTip("Switch to light theme")
+        else:
+            self._theme_btn.setText("")
+            ink = QColor(get_colors(self._theme)["text"])
+            self._theme_btn.setIcon(_moon_icon(ink))
+            self._theme_btn.setToolTip("Switch to dark theme")
+
+    def _toggle_theme(self) -> None:
+        """Switch between light and dark themes."""
+        self._theme = "light" if self._theme == "dark" else "dark"
+        self._settings.setValue("theme", self._theme)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(get_stylesheet(self._theme))
+
+        colors = get_colors(self._theme)
+        self.apply_theme(self._theme, colors)
+        self._update_theme_btn()
+
     def _on_about(self) -> None:
         """Show the About dialog with the main logo rendered from SVG."""
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
 
-        from src.ui.player_controls import _ROOT_DIR, _render_svg
-
-        svg_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_main_dark.svg")
+        variant = _logo_variant(self._theme)
+        svg_path = os.path.join(
+            _ROOT_DIR, "assets", "icons", f"logo_main_{variant}.svg"
+        )
 
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
@@ -227,11 +310,9 @@ class MainWindow(QMainWindow):
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
 
-        # Wait for any in-flight export to finish.
         if self._export_worker is not None and self._export_worker.isRunning():
             self._export_worker.wait(5000)
 
-        # Stop playback.
         self._player.stop()
 
         super().closeEvent(event)
@@ -361,7 +442,7 @@ class MainWindow(QMainWindow):
             )
             self._export_worker.finished.connect(self._on_export_finished)
             self._export_worker.error.connect(self._on_export_error)
-            
+
             self._export_worker.start()
 
     def _on_export_finished(self, path: str) -> None:
