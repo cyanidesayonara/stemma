@@ -516,3 +516,131 @@ class TestFullPipeline:
         # Stem files should still exist.
         for stem_path in results.values():
             assert os.path.isfile(stem_path)
+
+
+# ---------------------------------------------------------------------------
+# Hardware playback: audible verification through real speakers
+# ---------------------------------------------------------------------------
+
+def _find_test_song():
+    """Find a real audio file for the hardware playback test.
+
+    Checks (in order):
+        1. STEMMA_TEST_SONG environment variable
+        2. Any audio file matching data/test_song.* (mp3, wav, flac)
+
+    Returns the path if found, else None.
+    """
+    # Environment variable override.
+    env_path = os.environ.get("STEMMA_TEST_SONG")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    # Convention: data/test_song.{ext}
+    data = os.path.abspath(DATA_DIR)
+    for ext in ("mp3", "wav", "flac"):
+        candidate = os.path.join(data, f"test_song.{ext}")
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+@pytest.mark.hardware
+@pytest.mark.slow
+class TestAudioPlayback:
+    """Play actual audio through the speakers for manual verification.
+
+    Requires a real music file (not committed to the repo). Provide one by
+    either setting STEMMA_TEST_SONG or dropping a file at data/test_song.mp3.
+
+    Run with: pytest tests/test_integration.py -v -m hardware
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_prerequisites(self):
+        if not _model_available():
+            pytest.skip("htdemucs.onnx model not downloaded")
+        if _find_test_song() is None:
+            pytest.skip(
+                "No test song found. Set STEMMA_TEST_SONG or place a file "
+                "at data/test_song.mp3"
+            )
+
+    def test_audible_playback_with_mute_solo(self, tmp_path):
+        """Separate a real song, play the full mix, then solo each stem.
+
+        Uses only the first 15 seconds to keep separation fast.
+
+        You should hear:
+            1. ~4s of the full mix (all stems together)
+            2. ~4s of vocals only
+            3. ~4s of drums only
+            4. ~4s of bass only
+
+        The volume is kept moderate (0.25 scale) to avoid surprises.
+        """
+        import sounddevice as sd
+
+        test_song = _find_test_song()
+
+        # Load only the first 15 seconds to keep separation fast.
+        audio, sr = sf.read(test_song, always_2d=True, dtype="float32")
+        max_frames = int(15.0 * sr)
+        if audio.shape[0] > max_frames:
+            audio = audio[:max_frames]
+
+        clip_path = str(tmp_path / "clip.wav")
+        sf.write(clip_path, audio, sr)
+
+        # Separate.
+        real_mm = ModelManager(data_dir=os.path.abspath(DATA_DIR))
+        model_path = real_mm.model_path(is_6_stem=False)
+
+        worker = SeparatorWorker(
+            input_path=clip_path,
+            output_dir=str(tmp_path / "stems"),
+            model_path=model_path,
+            is_6_stem=False,
+        )
+
+        results = {}
+        errors = []
+        worker.finished.connect(lambda r: results.update(r))
+        worker.error.connect(lambda e: errors.append(e))
+        worker.run()
+
+        assert not errors, f"Separation failed: {errors}"
+        assert len(results) == 4
+
+        # Load stems and scale to a comfortable volume.
+        stem_data = {}
+        for name, path in results.items():
+            data, _ = sf.read(path, dtype="float32")
+            stem_data[name] = data * 0.25
+
+        total_frames = max(a.shape[0] for a in stem_data.values())
+        play_sr = SAMPLE_RATE
+
+        def _play_section(active_stems, label, duration_s=4.0):
+            """Play a mix of the given stems for *duration_s* seconds."""
+            frames = min(int(duration_s * play_sr), total_frames)
+            buf = np.zeros((frames, 2), dtype=np.float32)
+            for name in active_stems:
+                end = min(frames, stem_data[name].shape[0])
+                buf[:end] += stem_data[name][:end]
+            np.clip(buf, -1.0, 1.0, out=buf)
+            print(f"  Playing: {label}")
+            sd.play(buf, samplerate=play_sr)
+            sd.wait()
+
+        print()
+        _play_section(list(stem_data.keys()), "full mix")
+        _play_section(["vocals"], "vocals only")
+        _play_section(["drums"], "drums only")
+        _play_section(["bass"], "bass only")
+
+        # Verify each stem has meaningful audio (not silent).
+        for name, data in stem_data.items():
+            rms = np.sqrt(np.mean(data ** 2))
+            assert rms > 0.001, f"Stem '{name}' is nearly silent (RMS={rms:.6f})"
