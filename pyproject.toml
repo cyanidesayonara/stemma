@@ -1,4 +1,5 @@
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     "slow: marks tests that take more than a few seconds (e.g. ONNX inference)",
     "hardware: marks tests that require audio hardware (speakers/soundcard)",
