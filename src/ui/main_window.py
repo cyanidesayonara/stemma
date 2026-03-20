@@ -2,13 +2,20 @@
 
 Left panel: song library list.
 Center: player controls and stem mixer.
-Menu bar: File > Import / Export, View > Theme.
+Menu bar: File / Help; theme toggle in the menu bar corner.
 """
 
 import os
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QPointF, QSettings, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -21,6 +28,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.exporter import ExportWorker, StemExporter
@@ -42,6 +50,30 @@ def _is_audio_path(path: str) -> bool:
     """Return True if *path* has an audio file extension."""
     _, ext = os.path.splitext(path)
     return ext.lower() in _AUDIO_EXTENSIONS
+
+
+_THEME_TOGGLE_ICON_PX = 18
+
+
+def _moon_icon(color: QColor) -> QIcon:
+    """Crisp crescent moon for the theme button (avoids weak font glyphs on Windows)."""
+    s = _THEME_TOGGLE_ICON_PX
+    pix = QPixmap(s, s)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    cx = s * 0.5
+    cy = s * 0.5
+    r_outer = s * 0.42
+    p.drawEllipse(QPointF(cx, cy), r_outer, r_outer)
+    p.setCompositionMode(
+        QPainter.CompositionMode.CompositionMode_DestinationOut
+    )
+    p.drawEllipse(QPointF(cx + s * 0.20, cy), r_outer * 0.90, r_outer * 0.90)
+    p.end()
+    return QIcon(pix)
 
 
 class MainWindow(QMainWindow):
@@ -112,26 +144,25 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("&Quit")
         quit_action.triggered.connect(self.close)
 
-        view_menu = menu_bar.addMenu("&View")
-        self._theme_action = view_menu.addAction("&Light Theme")
-        self._theme_action.setCheckable(True)
-        self._theme_action.setChecked(self._theme == "light")
-        self._theme_action.toggled.connect(self._on_theme_toggled)
-
         help_menu = menu_bar.addMenu("&Help")
 
-        # Corner toggle button (right side of menu bar)
         self._theme_btn = QPushButton()
         self._theme_btn.setObjectName("theme-toggle")
         self._theme_btn.setAccessibleName("Toggle theme")
         self._theme_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._theme_btn.clicked.connect(
-            lambda: self._theme_action.setChecked(
-                not self._theme_action.isChecked()
-            )
+        self._theme_btn.setIconSize(
+            QSize(_THEME_TOGGLE_ICON_PX, _THEME_TOGGLE_ICON_PX)
         )
+        self._theme_btn.setFixedSize(30, 26)
+        self._theme_btn.clicked.connect(self._toggle_theme)
+
+        self._theme_corner = QWidget(menu_bar)
+        corner_l = QHBoxLayout(self._theme_corner)
+        corner_l.setContentsMargins(0, 4, 10, 0)
+        corner_l.setSpacing(0)
+        corner_l.addWidget(self._theme_btn)
         self._update_theme_btn()
-        menu_bar.setCornerWidget(self._theme_btn)
+        menu_bar.setCornerWidget(self._theme_corner)
 
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
@@ -198,17 +229,20 @@ class MainWindow(QMainWindow):
         self._player_controls.apply_theme(theme, colors)
 
     def _update_theme_btn(self) -> None:
-        """Update the corner toggle button text and tooltip for the active theme."""
+        """Update the corner toggle (sun glyph in dark mode, drawn moon in light)."""
         if self._theme == "dark":
+            self._theme_btn.setIcon(QIcon())
             self._theme_btn.setText("\u2600")
             self._theme_btn.setToolTip("Switch to light theme")
         else:
-            self._theme_btn.setText("\u263D")
+            self._theme_btn.setText("")
+            ink = QColor(get_colors(self._theme)["text"])
+            self._theme_btn.setIcon(_moon_icon(ink))
             self._theme_btn.setToolTip("Switch to dark theme")
 
-    def _on_theme_toggled(self, checked: bool) -> None:
+    def _toggle_theme(self) -> None:
         """Switch between light and dark themes."""
-        self._theme = "light" if checked else "dark"
+        self._theme = "light" if self._theme == "dark" else "dark"
         self._settings.setValue("theme", self._theme)
 
         app = QApplication.instance()
