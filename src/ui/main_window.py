@@ -209,7 +209,8 @@ class MainWindow(QMainWindow):
             return
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Mix", "", "WAV Files (*.wav)"
+            self, "Export Mix", "",
+            "WAV Files (*.wav);;MP3 Files (*.mp3)"
         )
         if path:
             exporter = StemExporter(stem_paths)
