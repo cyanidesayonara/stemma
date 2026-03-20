@@ -30,9 +30,11 @@ For full technical specs, module descriptions, and the phased roadmap, see `PROJ
 stemma/
   main.py              # Entry point
   requirements.txt
+  pyproject.toml       # pytest config (markers, pythonpath)
   PROJECT.md           # Detailed spec and roadmap (reference doc)
   AGENTS.md            # This file (AI context, living document)
   CHANGELOG.md         # Append-only session history
+  .github/workflows/ci.yml  # CI: fast tests on push
   src/
     app.py             # QApplication setup
     separator.py       # ONNX stem separation engine
@@ -40,19 +42,22 @@ stemma/
     player.py          # Multi-track audio player
     library.py         # Song library (JSON-based)
     exporter.py        # Export stems as WAV/MP3
+    post_processing.py # Wiener filter + soft gate
     ui/
       main_window.py
       player_controls.py
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite
+  tests/               # pytest test suite (112 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
     test_player.py
     test_library.py
     test_exporter.py
+    test_post_processing.py
+    test_integration.py
   data/                # Runtime data (gitignored)
     models/            # Cached ONNX model files
     songs/{song-id}/   # Separated stems per song
@@ -75,25 +80,36 @@ stemma/
 
 ## Current Status
 
-Last updated: 2026-03-20
+Last updated: 2026-03-21
 
-### Completed
-- Repository created and pushed to GitHub (https://github.com/cyanidesayonara/stemma)
-- Project scaffolding: all source files created (empty skeletons)
-- Virtual environment set up, dependencies installed
-- `PROJECT.md` finalized with full spec
+### Phase 1 (MVP) -- Complete
+All core functionality implemented and tested:
+- ONNX stem separation with overlap-add Hann windowing
+- Multi-track player with mute/solo/volume
+- Song library with JSON persistence and corruption recovery
+- Full Qt UI with dark theme
+- Integration test suite (including hardware playback)
 
-### In Progress
-- Quality infrastructure: PR workflow, testing setup, code cleanup
-- Stem separation engine (`src/separator.py`): skeleton `SeparatorWorker` QThread exists
-- Model manager (`src/model_manager.py`): `ModelManager` and `ModelDownloader` classes exist
+### Phase 2 (Polish) -- Complete
+- MP3 export (lameenc, 320kbps)
+- Keyboard shortcuts (Space, S, arrows, 1-6)
+- Per-stem volume sliders
+- Window state persistence
+- Wiener filter + soft gate post-processing
+- Robustness fixes (thread cleanup, stream safety, JSON recovery)
+- CI pipeline (GitHub Actions)
 
-### Next Steps
-- Set up GitHub Projects kanban board with Phase 1 issues
-- Complete the ONNX inference pipeline in `separator.py` (STFT via librosa, chunked inference, iSTFT)
-- Implement multi-track audio player (`src/player.py`)
-- Build the UI components
-- See `PROJECT.md` "Implementation Phases" for the full Phase 1 checklist
+### Phase 3 (Advanced) -- Not Started
+Remaining tickets: real-time streaming (#13), experimental DSP (#28)
+
+## Test Suite
+
+```
+pytest                                    # 112 fast tests (~8s)
+pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
+pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
+set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
+```
 
 ## Session History
 
