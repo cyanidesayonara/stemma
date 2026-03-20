@@ -179,11 +179,11 @@ class SeparatorWorker(QThread):
     def _run_segmented_inference(
         self, audio: np.ndarray, session
     ) -> np.ndarray:
-        """Process audio in fixed-size segments through the ONNX model.
+        """Process audio in overlapping segments through the ONNX model.
 
-        The model expects exactly SEGMENT_SAMPLES samples per segment.
-        For longer audio, we split into overlapping segments and average
-        the overlap regions.
+        Uses 50% overlap with a Hann window to eliminate boundary clicks.
+        Each segment is windowed before accumulation, and a weight buffer
+        tracks the total window contribution per sample for normalization.
 
         Args:
             audio: Full audio array, shape (channels, total_samples).
@@ -199,40 +199,69 @@ class SeparatorWorker(QThread):
         if n_channels == 1:
             audio = np.repeat(audio, 2, axis=0)
 
-        # Pad audio to be a multiple of SEGMENT_SAMPLES.
-        if total_samples % SEGMENT_SAMPLES != 0:
-            pad_length = SEGMENT_SAMPLES - (total_samples % SEGMENT_SAMPLES)
-            audio = np.pad(audio, ((0, 0), (0, pad_length)))
+        # 50% overlap: step by half a segment.
+        step = SEGMENT_SAMPLES // 2
+
+        # Pad so the last segment fits fully.
+        pad_needed = 0
+        if total_samples > SEGMENT_SAMPLES:
+            # Number of steps to cover all samples.
+            n_steps = (total_samples - SEGMENT_SAMPLES + step - 1) // step + 1
+            required_length = (n_steps - 1) * step + SEGMENT_SAMPLES
+            pad_needed = required_length - total_samples
         else:
-            pad_length = 0
+            # Single segment: pad to SEGMENT_SAMPLES.
+            pad_needed = SEGMENT_SAMPLES - total_samples
+            required_length = SEGMENT_SAMPLES
+
+        if pad_needed > 0:
+            audio = np.pad(audio, ((0, 0), (0, pad_needed)))
 
         padded_length = audio.shape[1]
-        n_segments = padded_length // SEGMENT_SAMPLES
 
-        # Accumulator for all stems.
+        # Build segment start positions.
+        starts = list(range(0, padded_length - SEGMENT_SAMPLES + 1, step))
+        n_segments = len(starts)
+
+        # Hann window for crossfading.
+        window = np.hanning(SEGMENT_SAMPLES).astype(np.float32)
+
+        # Accumulators.
         result = np.zeros(
             (n_stems, 2, padded_length), dtype=np.float32
         )
+        weight = np.zeros(padded_length, dtype=np.float32)
 
-        for seg_idx in range(n_segments):
+        for seg_idx, start in enumerate(starts):
             if self._is_cancelled:
                 return result
 
-            # Progress: 15% to 90% across segments.
-            pct = 15 + int(75 * seg_idx / n_segments)
+            pct = 15 + int(75 * seg_idx / max(n_segments, 1))
             self.progress.emit(
                 pct, f"Processing segment {seg_idx + 1}/{n_segments}..."
             )
 
-            start = seg_idx * SEGMENT_SAMPLES
             end = start + SEGMENT_SAMPLES
             segment = audio[:, start:end]
 
             stems_out = self._infer_segment(segment, session)
-            result[:, :, start:end] = stems_out
+
+            # Apply Hann window and accumulate.
+            for s in range(n_stems):
+                for ch in range(2):
+                    result[s, ch, start:end] += stems_out[s, ch] * window
+
+            weight[start:end] += window
+
+        # Normalize by the accumulated window weight.
+        # Avoid division by zero in silent padding regions.
+        weight = np.maximum(weight, 1e-8)
+        for s in range(n_stems):
+            for ch in range(2):
+                result[s, ch] /= weight
 
         # Remove padding.
-        if pad_length > 0:
+        if pad_needed > 0:
             result = result[:, :, :total_samples]
 
         return result
