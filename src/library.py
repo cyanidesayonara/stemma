@@ -94,11 +94,17 @@ class SongLibrary:
         song_dir = os.path.join(self._songs_dir, song_id)
         os.makedirs(song_dir, exist_ok=True)
 
+        # Copy the source audio into the song directory so the library is
+        # self-contained and does not break if the original file moves.
+        ext = os.path.splitext(original_path)[1]
+        internal_path = os.path.join(song_dir, f"original{ext}")
+        shutil.copy2(original_path, internal_path)
+
         song = Song(
             id=song_id,
             title=title,
             artist=artist,
-            original_path=original_path,
+            original_path=internal_path,
             stems_path=song_dir,
             model_used=model_used,
             date_added=datetime.now(timezone.utc).isoformat(),
@@ -158,6 +164,8 @@ class SongLibrary:
         self._songs = [Song.from_dict(entry) for entry in data]
 
     def _save(self) -> None:
-        """Write the current song list to the JSON index."""
-        with open(self._json_path, "w", encoding="utf-8") as f:
+        """Write the current song list to the JSON index atomically."""
+        tmp_path = self._json_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump([s.to_dict() for s in self._songs], f, indent=2)
+        os.replace(tmp_path, self._json_path)
