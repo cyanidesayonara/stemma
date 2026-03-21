@@ -56,7 +56,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~270 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~276 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -139,7 +139,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # ~270 fast tests (~10s)
+pytest                                    # ~276 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
