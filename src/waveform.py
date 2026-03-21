@@ -55,13 +55,8 @@ def compute_peaks(
         frames = mono.shape[0]
         mix[:frames] += mono * gain
 
-    # Compute peak per bin
-    peaks = np.zeros(num_bins, dtype=np.float32)
-    bin_edges = np.linspace(0, total_frames, num_bins + 1, dtype=np.int64)
-    for i in range(num_bins):
-        start = bin_edges[i]
-        end = bin_edges[i + 1]
-        if start < end:
-            peaks[i] = np.max(mix[start:end])
-
+    # Compute peak per bin using reduceat (fully vectorized)
+    bin_starts = np.linspace(0, total_frames, num_bins + 1, dtype=np.int64)[:-1]
+    # reduceat takes the max of mix[bin_starts[i]:bin_starts[i+1]] for each i
+    peaks = np.maximum.reduceat(mix, bin_starts).astype(np.float32)
     return peaks
