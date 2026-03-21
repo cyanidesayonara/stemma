@@ -1,11 +1,13 @@
 """Player transport controls and per-stem mute/solo mixer.
 
-Transport: Play/Pause, Stop, seek slider, time display.
-Per-stem row: label, Mute button, Solo button.
+Transport: Play/Pause, Stop, waveform display, time display.
+Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
-from PySide6.QtCore import Qt
+import numpy as np
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -17,6 +19,8 @@ from PySide6.QtWidgets import (
 
 from src.player import MultiTrackPlayer
 from src.ui.styles import STEM_COLORS
+from src.ui.waveform_widget import WaveformWidget
+from src.waveform import compute_peaks
 
 
 def _format_time(seconds: float) -> str:
@@ -28,6 +32,8 @@ def _format_time(seconds: float) -> str:
 
 class StemRow(QWidget):
     """A single stem row with label, mute, and solo buttons."""
+
+    mix_changed = Signal()
 
     def __init__(self, stem_name: str, player: MultiTrackPlayer,
                  parent: QWidget | None = None) -> None:
@@ -78,14 +84,17 @@ class StemRow(QWidget):
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
+        self.mix_changed.emit()
 
     def _on_solo(self, checked: bool) -> None:
         self._player.set_solo(self._stem_name, checked)
+        self.mix_changed.emit()
 
     def _on_volume(self, value: int) -> None:
         gain = value / 100.0
         self._player.set_volume(self._stem_name, gain)
         self._vol_label.setText(f"{value}%")
+        self.mix_changed.emit()
 
     def set_muted(self, muted: bool) -> None:
         """Programmatically set the mute button state (e.g. from keyboard shortcut)."""
@@ -100,7 +109,6 @@ class PlayerControls(QWidget):
         super().__init__(parent)
         self._player = player
         self._stem_rows: dict[str, StemRow] = {}
-        self._seeking = False
 
         self._setup_ui()
         self._connect_signals()
@@ -127,13 +135,13 @@ class PlayerControls(QWidget):
         self._time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         transport.addWidget(self._time_label)
 
-        self._seek_slider = QSlider(Qt.Orientation.Horizontal)
-        self._seek_slider.setRange(0, 1000)
-        self._seek_slider.sliderPressed.connect(self._on_seek_start)
-        self._seek_slider.sliderReleased.connect(self._on_seek_end)
-        transport.addWidget(self._seek_slider)
-
+        transport.addStretch()
         layout.addLayout(transport)
+
+        # -- Waveform display (replaces seek slider) --
+        self._waveform = WaveformWidget()
+        self._waveform.seek_requested.connect(self._on_waveform_seek)
+        layout.addWidget(self._waveform)
 
         # -- A-B loop controls --
         loop_bar = QHBoxLayout()
@@ -203,8 +211,11 @@ class PlayerControls(QWidget):
 
         for name in stem_names:
             row = StemRow(name, self._player)
+            row.mix_changed.connect(self._recompute_peaks)
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
+
+        self._recompute_peaks()
 
     def toggle_stem_mute(self, stem_name: str) -> None:
         """Toggle the mute state of a stem and update the UI button."""
@@ -224,30 +235,52 @@ class PlayerControls(QWidget):
     def _on_stop(self) -> None:
         self._player.stop()
 
-    def _on_seek_start(self) -> None:
-        self._seeking = True
-
-    def _on_seek_end(self) -> None:
-        self._seeking = False
-        total = self._player.total_seconds
-        if total > 0:
-            ratio = self._seek_slider.value() / 1000.0
-            self._player.seek(ratio * total)
+    def _on_waveform_seek(self, seconds: float) -> None:
+        self._player.seek(seconds)
 
     def _on_position_changed(self, pos_s: float) -> None:
         total = self._player.total_seconds
         self._time_label.setText(
             f"{_format_time(pos_s)} / {_format_time(total)}"
         )
-        if not self._seeking and total > 0:
-            self._seek_slider.setValue(int(pos_s / total * 1000))
+        if total > 0:
+            self._waveform.set_position(pos_s / total)
 
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setText("Pause" if playing else "Play")
 
     def _on_play_finished(self) -> None:
         self._play_btn.setText("Play")
-        self._seek_slider.setValue(0)
+        self._waveform.set_position(0.0)
+
+    def _recompute_peaks(self) -> None:
+        """Recompute waveform peaks from current stem/mix state."""
+        stems = self._player.stems
+        if not stems:
+            self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
+            return
+        peaks = compute_peaks(
+            stems=stems,
+            muted=self._player.muted_stems,
+            soloed=self._player.soloed_stems,
+            volumes=self._player.volumes,
+            num_bins=2000,
+        )
+        self._waveform.set_peaks(peaks)
+        self._waveform.set_total_seconds(self._player.total_seconds)
+
+    def _update_waveform_loop_markers(self) -> None:
+        """Update loop marker positions on the waveform widget."""
+        total = self._player.total_seconds
+        a = self._player.loop_a
+        b = self._player.loop_b
+        if total > 0:
+            a_ratio = a / total if a is not None else None
+            b_ratio = b / total if b is not None else None
+        else:
+            a_ratio = None
+            b_ratio = None
+        self._waveform.set_loop_markers(a_ratio, b_ratio)
 
     # -- A-B loop slots --
 
@@ -255,11 +288,13 @@ class PlayerControls(QWidget):
         """Set loop A to the current playback position."""
         self._player.set_loop_a(self._player.current_seconds)
         self._update_loop_label()
+        self._update_waveform_loop_markers()
 
     def _on_set_loop_b(self) -> None:
         """Set loop B to the current playback position."""
         self._player.set_loop_b(self._player.current_seconds)
         self._update_loop_label()
+        self._update_waveform_loop_markers()
 
     def _on_loop_toggled(self, checked: bool) -> None:
         """Enable or disable A-B looping."""
@@ -270,6 +305,7 @@ class PlayerControls(QWidget):
         self._player.clear_loop()
         self._loop_toggle_btn.setChecked(False)
         self._update_loop_label()
+        self._update_waveform_loop_markers()
 
     def toggle_looping(self) -> None:
         """Toggle the loop button state (e.g. from keyboard shortcut)."""

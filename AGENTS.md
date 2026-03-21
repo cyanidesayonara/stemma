@@ -45,13 +45,15 @@ stemma/
     exporter.py        # Export stems as WAV/MP3
     downloader.py      # YouTube audio download (yt-dlp)
     post_processing.py # Wiener filter + soft gate
+    waveform.py        # Waveform peak computation (numpy)
     ui/
       main_window.py
       player_controls.py
+      waveform_widget.py # Waveform display (QPainter)
       library_panel.py
       import_dialog.py
       styles.py        # Dark theme
-  tests/               # pytest test suite (154 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (170 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -60,6 +62,8 @@ stemma/
     test_downloader.py
     test_exporter.py
     test_post_processing.py
+    test_waveform.py
+    test_waveform_widget.py
     test_import_dialog.py
     test_integration.py
   data/                # Runtime data (gitignored)
@@ -106,14 +110,15 @@ All core functionality implemented and tested:
 ### Phase 3 (Advanced) -- In Progress
 - [x] A-B loop repeat (#44, PR #48)
 - [x] YouTube URL import (#41, PR #49)
-- Remaining tickets: real-time streaming (#13), tempo/key (#42), waveform (#43)
+- [x] Waveform visualization (#43)
+- Remaining tickets: real-time streaming (#13), tempo/key (#42)
 
 ### Phase 4 (Sandbox) -- Not Started
 Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 154 fast tests (~10s)
+pytest                                    # 170 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
