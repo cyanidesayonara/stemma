@@ -40,6 +40,19 @@ class TestURLValidation:
     def test_other_website(self):
         assert not is_supported_url("https://www.google.com")
 
+    def test_embedded_url_in_text(self):
+        """Text containing a YouTube URL but not starting with one."""
+        assert not is_supported_url("DO NOT VISIT youtube.com/watch?v=malware")
+
+    def test_fake_domain_prefix(self):
+        """Domain that ends with youtube.com but isn't."""
+        assert not is_supported_url("https://fakeyoutube.com/watch?v=abc")
+
+    def test_youtube_playlist_url(self):
+        assert is_supported_url(
+            "https://www.youtube.com/watch?v=abc123&list=PLxyz"
+        )
+
 
 class TestExtractMetadata:
     """Test metadata extraction from URLs."""
@@ -93,6 +106,17 @@ class TestExtractMetadata:
 
         with pytest.raises(DownloadError, match="network error"):
             extract_metadata("https://youtu.be/abc123")
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_extract_info_returns_none(self, mock_ydl_class):
+        """Private/deleted videos can cause extract_info to return None."""
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = None
+
+        with pytest.raises(DownloadError):
+            extract_metadata("https://youtu.be/private123")
 
 
 class TestDownloadAudio:
@@ -159,6 +183,7 @@ class TestDownloadAudio:
         mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
         mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
 
+        # yt-dlp creates the file at stem + .mp3 (from postprocessor)
         def fake_download(urls):
             with open(output_path, "wb") as f:
                 f.write(b"fake")
@@ -167,10 +192,12 @@ class TestDownloadAudio:
 
         download_audio("https://youtu.be/dQw4w9WgXcQ", output_path)
 
-        # Check the options passed to YoutubeDL constructor
+        # outtmpl should be the stem WITHOUT extension, because
+        # FFmpegExtractAudio appends the codec extension itself.
         opts = mock_ydl_class.call_args[0][0]
         assert opts["format"] == "bestaudio/best"
-        assert opts["outtmpl"] == output_path
+        stem = os.path.splitext(output_path)[0]
+        assert opts["outtmpl"] == stem
 
     @patch("src.downloader.yt_dlp.YoutubeDL")
     def test_progress_callback_invoked(self, mock_ydl_class, tmp_path):
