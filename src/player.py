@@ -196,8 +196,8 @@ class MultiTrackPlayer(QObject):
 
     @property
     def stems(self) -> dict[str, "np.ndarray"]:
-        """Return the loaded stem audio arrays (read-only reference)."""
-        return self._stems
+        """Return a shallow copy of the stems dict. Arrays are shared, not copied."""
+        return dict(self._stems)
 
     @property
     def sample_rate(self) -> int:
