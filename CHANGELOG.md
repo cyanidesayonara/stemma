@@ -4,6 +4,33 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-21 -- Phase 3: A-B Loop and YouTube Import
+
+### Done
+- A-B loop repeat (#44, PR #48)
+  - Loop point set/clear API on player with callback wrap-around
+  - UI controls: Set A, Set B, Loop toggle, Clear buttons
+  - Keyboard shortcuts: A/B/L keys
+  - Zero-width loop guard to prevent callback deadlock
+  - 9 new tests
+- YouTube URL import (#41, PR #49)
+  - yt-dlp downloader module: URL validation, metadata extraction, audio download
+  - Import dialog reworked: URL input with Fetch button, dual-mode import
+  - Background workers for metadata fetch and audio download
+  - ffmpeg availability check with user-facing error
+  - Worker lifecycle hardening: signal rename to avoid QThread.finished shadowing,
+    safe disconnect helper, proper wait/cleanup on dialog close
+  - Output file existence verification after download
+  - noplaylist option to prevent accidental playlist downloads
+  - Error handling in local import path (disk full, missing file, permissions)
+  - 33 new tests (26 downloader + 7 import dialog)
+
+### Metrics
+- 154 fast tests, 5 slow ONNX tests, 1 hardware playback test (159 total)
+- Phase 3: 2 of 5 tickets complete
+
+---
+
 ## 2026-03-21 -- Phase 2 Completion and Hardening
 
 ### Done
