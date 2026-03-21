@@ -122,10 +122,10 @@ class StemExporter:
         volumes: dict[str, float] | None = None,
         mp3_bitrate: int = 320,
     ) -> None:
-        """Export a mix of selected stems to a WAV file.
+        """Export a mix of selected stems to a WAV or MP3 file.
 
         Args:
-            output_path: Destination file path.
+            output_path: Destination file path (.wav or .mp3).
             stem_names: Stems to include. Defaults to all available stems.
             muted_stems: Stems to exclude from the mix. Applied after
                 *stem_names* filtering.
