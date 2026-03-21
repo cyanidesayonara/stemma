@@ -114,6 +114,7 @@ class MultiTrackPlayer(QObject):
 
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
+        self._output_device: int | None = None
 
         # UI updater.
         self._timer = QTimer(self)
@@ -187,6 +188,13 @@ class MultiTrackPlayer(QObject):
 
         self.position_changed.emit(0.0)
 
+    def set_output_device(self, device: int | None) -> None:
+        """Select the PortAudio output device index, or None for the system default."""
+        self._output_device = device
+        if self._is_playing:
+            self.pause()
+            self.play()
+
     def play(self) -> None:
         """Start or resume playback."""
         if not self._stems or self._is_playing:
@@ -197,11 +205,14 @@ class MultiTrackPlayer(QObject):
 
         try:
             if self._stream is None:
-                self._stream = sd.OutputStream(
-                    samplerate=self._sample_rate,
-                    channels=2,
-                    callback=self._audio_callback,
-                )
+                kwargs: dict = {
+                    "samplerate": self._sample_rate,
+                    "channels": 2,
+                    "callback": self._audio_callback,
+                }
+                if self._output_device is not None:
+                    kwargs["device"] = self._output_device
+                self._stream = sd.OutputStream(**kwargs)
             self._stream.start()
         except sd.PortAudioError:
             # No audio device or device error — clean up and bail.
