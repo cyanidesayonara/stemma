@@ -16,12 +16,19 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
 
-from src.downloader import DownloadError, download_audio, extract_metadata, is_supported_url
+from src.downloader import (
+    DownloadError,
+    check_ffmpeg,
+    download_audio,
+    extract_metadata,
+    is_supported_url,
+)
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.separator import SeparatorWorker
@@ -258,6 +265,16 @@ class ImportDialog(QDialog):
 
     def _start_youtube_import(self, url: str) -> None:
         """Download audio from YouTube, then hand off to the separator."""
+        if not check_ffmpeg():
+            QMessageBox.critical(
+                self,
+                "ffmpeg not found",
+                "YouTube import requires ffmpeg.\n\n"
+                "Install ffmpeg and make sure it is on your PATH.",
+            )
+            self._button_box.setEnabled(True)
+            return
+
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
         self._status_label.setVisible(True)
