@@ -39,8 +39,9 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 | **Audio Playback** | `sounddevice` + `soundfile` | Low-latency multi-track mixing via NumPy |
 | **Audio Processing** | `numpy` | Efficient buffer manipulation |
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
+| **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
 | **Packaging** | PyInstaller | Single `.exe` (~150-250MB without models) |
-| **Future** | `yt-dlp`, `librosa`/`audiotsm` | YouTube import, tempo/pitch changes |
+| **Future** | `librosa`/`audiotsm` | Tempo/pitch changes |
 
 ### Why HTDemucs v4?
 
@@ -79,13 +80,14 @@ stemma/
 │   ├── player.py              # Multi-track audio player (sounddevice)
 │   ├── library.py             # Song library (JSON-based)
 │   ├── exporter.py            # Export stems as WAV/MP3
+│   ├── downloader.py          # YouTube audio download (yt-dlp)
 │   ├── post_processing.py     # Wiener filter + soft gate
 │   └── ui/
 │       ├── __init__.py
 │       ├── main_window.py     # Main window layout
 │       ├── player_controls.py # Transport + stem mute/solo + volume
 │       ├── library_panel.py   # Song list with remove
-│       ├── import_dialog.py   # Import songs dialog
+│       ├── import_dialog.py   # Import songs + YouTube URL dialog
 │       └── styles.py          # Dark theme stylesheet
 ├── tests/
 │   ├── conftest.py            # Shared fixtures
@@ -93,6 +95,7 @@ stemma/
 │   ├── test_model_manager.py  # 9 tests
 │   ├── test_player.py         # 24 tests
 │   ├── test_library.py        # 22 tests
+│   ├── test_downloader.py     # 23 tests
 │   ├── test_exporter.py       # 18 tests
 │   ├── test_post_processing.py # 17 tests
 │   └── test_integration.py    # 13 tests (5 slow, 1 hardware)
@@ -156,7 +159,14 @@ stemma/
 - **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export. Keyboard shortcuts. Window state persistence via QSettings.
 - **`player_controls.py`** — Transport (Play/Pause/Stop + seek slider + time display). A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray)
 - **`library_panel.py`** — Song list with selection and Remove button (with confirmation)
-- **`import_dialog.py`** — File browser, metadata fields, separation progress bar. Cancels worker on close.
+- **`import_dialog.py`** — File browser or YouTube URL input, metadata fields (auto-filled from YouTube), separation progress bar. ffmpeg availability check for YouTube import. Cancels workers on close.
+
+### `downloader.py` — YouTube Audio Download
+- URL validation for youtube.com, youtu.be, music.youtube.com
+- Metadata extraction (title, artist) via yt-dlp without downloading
+- Audio download as MP3 (bestaudio + FFmpegExtractAudio, 320kbps)
+- Requires ffmpeg on PATH for audio conversion
+- Progress callback support for UI integration
 - **`styles.py`** — Dark theme (Catppuccin Mocha-inspired), good contrast
 
 ---
@@ -187,7 +197,7 @@ stemma/
 
 ### Phase 3 — Advanced
 - [ ] Real-time streaming stem separation
-- [ ] YouTube URL import (yt-dlp)
+- [x] YouTube URL import (yt-dlp)
 - [ ] Tempo change (time-stretch)
 - [ ] Key transposition (pitch-shift)
 - [ ] Waveform visualization
