@@ -5,6 +5,8 @@ into RAM entirely and summed dynamically inside the C-level audio callback,
 allowing instant, click-free muting and soloing.
 """
 
+from typing import Any
+
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
@@ -205,7 +207,7 @@ class MultiTrackPlayer(QObject):
 
         try:
             if self._stream is None:
-                kwargs: dict = {
+                kwargs: dict[str, Any] = {
                     "samplerate": self._sample_rate,
                     "channels": 2,
                     "callback": self._audio_callback,

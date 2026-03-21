@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings, QSharedMemory
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from src.app_settings import read_output_device_index
+from src.app_settings import normalize_output_device_setting
 from src.data_paths import resolve_data_dir
 from src.library import SongLibrary
 from src.model_manager import ModelManager
@@ -51,7 +51,7 @@ def run() -> int:
     data_dir = resolve_data_dir(_ROOT_DIR, settings)
     library = SongLibrary(data_dir=data_dir)
     player = MultiTrackPlayer()
-    player.set_output_device(read_output_device_index(settings))
+    player.set_output_device(normalize_output_device_setting(settings))
     model_manager = ModelManager(data_dir=data_dir)
 
     window = MainWindow(library, player, model_manager)

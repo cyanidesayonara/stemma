@@ -7,7 +7,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 
 import os
 
-from PySide6.QtCore import QPointF, QSettings, QSize, Qt
+from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -32,10 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    normalize_output_device_setting,
     read_default_export_format,
     read_default_mp3_bitrate,
-    read_output_device_index,
 )
+from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
@@ -113,9 +114,17 @@ class MainWindow(QMainWindow):
         self._restore_state()
         self.setAcceptDrops(True)
 
+        QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
+
     # ------------------------------------------------------------------
     # UI Setup
     # ------------------------------------------------------------------
+
+    def _maybe_show_data_dir_reset_notice(self) -> None:
+        """Tell the user if startup fell back from an invalid custom data path."""
+        msg = consume_data_dir_reset_notice(self._settings)
+        if msg:
+            QMessageBox.information(self, "Data folder", msg)
 
     def _setup_ui(self) -> None:
         """Build the main window layout."""
@@ -239,7 +248,7 @@ class MainWindow(QMainWindow):
         dlg = PreferencesDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._player.set_output_device(
-                read_output_device_index(self._settings)
+                normalize_output_device_setting(self._settings)
             )
 
     def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
