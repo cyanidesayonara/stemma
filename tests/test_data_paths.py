@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from src.data_paths import (
+    consume_data_dir_reset_notice,
     legacy_repo_data_dir,
     platform_user_data_dir,
     resolve_data_dir,
@@ -113,6 +114,33 @@ class TestResolveDataDir:
         resolve_data_dir(str(app_root), settings_ini)
 
         assert not os.path.exists(os.path.join(str(fake_user), "note2.txt"))
+
+    def test_invalid_custom_path_is_file_falls_back(
+        self, tmp_path, settings_ini, monkeypatch
+    ):
+        fake_user = tmp_path / "userdata"
+        monkeypatch.setattr(
+            "src.data_paths.platform_user_data_dir", lambda: str(fake_user)
+        )
+        bad = tmp_path / "not_a_dir"
+        bad.write_text("x", encoding="utf-8")
+        settings_ini.setValue("paths/data_dir", str(bad))
+        app_root = tmp_path / "repo"
+        os.makedirs(app_root, exist_ok=True)
+
+        resolved = resolve_data_dir(str(app_root), settings_ini)
+
+        assert resolved == str(fake_user)
+        assert not str(settings_ini.value("paths/data_dir", "")).strip()
+        assert settings_ini.value(
+            "internal/data_dir_was_reset", False, type=bool
+        ) is True
+
+
+def test_consume_data_dir_reset_notice_once(settings_ini):
+    settings_ini.setValue("internal/data_dir_was_reset", True)
+    assert consume_data_dir_reset_notice(settings_ini)
+    assert consume_data_dir_reset_notice(settings_ini) is None
 
 
 def test_legacy_repo_data_dir():

@@ -4,6 +4,8 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from src.app_settings import (
+    normalize_output_device_setting,
+    parse_stored_output_device_index,
     read_default_export_format,
     read_default_import_6_stem,
     read_default_mp3_bitrate,
@@ -56,6 +58,28 @@ class TestReadOutputDeviceIndex:
         )
         settings_ini.setValue("audio/output_device", 7)
         assert read_output_device_index(settings_ini) == 7
+
+
+class TestParseVsNormalizeOutputDevice:
+    def test_parse_does_not_clear_stale_index(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1}),
+        )
+        settings_ini.setValue("audio/output_device", 99)
+        assert parse_stored_output_device_index(settings_ini) == 99
+        assert int(settings_ini.value("audio/output_device")) == 99
+
+    def test_normalize_matches_read_output_device_index(
+        self, settings_ini, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1, 2}),
+        )
+        settings_ini.setValue("audio/output_device", 2)
+        assert normalize_output_device_setting(settings_ini) == 2
+        assert read_output_device_index(settings_ini) == 2
 
 
 class TestReadDefaultMp3Bitrate:
