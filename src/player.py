@@ -313,7 +313,8 @@ class MultiTrackPlayer(QObject):
         # Determine the effective playback boundary.
         looping = (self._looping
                    and self._loop_a_frame is not None
-                   and self._loop_b_frame is not None)
+                   and self._loop_b_frame is not None
+                   and self._loop_b_frame > self._loop_a_frame)
 
         # Fill the output buffer, handling loop wraps as needed.
         buf_offset = 0
