@@ -1,5 +1,6 @@
 """QApplication setup for stemma."""
 
+import os
 import sys
 
 from PySide6.QtWidgets import QApplication
@@ -10,7 +11,7 @@ from src.player import MultiTrackPlayer
 from src.ui.main_window import MainWindow
 from src.ui.styles import DARK_STYLESHEET
 
-DATA_DIR = "data"
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 
 def run() -> int:

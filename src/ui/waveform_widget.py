@@ -36,7 +36,7 @@ class WaveformWidget(QWidget):
         self._loop_b_ratio: float | None = None
         self._total_seconds: float = 0.0
         self._seeking: bool = False
-        self._cached_size: tuple[int, int] = (0, 0)
+        self._cached_size: tuple[int, int] = (-1, -1)
         self._cached_rects: list[QRect] = []
 
         self.setFixedHeight(_WAVEFORM_HEIGHT)
