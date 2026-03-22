@@ -5,6 +5,7 @@ selected. Full implementation in ticket #10.
 """
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -97,6 +99,10 @@ class LibraryPanel(QWidget):
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
+        self._list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._list)
 
         self._remove_btn = QPushButton("Remove Selected")
@@ -132,6 +138,16 @@ class LibraryPanel(QWidget):
                 self._remove_btn.setEnabled(True)
         else:
             self._remove_btn.setEnabled(False)
+
+    def _on_context_menu(self, pos) -> None:
+        """Show a right-click context menu on the song list."""
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit...")
+        edit_action.triggered.connect(self._on_edit_song)
+        menu.exec(self._list.mapToGlobal(pos))
 
     def _on_edit_song(self) -> None:
         """Open the edit dialog for the currently selected song."""
