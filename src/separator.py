@@ -422,7 +422,7 @@ class SeparatorWorker(QThread):
             out_path = os.path.join(self.output_dir, f"{stem_name}.wav")
             # Transpose to (samples, channels) for soundfile.
             stem_audio = separated[i].T
-            sf.write(out_path, stem_audio, SAMPLE_RATE)
+            sf.write(out_path, stem_audio, SAMPLE_RATE, subtype="PCM_16")
             result_files[stem_name] = out_path
 
         return result_files
