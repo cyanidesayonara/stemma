@@ -31,8 +31,9 @@ from src.downloader import (
     extract_metadata,
     is_supported_url,
 )
-from src.library import SongLibrary
-from src.model_manager import ModelManager
+from src.import_messages import format_import_error
+from src.library import Song, SongLibrary
+from src.model_manager import ModelDownloader, ModelManager
 from src.separator import SeparatorWorker
 
 
@@ -119,6 +120,9 @@ class ImportDialog(QDialog):
         self._worker: SeparatorWorker | None = None
         self._download_worker: _DownloadWorker | None = None
         self._metadata_worker: _MetadataWorker | None = None
+        self._model_downloader: ModelDownloader | None = None
+        self._song_pending_model_id: str | None = None
+        self._pending_separation_is_6_stem: bool = False
         self._selected_path: str = ""
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
@@ -257,7 +261,9 @@ class ImportDialog(QDialog):
         self._fetch_btn.setEnabled(True)
 
     def _on_metadata_error(self, message: str) -> None:
-        self._status_label.setText(f"Metadata error: {message}")
+        self._status_label.setText(
+            f"Metadata error: {format_import_error(message)}"
+        )
         self._fetch_btn.setEnabled(True)
 
     # ------------------------------------------------------------------
@@ -359,11 +365,78 @@ class ImportDialog(QDialog):
         model_path = self._model_manager.model_path(is_6_stem=is_6_stem)
 
         if not os.path.isfile(model_path):
-            # Model not downloaded yet -- skip separation for now.
-            self._library.update_song(song.id, model_used="pending")
-            self.accept()
+            self._begin_model_download(song, is_6_stem)
             return
 
+        self._start_separation_worker(song, model_path, is_6_stem)
+
+    def _begin_model_download(self, song: Song, is_6_stem: bool) -> None:
+        """Download the ONNX model in the background, then run separation."""
+        self._song_pending_model_id = song.id
+        self._pending_separation_is_6_stem = is_6_stem
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setValue(0)
+        self._status_label.setVisible(True)
+        self._button_box.setEnabled(False)
+
+        self._model_downloader = self._model_manager.download_model(
+            is_6_stem=is_6_stem
+        )
+        self._model_downloader.progress.connect(self._on_progress)
+        self._model_downloader.finished.connect(
+            self._on_model_download_finished
+        )
+        self._model_downloader.error.connect(self._on_model_download_error)
+        self._model_downloader.start()
+
+    def _on_model_download_finished(self, _path: str) -> None:
+        """Model file is on disk; continue with stem separation."""
+        song_id = self._song_pending_model_id
+        is_6 = self._pending_separation_is_6_stem
+        self._song_pending_model_id = None
+        self._model_downloader = None
+
+        if song_id is None:
+            return
+        song = self._library.get_song(song_id)
+        if song is None:
+            return
+
+        model_path = self._model_manager.model_path(is_6_stem=is_6)
+        if not os.path.isfile(model_path):
+            try:
+                self._library.remove_song(song_id)
+            except KeyError:
+                pass
+            self._on_error("Model file missing after download.")
+            return
+
+        self._start_separation_worker(song, model_path, is_6)
+
+    def _on_model_download_error(self, message: str) -> None:
+        """Remove the library entry and show a readable download error."""
+        self._rollback_pending_model_song()
+        self._model_downloader = None
+        self._on_error(message)
+
+    def _rollback_pending_model_song(self) -> None:
+        """Drop the song created for an import that failed before separation."""
+        if self._song_pending_model_id is None:
+            return
+        sid = self._song_pending_model_id
+        self._song_pending_model_id = None
+        try:
+            self._library.remove_song(sid)
+        except KeyError:
+            pass
+
+    def _start_separation_worker(
+        self,
+        song: Song,
+        model_path: str,
+        is_6_stem: bool,
+    ) -> None:
+        """Run ONNX separation for a song that already has a model file."""
         self._progress_bar.setVisible(True)
         self._status_label.setVisible(True)
         self._button_box.setEnabled(False)
@@ -389,7 +462,7 @@ class ImportDialog(QDialog):
 
     def _on_error(self, message: str) -> None:
         self._status_label.setVisible(True)
-        self._status_label.setText(f"Error: {message}")
+        self._status_label.setText(f"Error: {format_import_error(message)}")
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._button_box.setEnabled(True)
@@ -415,6 +488,10 @@ class ImportDialog(QDialog):
             _safe_disconnect(self._download_worker.progress)
             _safe_disconnect(self._download_worker.completed)
             _safe_disconnect(self._download_worker.error)
+        if self._model_downloader is not None:
+            _safe_disconnect(self._model_downloader.progress)
+            _safe_disconnect(self._model_downloader.finished)
+            _safe_disconnect(self._model_downloader.error)
         if self._worker is not None:
             _safe_disconnect(self._worker.progress)
             _safe_disconnect(self._worker.finished)
@@ -437,6 +514,12 @@ class ImportDialog(QDialog):
                 self._download_worker.finished.connect(
                     self._download_worker.deleteLater
                 )
+        if self._model_downloader is not None:
+            if self._model_downloader.isRunning():
+                self._model_downloader.cancel()
+                self._model_downloader.wait(5000)
+            self._model_downloader = None
+        self._rollback_pending_model_song()
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(5000)
