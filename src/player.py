@@ -8,7 +8,43 @@ allowing instant, click-free muting and soloing.
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
-from PySide6.QtCore import QObject, Signal, QTimer
+import librosa
+from PySide6.QtCore import QObject, QThread, Signal, QTimer
+
+
+SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
+
+
+class SpeedWorker(QThread):
+    """Background thread for pitch-preserving time-stretch of all stems."""
+
+    completed = Signal(dict)  # {name: stretched_ndarray}
+    progress = Signal(int, int)  # (current_stem, total_stems)
+
+    def __init__(self, stems: dict[str, np.ndarray], speed: float,
+                 parent=None) -> None:
+        super().__init__(parent)
+        self._stems = stems
+        self._speed = speed
+
+    def run(self) -> None:
+        total = len(self._stems)
+        stretched = {}
+        for i, (name, data) in enumerate(self._stems.items()):
+            # librosa.effects.time_stretch works on mono; process each channel.
+            channels = []
+            for ch in range(data.shape[1]):
+                mono = data[:, ch].astype(np.float32)
+                stretched_ch = librosa.effects.time_stretch(
+                    mono, rate=self._speed
+                )
+                channels.append(stretched_ch)
+            # Recombine to stereo, matching shortest channel.
+            min_len = min(ch.shape[0] for ch in channels)
+            stereo = np.column_stack([ch[:min_len] for ch in channels])
+            stretched[name] = stereo.astype(np.float32)
+            self.progress.emit(i + 1, total)
+        self.completed.emit(stretched)
 
 
 class MultiTrackPlayer(QObject):
@@ -23,6 +59,7 @@ class MultiTrackPlayer(QObject):
     position_changed = Signal(float)
     state_changed = Signal(bool)
     play_finished = Signal()
+    speed_changed = Signal(float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -43,6 +80,11 @@ class MultiTrackPlayer(QObject):
         self._loop_a_frame: int | None = None
         self._loop_b_frame: int | None = None
         self._looping: bool = False
+
+        # Speed / time-stretch state.
+        self._playback_speed: float = 1.0
+        self._original_stems: dict[str, np.ndarray] = {}
+        self._speed_worker: SpeedWorker | None = None
 
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
@@ -84,12 +126,14 @@ class MultiTrackPlayer(QObject):
         """
         self.stop()
         self._stems.clear()
+        self._original_stems.clear()
         self._muted_stems.clear()
         self._soloed_stems.clear()
         self._volumes.clear()
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
+        self._playback_speed = 1.0
 
         max_frames = 0
         sample_rate = 0
@@ -112,6 +156,7 @@ class MultiTrackPlayer(QObject):
         self._sample_rate = sample_rate
         self._total_frames = max_frames
         self._current_frame = 0
+        self._original_stems = dict(self._stems)
 
         self.position_changed.emit(0.0)
 
@@ -286,6 +331,67 @@ class MultiTrackPlayer(QObject):
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
+
+    # ------------------------------------------------------------------
+    # Speed / Time-Stretch
+    # ------------------------------------------------------------------
+
+    @property
+    def speed(self) -> float:
+        """Return the current playback speed multiplier."""
+        return self._playback_speed
+
+    def set_speed(self, speed: float) -> None:
+        """Set the playback speed with pitch-preserving time-stretch.
+
+        Clamps *speed* to [0.5, 2.0]. Stretching runs in a background
+        thread; the ``speed_changed`` signal fires when the stretched
+        audio is ready.
+        """
+        speed = max(0.5, min(speed, 2.0))
+        self._playback_speed = speed
+
+        if not self._original_stems:
+            return
+
+        # Cancel any in-flight stretch.
+        if self._speed_worker is not None and self._speed_worker.isRunning():
+            self._speed_worker.wait(5000)
+
+        if speed == 1.0:
+            self._apply_stretched_stems(dict(self._original_stems), 1.0)
+            self.speed_changed.emit(speed)
+            return
+
+        self._speed_worker = SpeedWorker(
+            self._original_stems, speed, parent=self
+        )
+        self._speed_worker.completed.connect(
+            lambda stretched: self._on_speed_ready(stretched, speed)
+        )
+        self._speed_worker.start()
+
+    def _on_speed_ready(self, stretched: dict, speed: float) -> None:
+        """Swap in stretched stems and adjust frame indices."""
+        self._apply_stretched_stems(stretched, speed)
+        self.speed_changed.emit(speed)
+
+    def _apply_stretched_stems(self, stems: dict, speed: float) -> None:
+        """Replace current stems with *stems* and adjust frame indices."""
+        old_total = self._total_frames if self._total_frames > 0 else 1
+
+        self._stems = stems
+        self._total_frames = max(
+            (data.shape[0] for data in stems.values()), default=0
+        )
+
+        ratio = self._total_frames / old_total
+
+        self._current_frame = int(self._current_frame * ratio)
+        if self._loop_a_frame is not None:
+            self._loop_a_frame = int(self._loop_a_frame * ratio)
+        if self._loop_b_frame is not None:
+            self._loop_b_frame = int(self._loop_b_frame * ratio)
 
     # ------------------------------------------------------------------
     # Internal Callbacks
