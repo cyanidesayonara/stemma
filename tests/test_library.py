@@ -155,6 +155,25 @@ class TestSongLibraryCRUD:
         assert song.id  # Non-empty ID generated
         assert len(library.songs) == 1
 
+    def test_add_song_removes_partial_dir_when_copy_fails(
+        self, library, fake_audio, monkeypatch
+    ):
+        songs_dir = library._songs_dir
+        assert len(os.listdir(songs_dir)) == 0
+
+        def fail_copy(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("src.library.shutil.copy2", fail_copy)
+        with pytest.raises(OSError, match="disk full"):
+            library.add_song(
+                title="T",
+                artist="A",
+                original_path=fake_audio,
+            )
+        assert len(library.songs) == 0
+        assert len(os.listdir(songs_dir)) == 0
+
     def test_add_song_copies_audio_into_song_dir(self, library, library_dir, fake_audio):
         song = library.add_song(
             title="My Song",

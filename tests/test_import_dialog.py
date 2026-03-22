@@ -15,6 +15,7 @@ import pytest
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 
+from src.model_manager import ModelDownloader
 from src.ui.import_dialog import (
     ImportDialog,
     _MetadataWorker,
@@ -69,6 +70,10 @@ class TestSignalNaming:
             "_DownloadWorker.finished shadows QThread.finished; "
             "rename to 'completed' or 'result_ready'"
         )
+
+    def test_model_downloader_does_not_shadow_finished(self):
+        """ModelDownloader must keep QThread.finished for thread lifecycle."""
+        assert ModelDownloader.finished is QThread.finished
 
 
 # -----------------------------------------------------------------------

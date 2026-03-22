@@ -1,6 +1,7 @@
 """Tests for the MultiTrackPlayer."""
 
 import os
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -79,6 +80,23 @@ class TestMultiTrackPlayerPositions:
         
         player.seek(-1.0) # Before start
         assert player._current_frame == 0
+
+
+class TestPlaybackFailedSignal:
+
+    def test_play_emits_playback_failed_on_portaudio_error(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        messages: list[str] = []
+        player.playback_failed.connect(lambda m: messages.append(m))
+        with patch(
+            "src.player.sd.OutputStream",
+            side_effect=sd.PortAudioError("no device"),
+        ):
+            player.play()
+        assert not player.is_playing
+        assert len(messages) == 1
+        assert "Preferences" in messages[0]
 
 
 class TestMultiTrackPlayerMixing:
