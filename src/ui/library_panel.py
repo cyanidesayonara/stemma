@@ -4,19 +4,65 @@ Displays the song library as a list and emits a signal when a song is
 selected. Full implementation in ticket #10.
 """
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from src.library import SongLibrary
+from src.library import Song, SongLibrary
+
+
+class EditSongDialog(QDialog):
+    """Small dialog for editing a song's title and artist."""
+
+    def __init__(self, song: Song, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit Song")
+        self.setMinimumWidth(400)
+        self._song = song
+
+        layout = QVBoxLayout(self)
+
+        title_row = QHBoxLayout()
+        title_row.addWidget(QLabel("Title:"))
+        self._title_edit = QLineEdit(song.title)
+        title_row.addWidget(self._title_edit)
+        layout.addLayout(title_row)
+
+        artist_row = QHBoxLayout()
+        artist_row.addWidget(QLabel("Artist:"))
+        self._artist_edit = QLineEdit(song.artist)
+        artist_row.addWidget(self._artist_edit)
+        layout.addLayout(artist_row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @property
+    def title(self) -> str:
+        """Return the edited title, falling back to the original."""
+        return self._title_edit.text().strip() or self._song.title
+
+    @property
+    def artist(self) -> str:
+        """Return the edited artist, falling back to the original."""
+        return self._artist_edit.text().strip() or self._song.artist
 
 
 class LibraryPanel(QWidget):
@@ -51,6 +97,11 @@ class LibraryPanel(QWidget):
 
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_item_changed)
+        self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
+        self._list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._list)
 
         self._remove_btn = QPushButton("Remove Selected")
@@ -86,6 +137,34 @@ class LibraryPanel(QWidget):
                 self._remove_btn.setEnabled(True)
         else:
             self._remove_btn.setEnabled(False)
+
+    def _on_context_menu(self, pos) -> None:
+        """Show a right-click context menu on the song list."""
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        # Select the right-clicked item so _on_edit_song targets it,
+        # not whatever was previously selected.
+        self._list.setCurrentItem(item)
+        menu = QMenu(self)
+        menu.addAction("Edit...").triggered.connect(self._on_edit_song)
+        menu.exec(self._list.mapToGlobal(pos))
+
+    def _on_edit_song(self) -> None:
+        """Open the edit dialog for the currently selected song."""
+        current = self._list.currentItem()
+        if current is None:
+            return
+        song_id = current.data(256)
+        if not song_id:
+            return
+        song = self._library.get_song(song_id)
+        if song is None:
+            return
+        dlg = EditSongDialog(song, parent=self)
+        if dlg.exec():
+            self._library.update_song(song_id, title=dlg.title, artist=dlg.artist)
+            self.refresh()
 
     def _on_remove_clicked(self) -> None:
         current = self._list.currentItem()
