@@ -73,6 +73,10 @@ class LibraryPanel(QWidget):
         for i in range(self._list.count()):
             item = self._list.item(i)
             item.setHidden(query not in item.text().lower())
+        # Disable Remove if the current selection is hidden or gone.
+        current = self._list.currentItem()
+        if current is None or current.isHidden():
+            self._remove_btn.setEnabled(False)
 
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
