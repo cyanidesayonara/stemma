@@ -5,7 +5,6 @@ selected. Full implementation in ticket #10.
 """
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -144,9 +143,11 @@ class LibraryPanel(QWidget):
         item = self._list.itemAt(pos)
         if item is None:
             return
+        # Select the right-clicked item so _on_edit_song targets it,
+        # not whatever was previously selected.
+        self._list.setCurrentItem(item)
         menu = QMenu(self)
-        edit_action = menu.addAction("Edit...")
-        edit_action.triggered.connect(self._on_edit_song)
+        menu.addAction("Edit...").triggered.connect(self._on_edit_song)
         menu.exec(self._list.mapToGlobal(pos))
 
     def _on_edit_song(self) -> None:
