@@ -36,7 +36,7 @@ class WaveformWidget(QWidget):
         self._loop_b_ratio: float | None = None
         self._total_seconds: float = 0.0
         self._seeking: bool = False
-        self._cached_width: int = 0
+        self._cached_size: tuple[int, int] = (0, 0)
         self._cached_rects: list[QRect] = []
 
         self.setFixedHeight(_WAVEFORM_HEIGHT)
@@ -50,7 +50,7 @@ class WaveformWidget(QWidget):
         """Set the pre-computed peak array and trigger repaint."""
         self._peaks = peaks
         self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
-        self._cached_width = 0  # Invalidate rect cache
+        self._cached_size = (0, 0)  # Invalidate rect cache
         self.update()
 
     def set_position(self, ratio: float) -> None:
@@ -99,10 +99,10 @@ class WaveformWidget(QWidget):
         if w <= 0 or self._max_peak <= 0:
             return
 
-        # Rebuild rect cache only when width or peaks change.
-        if self._cached_width != w:
+        # Rebuild rect cache only when size or peaks change.
+        if self._cached_size != (w, h):
             self._cached_rects = self._build_waveform_rects(w, h)
-            self._cached_width = w
+            self._cached_size = (w, h)
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(_WAVEFORM_COLOR)
@@ -124,7 +124,7 @@ class WaveformWidget(QWidget):
         visible_heights = bar_heights[mask]
 
         tops = (center_y - visible_heights).astype(int)
-        heights = ((visible_heights * 2)).astype(int)
+        heights = (visible_heights * 2).astype(int)
 
         return [
             QRect(int(visible_xs[i]), int(tops[i]), 1, int(heights[i]))
