@@ -10,6 +10,7 @@ from src.downloader import (
     extract_metadata,
     download_audio,
     check_ffmpeg,
+    _get_ffmpeg_exe,
     DownloadError,
 )
 
@@ -123,12 +124,24 @@ class TestExtractMetadata:
 class TestCheckFFmpeg:
     """Test ffmpeg availability check."""
 
-    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
-    def test_ffmpeg_available(self, mock_which):
+    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+           return_value="/bundled/ffmpeg")
+    def test_available_via_imageio(self, mock_get):
+        """imageio-ffmpeg bundled binary satisfies the check."""
         assert check_ffmpeg() is True
 
-    @patch("shutil.which", return_value=None)
-    def test_ffmpeg_missing(self, mock_which):
+    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+           side_effect=RuntimeError("no binary"))
+    @patch("src.downloader.shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_available_via_path_fallback(self, mock_which, mock_get):
+        """Falls back to PATH when imageio-ffmpeg raises."""
+        assert check_ffmpeg() is True
+
+    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+           side_effect=RuntimeError("no binary"))
+    @patch("src.downloader.shutil.which", return_value=None)
+    def test_missing_when_both_unavailable(self, mock_which, mock_get):
+        """Returns False only when neither source has ffmpeg."""
         assert check_ffmpeg() is False
 
 
@@ -211,6 +224,29 @@ class TestDownloadAudio:
         assert opts["format"] == "bestaudio/best"
         stem = os.path.splitext(output_path)[0]
         assert opts["outtmpl"] == stem
+
+    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+           return_value="/bundled/ffmpeg")
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_ffmpeg_location_passed_to_ytdlp(self, mock_ydl_class, mock_get,
+                                              tmp_path):
+        """download_audio passes ffmpeg_location so yt-dlp finds ffmpeg."""
+        output_path = str(tmp_path / "audio.mp3")
+
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+
+        def fake_download(urls):
+            with open(output_path, "wb") as f:
+                f.write(b"fake")
+
+        mock_ydl.download.side_effect = fake_download
+
+        download_audio("https://youtu.be/dQw4w9WgXcQ", output_path)
+
+        opts = mock_ydl_class.call_args[0][0]
+        assert opts["ffmpeg_location"] == "/bundled/ffmpeg"
 
     @patch("src.downloader.yt_dlp.YoutubeDL")
     def test_progress_callback_invoked(self, mock_ydl_class, tmp_path):
