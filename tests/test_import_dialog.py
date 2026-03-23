@@ -15,6 +15,7 @@ import pytest
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 
+from src.model_manager import ModelDownloader
 from src.ui.import_dialog import (
     ImportDialog,
     _MetadataWorker,
@@ -69,6 +70,10 @@ class TestSignalNaming:
             "_DownloadWorker.finished shadows QThread.finished; "
             "rename to 'completed' or 'result_ready'"
         )
+
+    def test_model_downloader_does_not_shadow_finished(self):
+        """ModelDownloader must keep QThread.finished for thread lifecycle."""
+        assert ModelDownloader.finished is QThread.finished
 
 
 # -----------------------------------------------------------------------
@@ -138,6 +143,29 @@ class TestRefetchWaitsForPrevious:
 # Bug #6: _start_local_import must handle exceptions
 # -----------------------------------------------------------------------
 
+class TestModelDownloadWhenMissing:
+    """Missing ONNX file should trigger ModelDownloader, not silent accept."""
+
+    def test_starts_model_download_when_onnx_missing(self, dialog, tmp_path):
+        dummy = tmp_path / "track.mp3"
+        dummy.write_bytes(b"\x00\x00")
+
+        song = MagicMock()
+        song.id = "songabc"
+        song.original_path = str(dummy)
+        song.stems_path = str(tmp_path / "stems")
+        dialog._library.add_song.return_value = song
+        dialog._library.get_song.return_value = song
+
+        md = MagicMock()
+        dialog._model_manager.download_model.return_value = md
+
+        dialog._start_local_import(str(dummy))
+
+        dialog._model_manager.download_model.assert_called_once()
+        md.start.assert_called_once()
+
+
 class TestLocalImportErrorHandling:
     """_start_local_import must catch exceptions and call _on_error."""
 
@@ -154,7 +182,9 @@ class TestLocalImportErrorHandling:
 
         # The dialog should have recovered: error shown, buttons re-enabled.
         assert dialog._button_box.isEnabled()
-        assert "Error" in dialog._status_label.text() or "disk full" in dialog._status_label.text()
+        text = dialog._status_label.text()
+        assert "Error" in text
+        assert "space" in text.lower() or "disk" in text.lower()
 
 
 # -----------------------------------------------------------------------
