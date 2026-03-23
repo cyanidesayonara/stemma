@@ -30,12 +30,14 @@ class ModelDownloader(QThread):
 
     Signals:
         progress(int, str): Download percentage (0-100) and status message.
-        finished(str): Absolute path to the downloaded model file.
+        download_complete(str): Absolute path to the downloaded model file.
         error(str): Error description if download fails.
+
+    ``download_complete`` is named to avoid shadowing ``QThread.finished``.
     """
 
     progress = Signal(int, str)
-    finished = Signal(str)
+    download_complete = Signal(str)
     error = Signal(str)
 
     def __init__(self, model_name: str, models_dir: str) -> None:
@@ -69,7 +71,7 @@ class ModelDownloader(QThread):
 
         if os.path.exists(dest_path):
             self.progress.emit(100, f"{file_name} already cached.")
-            self.finished.emit(dest_path)
+            self.download_complete.emit(dest_path)
             return
 
         self.progress.emit(0, f"Downloading {file_name}...")
@@ -88,7 +90,7 @@ class ModelDownloader(QThread):
         urllib.request.urlretrieve(url, dest_path, reporthook=_report_hook)
 
         self.progress.emit(100, "Download complete.")
-        self.finished.emit(dest_path)
+        self.download_complete.emit(dest_path)
 
 
 class ModelManager(QObject):
@@ -99,7 +101,7 @@ class ModelManager(QObject):
         if not manager.is_model_downloaded(is_6_stem=False):
             downloader = manager.download_model(is_6_stem=False)
             downloader.progress.connect(on_progress)
-            downloader.finished.connect(on_done)
+            downloader.download_complete.connect(on_done)
             downloader.start()
     """
 

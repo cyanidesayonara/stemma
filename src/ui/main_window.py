@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from src.app_settings import (
     normalize_output_device_setting,
+    output_device_indices_with_output,
     read_default_export_format,
     read_default_mp3_bitrate,
 )
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
+        QTimer.singleShot(0, self._maybe_warn_no_audio_output)
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -125,6 +127,23 @@ class MainWindow(QMainWindow):
         msg = consume_data_dir_reset_notice(self._settings)
         if msg:
             QMessageBox.information(self, "Data folder", msg)
+
+    def _maybe_warn_no_audio_output(self) -> None:
+        """Warn once at startup if PortAudio reports no output devices."""
+        valid = output_device_indices_with_output()
+        if valid is not None and len(valid) == 0:
+            QMessageBox.warning(
+                self,
+                "Audio output",
+                "No audio output devices were found. Playback will not work "
+                "until you connect speakers or headphones, or install an audio "
+                "driver.\n\n"
+                "You can still import and separate songs.",
+            )
+
+    def _on_playback_failed(self, message: str) -> None:
+        """Show a dialog when the player cannot open an output stream."""
+        QMessageBox.warning(self, "Playback", message)
 
     def _setup_ui(self) -> None:
         """Build the main window layout."""
@@ -347,6 +366,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._player.playback_failed.connect(self._on_playback_failed)
 
     # ------------------------------------------------------------------
     # Slots
