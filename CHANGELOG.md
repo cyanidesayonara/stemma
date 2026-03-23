@@ -4,6 +4,23 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-24 -- Error handling, model download UX, playback warnings (#73, PR #82)
+
+### Done
+- Import when ONNX is missing: `ModelDownloader` runs inside the import dialog with progress and status; separation starts when the file exists.
+- `format_import_error()` in `import_messages.py` for disk full, permission, timeout, network, SSL, HTTP/404, cancellation, and long message truncation.
+- Failed import (including model download, separation, and `add_song` errors) removes the new library row; **Retry import** re-runs the flow.
+- Large source files (100 MiB and up): confirmation before import (local path and YouTube temp file after download).
+- `SongLibrary.add_song`: on `OSError` during copy or JSON save, removes partial song directory and re-raises.
+- `MultiTrackPlayer.playback_failed` when `PortAudioError` on play; main window shows a **Playback** dialog. Startup warning if PortAudio reports no output devices.
+- `ModelDownloader` success signal renamed to **`download_complete(str)`** so `QThread.finished` remains available for thread cleanup (`deleteLater` on cancel).
+- Tests: `test_import_messages.py`, extended import dialog and library tests, `ModelDownloader` signal naming, `playback_failed` on PortAudio error.
+
+### Metrics
+- 286 fast tests, 5 slow ONNX tests, 1 hardware playback test (292 total)
+
+---
+
 ## 2026-03-22 -- v1.0: Library Search, Metadata Editing, and Playback Speed
 
 ### Done

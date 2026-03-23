@@ -41,7 +41,7 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
 | **Packaging** | PyInstaller | Single `.exe` (~150-250MB without models) |
-| **Future** | `librosa`/`audiotsm` | Tempo/pitch changes |
+| **Future** | `librosa` / other | Key transposition (pitch-shift); tempo stretch is implemented via librosa |
 
 ### Why HTDemucs v4?
 
@@ -75,6 +75,9 @@ stemma/
 ├── src/
 │   ├── __init__.py
 │   ├── app.py                 # QApplication setup
+│   ├── app_settings.py        # Typed QSettings (audio device, import/export defaults)
+│   ├── data_paths.py        # Per-user data directory resolution
+│   ├── import_messages.py   # User-facing text for import/download failures
 │   ├── separator.py           # ONNX Runtime stem separation
 │   ├── model_manager.py       # Download/cache ONNX models on first run
 │   ├── player.py              # Multi-track audio player (sounddevice)
@@ -85,12 +88,13 @@ stemma/
 │   ├── waveform.py            # Waveform peak computation (numpy)
 │   └── ui/
 │       ├── __init__.py
-│       ├── main_window.py     # Main window layout
+│       ├── main_window.py     # Main window layout, menus, drag-and-drop import
 │       ├── player_controls.py # Transport + waveform + stem mixer
 │       ├── waveform_widget.py # Waveform display (QPainter)
 │       ├── library_panel.py   # Song list with remove
-│       ├── import_dialog.py   # Import songs + YouTube URL dialog
-│       └── styles.py          # Dark theme stylesheet
+│       ├── import_dialog.py   # Import songs + YouTube URL + model download
+│       ├── preferences_dialog.py  # Data dir, audio device, defaults
+│       └── styles.py          # Dark / light themes
 ├── tests/
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_separator.py      # 22 tests
@@ -102,8 +106,12 @@ stemma/
 │   ├── test_post_processing.py # 17 tests
 │   ├── test_waveform.py       # 9 tests
 │   ├── test_waveform_widget.py # 7 tests
-│   ├── test_import_dialog.py  # 7 tests
-│   └── test_integration.py    # 13 tests (5 slow, 1 hardware)
+│   ├── test_import_dialog.py
+│   ├── test_import_messages.py
+│   ├── test_data_paths.py
+│   ├── test_app_settings.py
+│   ├── test_theme.py
+│   └── test_integration.py    # includes slow + hardware markers
 └── data/                      # Created at runtime
     ├── library.json
     ├── models/                # Downloaded ONNX models cached here
@@ -129,10 +137,13 @@ stemma/
 - Supports both `htdemucs` (4-stem) and `htdemucs_6s` (6-stem)
 
 ### `model_manager.py` — Model Download & Cache
-- Checks if ONNX model files exist in `data/models/`
-- Downloads from HuggingFace on first run (~80-300MB per model)
-- Shows download progress in UI
+- Checks if ONNX model files exist under the app data directory (`models/`)
+- `ModelDownloader` (`QThread`): downloads from HuggingFace on first run (~80-300MB per model)
+- Signals: `progress`, **`download_complete(str)`** (model path; not named `finished`, to avoid shadowing `QThread.finished`), `error`
 - Manages both 4-stem and 6-stem model files
+
+### `import_messages.py` — Import Error Text
+- `format_import_error(message)` maps raw exceptions to short, readable strings (disk full, permission, network, SSL, HTTP/404, timeout, cancel, truncation)
 
 ### `player.py` — Multi-Track Audio Player
 - Loads stem WAVs as NumPy arrays
@@ -141,11 +152,12 @@ stemma/
 - Per-stem volume control (0.0-2.0)
 - A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`
 - Tracks playback position for UI sync
-- PortAudioError handling with stream cleanup
+- PortAudioError on open/start: stream cleanup and **`playback_failed`** signal (user-facing message for UI dialogs)
 
 ### `library.py` — Song Library
 - JSON song index: `{id, title, artist, stems_path, model_used, date_added}`
 - CRUD operations on the song list
+- `add_song`: on `OSError` during file copy or index save, removes the partial per-song directory and does not leave a half-added entry
 - Atomic writes via `os.replace()` to prevent corruption
 - Graceful recovery from corrupted JSON
 
@@ -166,19 +178,20 @@ stemma/
 - Respects mute/solo state (same logic as audio callback)
 
 ### UI Modules
-- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File > Import / Export. Keyboard shortcuts. Window state persistence via QSettings.
-- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform display with click-to-seek, playback cursor, and A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray). Waveform recomputes on mute/solo/volume changes.
+- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File / Edit (Preferences) / Help. Keyboard shortcuts. Window state persistence via QSettings. Drag-and-drop audio import. Connects **`playback_failed`** and startup warning when no audio output devices exist.
+- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform display with click-to-seek, playback cursor, and A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray). Waveform recomputes on mute/solo/volume changes. Playback speed presets.
 - **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
-- **`library_panel.py`** — Song list with selection and Remove button (with confirmation)
-- **`import_dialog.py`** — File browser or YouTube URL input, metadata fields (auto-filled from YouTube), separation progress bar. ffmpeg availability check for YouTube import. Cancels workers on close.
+- **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
+- **`import_dialog.py`** — File browser or YouTube URL, metadata fields, model variant (4/6 stem). If ONNX is missing, downloads model with progress; on any failure before successful import completion, removes the new library row. Large file (100 MiB+) confirmation. **Retry import** after errors. Workers cancelled and rolled back on dialog reject.
+- **`preferences_dialog.py`** — Data directory, output device, default import model, export format and MP3 bitrate
 
 ### `downloader.py` — YouTube Audio Download
 - URL validation for youtube.com, youtu.be, music.youtube.com
 - Metadata extraction (title, artist) via yt-dlp without downloading
 - Audio download as MP3 (bestaudio + FFmpegExtractAudio, 320kbps)
-- Requires ffmpeg on PATH for audio conversion
+- Prefers bundled ffmpeg via imageio-ffmpeg when available; falls back to ffmpeg on PATH
 - Progress callback support for UI integration
-- **`styles.py`** — Dark theme (Catppuccin Mocha-inspired), good contrast
+- **`styles.py`** — Dark and light themes (Catppuccin-inspired), good contrast
 
 ---
 
@@ -209,10 +222,11 @@ stemma/
 ### Phase 3 — Advanced
 - [ ] Real-time streaming stem separation
 - [x] YouTube URL import (yt-dlp)
-- [ ] Tempo change (time-stretch)
+- [x] Tempo change (time-stretch) in player via librosa
 - [ ] Key transposition (pitch-shift)
 - [x] Waveform visualization
 - [x] A-B loop repeat
+- [x] Error handling: model download in import, friendly messages, library rollback, playback / no-device warnings (#73)
 
 ### Phase 4 — Sandbox
 - [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
