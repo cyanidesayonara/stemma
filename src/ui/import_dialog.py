@@ -8,7 +8,7 @@ import os
 import shutil
 import tempfile
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from src.app_settings import read_default_import_6_stem
 from src.downloader import (
     DownloadError,
     check_ffmpeg,
@@ -122,6 +123,9 @@ class ImportDialog(QDialog):
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
         self._setup_ui()
+
+        if read_default_import_6_stem(QSettings("stemma", "stemma")):
+            self._model_combo.setCurrentIndex(1)
 
         if file_path:
             self._selected_path = file_path
