@@ -82,12 +82,15 @@ class MultiTrackPlayer(QObject):
         position_changed(float): Current playback position in seconds.
         state_changed(bool): Emitted when playback starts or stops.
         play_finished(): Emitted when the end of the track is reached.
+        playback_failed(str): Emitted when opening the output device fails
+            (e.g. no device available). *str* is a short user-facing message.
     """
 
     position_changed = Signal(float)
     state_changed = Signal(bool)
     play_finished = Signal()
     speed_changed = Signal(float)
+    playback_failed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -221,6 +224,11 @@ class MultiTrackPlayer(QObject):
             if self._stream is not None:
                 self._stream.close()
                 self._stream = None
+            self.playback_failed.emit(
+                "No audio output device is available, or playback failed to "
+                "start. Connect speakers or headphones, or choose another "
+                "device in Edit > Preferences."
+            )
             return
 
         self._is_playing = True
