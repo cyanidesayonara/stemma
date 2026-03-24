@@ -12,12 +12,13 @@ from src.app_settings import normalize_output_device_setting
 from src.data_paths import resolve_data_dir
 from src.library import SongLibrary
 from src.model_manager import ModelManager
+from src.paths import app_root
 from src.player import MultiTrackPlayer
 from src.ui.main_window import MainWindow
 from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
 
-_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT_DIR = app_root()
 _ICON_PATH = os.path.join(_ROOT_DIR, "assets", "icons", "stemma.ico")
 
 
