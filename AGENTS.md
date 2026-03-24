@@ -40,6 +40,7 @@ stemma/
     app.py             # QApplication setup
     app_settings.py    # Typed QSettings reads (audio, export, import defaults)
     data_paths.py      # Per-user data dir + legacy repo data/ migration
+    import_messages.py # User-facing import / download / separation error text
     separator.py       # ONNX stem separation engine
     model_manager.py   # Download/cache ONNX models
     player.py          # Multi-track audio player
@@ -56,7 +57,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~276 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~286 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -68,10 +69,14 @@ stemma/
     test_waveform.py
     test_waveform_widget.py
     test_import_dialog.py
+    test_import_messages.py
     test_drag_drop.py
     test_library_panel.py
     test_metadata_edit.py
     test_speed_control.py
+    test_data_paths.py
+    test_app_settings.py
+    test_theme.py
     test_integration.py
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
@@ -123,6 +128,7 @@ All core functionality implemented and tested:
 - [x] Waveform visualization (#43, PR #58)
 - [x] Drag-and-drop import (#51, PR #60)
 - [x] Bundled ffmpeg via imageio-ffmpeg (PR #60)
+- [x] Error handling and model download UX (#73, PR #82): missing-model download in import dialog, friendly errors, library rollback, large-file confirm, Retry, no-output-device warnings, `add_song` I/O cleanup
 - Remaining tickets: real-time streaming (#13), tempo/key (#42)
 
 ### v1.0 Release -- In Progress
@@ -139,7 +145,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # ~276 fast tests (~10s)
+pytest                                    # ~286 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
