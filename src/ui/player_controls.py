@@ -22,12 +22,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.paths import app_root
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.styles import DARK_COLORS, STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
-_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT_DIR = app_root()
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
 
