@@ -22,8 +22,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.version import __version__
-
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
@@ -31,6 +29,7 @@ from src.player import MultiTrackPlayer
 from src.ui.import_dialog import ImportDialog
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls
+from src.version import __version__
 
 # Try loading all components in this preferred visual layout order
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
@@ -175,10 +174,10 @@ class MainWindow(QMainWindow):
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
 
-        svg_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_main_dark.svg",
-        )
+        root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        )))
+        svg_path = os.path.join(root, "assets", "icons", "logo_main_dark.svg")
 
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
