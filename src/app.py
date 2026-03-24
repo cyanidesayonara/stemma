@@ -4,7 +4,7 @@ import ctypes
 import os
 import sys
 
-from PySide6.QtGui import QFontDatabase, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from src.library import SongLibrary
@@ -17,7 +17,6 @@ from src.version import __version__
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT_DIR, "data")
 _ICON_PATH = os.path.join(_ROOT_DIR, "assets", "icons", "stemma.ico")
-_BRAVURA_PATH = os.path.join(_ROOT_DIR, "assets", "fonts", "Bravura.woff")
 
 
 def run() -> int:
@@ -33,8 +32,6 @@ def run() -> int:
     app.setStyleSheet(DARK_STYLESHEET)
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))
-    if os.path.exists(_BRAVURA_PATH):
-        QFontDatabase.addApplicationFont(_BRAVURA_PATH)
 
     library = SongLibrary(data_dir=DATA_DIR)
     player = MultiTrackPlayer()
