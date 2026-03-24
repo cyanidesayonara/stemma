@@ -66,18 +66,23 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 ```
 stemma/
 ├── main.py                    # App entry point
+├── stemma.spec                # PyInstaller one-file build spec
 ├── requirements.txt
+├── requirements-dev.txt       # Dev/build deps (pyinstaller)
 ├── pyproject.toml             # pytest config
 ├── README.md
 ├── LICENSE                    # MIT
 ├── .gitignore
-├── .github/workflows/ci.yml  # CI: fast tests on every push
+├── .github/workflows/ci.yml      # CI: fast tests on every push
+├── .github/workflows/release.yml # Build .exe + GitHub Release on v* tags
 ├── src/
 │   ├── __init__.py
 │   ├── app.py                 # QApplication setup
 │   ├── app_settings.py        # Typed QSettings (audio device, import/export defaults)
-│   ├── data_paths.py        # Per-user data directory resolution
-│   ├── import_messages.py   # User-facing text for import/download failures
+│   ├── data_paths.py          # Per-user data directory resolution
+│   ├── import_messages.py     # User-facing text for import/download failures
+│   ├── paths.py               # app_root(): frozen-build-aware root dir
+│   ├── version.py             # __version__ string
 │   ├── separator.py           # ONNX Runtime stem separation
 │   ├── model_manager.py       # Download/cache ONNX models on first run
 │   ├── player.py              # Multi-track audio player (sounddevice)
@@ -219,18 +224,25 @@ stemma/
 - [x] Error handling & edge cases (JSON recovery, thread cleanup, stream safety)
 - [x] CI pipeline (GitHub Actions, fast tests on every push)
 
-### Phase 3 — Advanced
-- [ ] Real-time streaming stem separation
+### Phase 3 — Advanced (complete)
 - [x] YouTube URL import (yt-dlp)
 - [x] Tempo change (time-stretch) in player via librosa
-- [ ] Key transposition (pitch-shift)
 - [x] Waveform visualization
 - [x] A-B loop repeat
 - [x] Error handling: model download in import, friendly messages, library rollback, playback / no-device warnings (#73)
+- [x] PyInstaller packaging + GitHub Release workflow (#56)
 
-### Phase 4 — Sandbox
-- [ ] Experimental DSP (phase-aware recombination, model ensembling, transient preservation)
-- [ ] General music player features (shuffle, repeat, EQ)
+### Post-1.0 Backlog
+Tickets ship as incremental 1.x releases (semver).
+- [ ] Session persistence (#55)
+- [ ] Metronome with BPM entry (#57)
+- [ ] Count-in before playback/loop start (#78)
+- [ ] Record audio track (#79)
+- [ ] Key transposition / tempo manipulation (#42)
+- [ ] Animated startup logo (#76)
+- [ ] MSIX packaging for Microsoft Store (#74)
+- [ ] Real-time streaming stem separation (#13)
+- [ ] Experimental DSP (#28)
 
 ---
 

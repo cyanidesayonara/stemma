@@ -35,11 +35,16 @@ stemma/
   PROJECT.md           # Detailed spec and roadmap (reference doc)
   AGENTS.md            # This file (AI context, living document)
   CHANGELOG.md         # Append-only session history
-  .github/workflows/ci.yml  # CI: fast tests on push
+  stemma.spec              # PyInstaller one-file build spec
+  requirements-dev.txt     # Dev/build dependencies (pyinstaller)
+  .github/workflows/ci.yml      # CI: fast tests on push
+  .github/workflows/release.yml # Build .exe + GitHub Release on v* tags
   src/
     app.py             # QApplication setup
     app_settings.py    # Typed QSettings reads (audio, export, import defaults)
     data_paths.py      # Per-user data dir + legacy repo data/ migration
+    paths.py           # app_root(): frozen-build-aware root dir (sys._MEIPASS)
+    version.py         # __version__ string
     import_messages.py # User-facing import / download / separation error text
     separator.py       # ONNX stem separation engine
     model_manager.py   # Download/cache ONNX models
@@ -57,7 +62,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~286 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~282 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -122,30 +127,38 @@ All core functionality implemented and tested:
 - Robustness fixes (thread cleanup, stream safety, JSON recovery)
 - CI pipeline (GitHub Actions)
 
-### Phase 3 (Advanced) -- In Progress
+### Phase 3 (Advanced) -- Complete
 - [x] A-B loop repeat (#44, PR #48)
 - [x] YouTube URL import (#41, PR #49)
 - [x] Waveform visualization (#43, PR #58)
 - [x] Drag-and-drop import (#51, PR #60)
 - [x] Bundled ffmpeg via imageio-ffmpeg (PR #60)
-- [x] Error handling and model download UX (#73, PR #82): missing-model download in import dialog, friendly errors, library rollback, large-file confirm, Retry, no-output-device warnings, `add_song` I/O cleanup
-- Remaining tickets: real-time streaming (#13), tempo/key (#42)
+- [x] Error handling and model download UX (#73, PR #82)
 
-### v1.0 Release -- In Progress
+### v1.0 Release -- Shipped
 - [x] Library search/filter (#54, PR #63)
 - [x] Song metadata editing (#52, PR #64)
 - [x] Playback speed control (#53, PR #67)
 - [x] Light theme + theme switch (#70)
-- [x] User data directory, preferences, single-instance lock
-- [ ] App icon and branding (#61)
-- [ ] PyInstaller packaging + GitHub Release (#56)
+- [x] App icon and branding (#61)
+- [x] User data directory, preferences, single-instance lock (#72, PR #81)
+- [x] PyInstaller packaging + GitHub Release (#56, PR #83)
 
-### Phase 4 (Sandbox) -- Not Started
-Remaining tickets: experimental DSP (#28)
+### Post-1.0 Backlog
+Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
+- [ ] Session persistence (#55)
+- [ ] Metronome with BPM entry (#57)
+- [ ] Count-in before playback/loop start (#78)
+- [ ] Record audio track (#79)
+- [ ] Tempo/key manipulation (#42)
+- [ ] Animated startup logo (#76)
+- [ ] MSIX packaging (#74)
+- [ ] Experimental DSP (#28)
+- [ ] Real-time streaming (#13)
 ## Test Suite
 
 ```
-pytest                                    # ~286 fast tests (~10s)
+pytest                                    # ~282 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

@@ -4,6 +4,24 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-24 -- v1.0.0 Release: PyInstaller packaging + GitHub Release (#56, PR #83)
+
+### Done
+- `src/paths.py`: `app_root()` returns `sys._MEIPASS` in frozen builds, repo root otherwise.
+- `stemma.spec`: one-file windowed PyInstaller build. Collects ONNX Runtime DirectML DLLs, PortAudio, imageio-ffmpeg binary, and PySide6 QtSvg. UPX disabled to avoid corrupting native DLLs.
+- `.github/workflows/release.yml`: builds .exe on `v*` tag push, creates GitHub Release with the artifact via `softprops/action-gh-release@v2`.
+- `requirements-dev.txt` for pyinstaller as dev dependency.
+- `.gitignore` updated to track `stemma.spec` while still ignoring other `.spec` files.
+- Updated `src/app.py` and `src/ui/player_controls.py` to use `app_root()` for asset path resolution.
+- Version bumped from `1.0.0-dev` to `1.0.0`.
+
+### Metrics
+- Local build: 202 MB exe, launches correctly with icon.
+- 282 fast tests, 5 slow ONNX tests, 1 hardware playback test (288 total).
+- All v1.0 tickets closed. First GitHub Release published.
+
+---
+
 ## 2026-03-24 -- Error handling, model download UX, playback warnings (#73, PR #82)
 
 ### Done
