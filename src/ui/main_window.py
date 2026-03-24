@@ -5,6 +5,7 @@ Center: player controls and stem mixer.
 Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 """
 
+import json
 import os
 
 from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
         QTimer.singleShot(0, self._maybe_warn_no_audio_output)
+        QTimer.singleShot(0, self._restore_session)
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -351,8 +353,114 @@ class MainWindow(QMainWindow):
         if state is not None:
             self.restoreState(state)
 
+    def _save_session(self) -> None:
+        """Persist current player state so it can be restored on next launch."""
+        self._settings.setValue(
+            "session/song_id", self._current_song_id or ""
+        )
+        self._settings.setValue(
+            "session/position", self._player.current_seconds
+        )
+        self._settings.setValue(
+            "session/muted_stems",
+            json.dumps(sorted(self._player.muted_stems)),
+        )
+        self._settings.setValue(
+            "session/soloed_stems",
+            json.dumps(sorted(self._player.soloed_stems)),
+        )
+        self._settings.setValue(
+            "session/volumes", json.dumps(self._player.volumes)
+        )
+        loop_a = self._player.loop_a
+        loop_b = self._player.loop_b
+        self._settings.setValue("session/loop_a", loop_a if loop_a is not None else -1)
+        self._settings.setValue("session/loop_b", loop_b if loop_b is not None else -1)
+        self._settings.setValue("session/looping", self._player.looping)
+        self._settings.setValue("session/speed", self._player.speed)
+
+    def _restore_session(self) -> None:
+        """Reload the last song and player state from QSettings."""
+        song_id = self._settings.value("session/song_id", "")
+        if not song_id:
+            return
+
+        song = self._library.get_song(song_id)
+        if song is None:
+            return
+
+        if not self._library_panel.select_song(song_id):
+            return
+
+        # Stem mute/solo/volume
+        try:
+            muted = set(json.loads(self._settings.value("session/muted_stems", "[]")))
+        except (json.JSONDecodeError, TypeError):
+            muted = set()
+        try:
+            soloed = set(json.loads(self._settings.value("session/soloed_stems", "[]")))
+        except (json.JSONDecodeError, TypeError):
+            soloed = set()
+        try:
+            volumes = json.loads(self._settings.value("session/volumes", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            volumes = {}
+
+        self._player_controls.restore_stem_state(muted, soloed, volumes)
+
+        # Loop points
+        try:
+            loop_a = float(self._settings.value("session/loop_a", -1))
+        except (TypeError, ValueError):
+            loop_a = -1
+        try:
+            loop_b = float(self._settings.value("session/loop_b", -1))
+        except (TypeError, ValueError):
+            loop_b = -1
+        looping = self._settings.value("session/looping", False)
+        if isinstance(looping, str):
+            looping = looping.lower() == "true"
+
+        self._player_controls.restore_loop_state(
+            loop_a if loop_a >= 0 else None,
+            loop_b if loop_b >= 0 else None,
+            bool(looping),
+        )
+
+        # Speed (async — seek after stretch completes)
+        try:
+            speed = float(self._settings.value("session/speed", 1.0))
+        except (TypeError, ValueError):
+            speed = 1.0
+
+        try:
+            position = float(self._settings.value("session/position", 0.0))
+        except (TypeError, ValueError):
+            position = 0.0
+
+        if speed != 1.0:
+            def _after_speed_applied(_s: float, pos=position) -> None:
+                self._player.speed_changed.disconnect(_after_speed_applied)
+                self._player.seek(pos)
+
+            self._player.speed_changed.connect(_after_speed_applied)
+            self._player_controls._speed_combo.blockSignals(True)
+            label = f"{speed}x"
+            idx = self._player_controls._speed_combo.findText(label)
+            if idx >= 0:
+                self._player_controls._speed_combo.setCurrentIndex(idx)
+            self._player_controls._speed_combo.blockSignals(False)
+            self._player_controls._speed_status.setText("Stretching...")
+            self._player.set_speed(speed)
+        else:
+            self._player.seek(position)
+
     def closeEvent(self, event) -> None:
-        """Save window geometry/state and clean up background threads."""
+        """Save window geometry/state, session, and clean up background threads."""
+        try:
+            self._save_session()
+        except Exception:
+            pass  # Never prevent the window from closing.
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
 

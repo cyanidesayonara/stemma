@@ -132,6 +132,18 @@ class LibraryPanel(QWidget):
         if current is None or current.isHidden():
             self._remove_btn.setEnabled(False)
 
+    def select_song(self, song_id: str) -> bool:
+        """Programmatically select a song by its ID.
+
+        Returns True if the song was found and selected, False otherwise.
+        """
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == song_id:
+                self._list.setCurrentItem(item)
+                return True
+        return False
+
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
