@@ -190,13 +190,13 @@ class PlayerControls(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             )
             self._empty_logo.setPixmap(pixmap)
-        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(self._empty_logo)
+        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         hint = QLabel("Drop an audio file or use File > Import")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color: #585b70; padding: 10px;")
-        empty_layout.addWidget(hint)
+        hint.setStyleSheet("color: #585b70; margin-top: 0px;")
+        empty_layout.addWidget(hint, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         empty_layout.addStretch(1)  # Bottom spacer (centers content vertically)
 
@@ -315,8 +315,13 @@ class PlayerControls(QWidget):
         layout.addWidget(self._controls_widget, 1)
 
         # ── Footer bar (pinned to bottom, always visible) ──
+        footer_separator = QLabel()
+        footer_separator.setFixedHeight(1)
+        footer_separator.setStyleSheet("background-color: #313244;")
+        layout.addWidget(footer_separator)
+
         footer = QHBoxLayout()
-        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setContentsMargins(0, 8, 0, 8)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
         copyright_label.setStyleSheet("color: #45475a; font-size: 10pt;")
