@@ -56,6 +56,21 @@ QMenuBar::item:selected {{
     background-color: {c["surface0"]};
 }}
 
+QPushButton#theme-toggle {{
+    background-color: {c["mantle"]};
+    border: 1px solid {c["surface0"]};
+    border-radius: 10px;
+    padding: 2px 8px;
+    min-height: 0;
+    min-width: 0;
+    font-size: 12pt;
+    color: {c["text"]};
+}}
+
+QPushButton#theme-toggle:hover {{
+    background-color: {c["surface0"]};
+}}
+
 QMenu {{
     background-color: {c["base"]};
     color: {c["text"]};
