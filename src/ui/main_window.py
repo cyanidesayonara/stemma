@@ -2,7 +2,7 @@
 
 Left panel: song library list.
 Center: player controls and stem mixer.
-Menu bar: File / Help; theme toggle in the menu bar corner.
+Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 """
 
 import os
@@ -31,11 +31,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.app_settings import (
+    read_default_export_format,
+    read_default_mp3_bitrate,
+    read_output_device_index,
+)
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
 from src.ui.import_dialog import ImportDialog
+from src.ui.preferences_dialog import PreferencesDialog
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls, _ROOT_DIR, _logo_variant, _render_svg
 from src.ui.styles import get_colors, get_stylesheet
@@ -144,6 +150,10 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("&Quit")
         quit_action.triggered.connect(self.close)
 
+        edit_menu = menu_bar.addMenu("&Edit")
+        prefs_action = edit_menu.addAction("&Preferences...")
+        prefs_action.triggered.connect(self._on_preferences)
+
         help_menu = menu_bar.addMenu("&Help")
 
         self._theme_btn = QPushButton()
@@ -223,6 +233,14 @@ class MainWindow(QMainWindow):
             self._player.pause()
         else:
             self._player.play()
+
+    def _on_preferences(self) -> None:
+        """Open preferences; apply audio device without restart."""
+        dlg = PreferencesDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._player.set_output_device(
+                read_output_device_index(self._settings)
+            )
 
     def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
         """Apply a theme to all child widgets that need explicit updates."""
@@ -404,7 +422,7 @@ class MainWindow(QMainWindow):
                 self._open_import_dialog(file_path=path)
 
     def _on_export(self) -> None:
-        """Export the current mix as a WAV file."""
+        """Export the current mix as WAV or MP3."""
         if not self._player.has_stems:
             QMessageBox.information(
                 self, "Export", "No stems loaded. Import and separate a song first."
@@ -424,9 +442,13 @@ class MainWindow(QMainWindow):
         if not stem_paths:
             return
 
+        fmt = read_default_export_format(self._settings)
+        if fmt == "mp3":
+            filters = "MP3 Files (*.mp3);;WAV Files (*.wav)"
+        else:
+            filters = "WAV Files (*.wav);;MP3 Files (*.mp3)"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Mix", "",
-            "WAV Files (*.wav);;MP3 Files (*.mp3)"
+            self, "Export Mix", "", filters
         )
         if path:
             exporter = StemExporter(stem_paths)
@@ -434,11 +456,13 @@ class MainWindow(QMainWindow):
                 name: self._player.get_volume(name)
                 for name in stem_paths
             }
+            bitrate = read_default_mp3_bitrate(self._settings)
             self._export_worker = ExportWorker(
                 exporter=exporter,
                 output_path=path,
                 muted_stems=self._player.muted_stems,
                 volumes=volumes,
+                mp3_bitrate=bitrate,
             )
             self._export_worker.finished.connect(self._on_export_finished)
             self._export_worker.error.connect(self._on_export_error)

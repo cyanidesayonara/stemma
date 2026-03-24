@@ -17,7 +17,12 @@ from src.separator import SAMPLE_RATE
 SUPPORTED_FORMATS = (".wav", ".mp3")
 
 
-def _write_audio(path: str, audio: np.ndarray, sample_rate: int) -> None:
+def _write_audio(
+    path: str,
+    audio: np.ndarray,
+    sample_rate: int,
+    mp3_bitrate: int = 320,
+) -> None:
     """Write audio data to a file, choosing format by extension.
 
     Args:
@@ -33,7 +38,7 @@ def _write_audio(path: str, audio: np.ndarray, sample_rate: int) -> None:
     if ext == ".wav":
         sf.write(path, audio, sample_rate)
     elif ext == ".mp3":
-        _write_mp3(path, audio, sample_rate)
+        _write_mp3(path, audio, sample_rate, bitrate=mp3_bitrate)
     else:
         raise ValueError(f"Unsupported format '{ext}'. Use .wav or .mp3.")
 
@@ -115,6 +120,7 @@ class StemExporter:
         stem_names: list[str] | None = None,
         muted_stems: set[str] | None = None,
         volumes: dict[str, float] | None = None,
+        mp3_bitrate: int = 320,
     ) -> None:
         """Export a mix of selected stems to a WAV file.
 
@@ -162,7 +168,7 @@ class StemExporter:
             np.clip(mixed, -1.0, 1.0, out=mixed)
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        _write_audio(output_path, mixed, SAMPLE_RATE)
+        _write_audio(output_path, mixed, SAMPLE_RATE, mp3_bitrate=mp3_bitrate)
 
 
 class ExportWorker(QThread):
@@ -182,12 +188,14 @@ class ExportWorker(QThread):
         output_path: str,
         muted_stems: set[str],
         volumes: dict[str, float],
+        mp3_bitrate: int = 320,
     ) -> None:
         super().__init__()
         self.exporter = exporter
         self.output_path = output_path
         self.muted_stems = muted_stems
         self.volumes = volumes
+        self.mp3_bitrate = mp3_bitrate
 
     def run(self) -> None:
         try:
@@ -195,6 +203,7 @@ class ExportWorker(QThread):
                 self.output_path,
                 muted_stems=self.muted_stems,
                 volumes=self.volumes,
+                mp3_bitrate=self.mp3_bitrate,
             )
             self.finished.emit(self.output_path)
         except Exception as exc:
