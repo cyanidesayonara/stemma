@@ -38,6 +38,8 @@ stemma/
   .github/workflows/ci.yml  # CI: fast tests on push
   src/
     app.py             # QApplication setup
+    app_settings.py    # Typed QSettings reads (audio, export, import defaults)
+    data_paths.py      # Per-user data dir + legacy repo data/ migration
     separator.py       # ONNX stem separation engine
     model_manager.py   # Download/cache ONNX models
     player.py          # Multi-track audio player
@@ -52,8 +54,9 @@ stemma/
       waveform_widget.py # Waveform display (QPainter)
       library_panel.py
       import_dialog.py
-      styles.py        # Dark theme
-  tests/               # pytest test suite (229 fast + 5 slow + 1 hardware)
+      preferences_dialog.py  # Edit > Preferences
+      styles.py        # Dark / light themes
+  tests/               # pytest test suite (~270 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -70,10 +73,12 @@ stemma/
     test_metadata_edit.py
     test_speed_control.py
     test_integration.py
-  data/                # Runtime data (gitignored)
-    models/            # Cached ONNX model files
+  data/                # Legacy dev-only folder; packaged app uses OS user dir
+    models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
 ```
+
+Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\\stemma` on Windows), with a one-time copy from `./data` when that folder is new. See `src/data_paths.py`.
 
 ## Rules
 
@@ -93,7 +98,7 @@ stemma/
 
 ## Current Status
 
-Last updated: 2026-03-22
+Last updated: 2026-03-24
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -124,6 +129,8 @@ All core functionality implemented and tested:
 - [x] Library search/filter (#54, PR #63)
 - [x] Song metadata editing (#52, PR #64)
 - [x] Playback speed control (#53, PR #67)
+- [x] Light theme + theme switch (#70)
+- [x] User data directory, preferences, single-instance lock
 - [ ] App icon and branding (#61)
 - [ ] PyInstaller packaging + GitHub Release (#56)
 
@@ -132,7 +139,7 @@ Remaining tickets: experimental DSP (#28)
 ## Test Suite
 
 ```
-pytest                                    # 229 fast tests (~10s)
+pytest                                    # ~270 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

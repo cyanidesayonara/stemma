@@ -32,6 +32,17 @@ from src.data_paths import platform_user_data_dir
 from src.version import __version__
 
 
+def _combo_int_data(combo: QComboBox, default: int = -1) -> int:
+    """Return ``currentData()`` as int, or *default* if missing or invalid."""
+    d = combo.currentData()
+    if d is None:
+        return default
+    try:
+        return int(d)
+    except (TypeError, ValueError):
+        return default
+
+
 class PreferencesDialog(QDialog):
     """Modal preferences editor backed by ``QSettings``."""
 
@@ -131,9 +142,15 @@ class PreferencesDialog(QDialog):
         dev = read_output_device_index(self._settings)
         target = -1 if dev is None else dev
         for i in range(self._device_combo.count()):
-            if int(self._device_combo.itemData(i)) == target:
-                self._device_combo.setCurrentIndex(i)
-                break
+            raw = self._device_combo.itemData(i)
+            if raw is None:
+                continue
+            try:
+                if int(raw) == target:
+                    self._device_combo.setCurrentIndex(i)
+                    break
+            except (TypeError, ValueError):
+                continue
 
         self._model_combo.setCurrentIndex(
             1 if read_default_import_6_stem(self._settings) else 0
@@ -144,9 +161,15 @@ class PreferencesDialog(QDialog):
 
         br = read_default_mp3_bitrate(self._settings)
         for i in range(self._bitrate_combo.count()):
-            if int(self._bitrate_combo.itemData(i)) == br:
-                self._bitrate_combo.setCurrentIndex(i)
-                break
+            raw = self._bitrate_combo.itemData(i)
+            if raw is None:
+                continue
+            try:
+                if int(raw) == br:
+                    self._bitrate_combo.setCurrentIndex(i)
+                    break
+            except (TypeError, ValueError):
+                continue
 
     def _on_browse_data_dir(self) -> None:
         start = self._data_dir_edit.text().strip() or platform_user_data_dir()
@@ -156,6 +179,21 @@ class PreferencesDialog(QDialog):
 
     def _on_accept(self) -> None:
         new_dir = self._data_dir_edit.text().strip()
+        if new_dir:
+            try:
+                os.makedirs(new_dir, exist_ok=True)
+                probe = os.path.join(new_dir, ".stemma_write_test")
+                with open(probe, "w", encoding="utf-8") as f:
+                    f.write("")
+                os.remove(probe)
+            except OSError as exc:
+                QMessageBox.warning(
+                    self,
+                    "Preferences",
+                    f"Cannot use this data folder (create or write failed):\n{exc}",
+                )
+                return
+
         old_raw = self._settings.value("paths/data_dir", "")
         old_dir = old_raw.strip() if isinstance(old_raw, str) else ""
 
@@ -167,19 +205,25 @@ class PreferencesDialog(QDialog):
                 "Restart stemma for the new data directory to take effect.",
             )
 
-        dev = int(self._device_combo.currentData())
-        self._settings.setValue("audio/output_device", dev)
+        self._settings.setValue(
+            "audio/output_device",
+            _combo_int_data(self._device_combo, -1),
+        )
 
+        mdata = self._model_combo.currentData()
         self._settings.setValue(
             "import/default_6_stem",
-            bool(self._model_combo.currentData()),
+            bool(mdata) if mdata is not None else False,
         )
+
+        fmt_data = self._export_combo.currentData()
         self._settings.setValue(
             "export/default_format",
-            str(self._export_combo.currentData()),
+            str(fmt_data) if fmt_data is not None else "wav",
         )
+
         self._settings.setValue(
             "export/mp3_bitrate",
-            int(self._bitrate_combo.currentData()),
+            _combo_int_data(self._bitrate_combo, 320),
         )
         self.accept()

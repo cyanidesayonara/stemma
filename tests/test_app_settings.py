@@ -17,16 +17,45 @@ def settings_ini(tmp_path):
 
 
 class TestReadOutputDeviceIndex:
-    def test_default_none(self, settings_ini):
+    def test_default_none(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1, 2, 3}),
+        )
         assert read_output_device_index(settings_ini) is None
 
-    def test_negative_none(self, settings_ini):
+    def test_negative_none(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1, 2, 3}),
+        )
         settings_ini.setValue("audio/output_device", -1)
         assert read_output_device_index(settings_ini) is None
 
-    def test_positive_index(self, settings_ini):
+    def test_positive_index(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1, 2, 3}),
+        )
         settings_ini.setValue("audio/output_device", 3)
         assert read_output_device_index(settings_ini) == 3
+
+    def test_stale_index_clears_setting(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: frozenset({0, 1, 2}),
+        )
+        settings_ini.setValue("audio/output_device", 99)
+        assert read_output_device_index(settings_ini) is None
+        assert int(settings_ini.value("audio/output_device")) == -1
+
+    def test_query_failure_keeps_stored_index(self, settings_ini, monkeypatch):
+        monkeypatch.setattr(
+            "src.app_settings.output_device_indices_with_output",
+            lambda: None,
+        )
+        settings_ini.setValue("audio/output_device", 7)
+        assert read_output_device_index(settings_ini) == 7
 
 
 class TestReadDefaultMp3Bitrate:
