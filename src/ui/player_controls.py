@@ -23,24 +23,23 @@ from PySide6.QtWidgets import (
 )
 
 from src.player import SPEED_PRESETS, MultiTrackPlayer
-from src.ui.styles import STEM_COLORS
+from src.ui.styles import DARK_COLORS, STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
-_ICON_COLOR = QColor("#cdd6f4")
 
 
-def _make_icon(draw_fn) -> QIcon:
+def _make_icon(draw_fn, color: QColor) -> QIcon:
     """Create a crisp QIcon by painting with *draw_fn(painter, size)*."""
     pixmap = QPixmap(QSize(_ICON_SIZE, _ICON_SIZE))
     pixmap.fill(Qt.GlobalColor.transparent)
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(_ICON_COLOR)
+    p.setBrush(color)
     draw_fn(p, _ICON_SIZE)
     p.end()
     return QIcon(pixmap)
@@ -90,6 +89,11 @@ def _format_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+def _logo_variant(theme: str) -> str:
+    """Return 'dark' or 'light' SVG variant name for the given theme."""
+    return "dark" if theme == "dark" else "light"
+
+
 class StemRow(QWidget):
     """A single stem row with label, mute, and solo buttons."""
 
@@ -133,7 +137,7 @@ class StemRow(QWidget):
         self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
-        self._volume_slider.setToolTip(f"{stem_name} volume (0–200%, double-click to reset)")
+        self._volume_slider.setToolTip(f"{stem_name} volume (0-200%, double-click to reset)")
         self._volume_slider.setAccessibleName(f"{stem_name} volume")
         self._volume_slider.valueChanged.connect(self._on_volume)
         self._volume_slider.mouseDoubleClickEvent = lambda _: self._volume_slider.setValue(100)
@@ -173,6 +177,7 @@ class PlayerControls(QWidget):
         super().__init__(parent)
         self._player = player
         self._stem_rows: dict[str, StemRow] = {}
+        self._theme = "dark"
 
         self._peaks_timer = QTimer(self)
         self._peaks_timer.setSingleShot(True)
@@ -186,29 +191,36 @@ class PlayerControls(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
 
-        # ── Empty state (shown when no song is loaded) ──
+        colors = DARK_COLORS
+
+        # -- Empty state (shown when no song is loaded) --
         self._empty_widget = QWidget()
         empty_layout = QVBoxLayout(self._empty_widget)
-        empty_layout.addStretch(1)  # Top spacer
+        empty_layout.addStretch(1)
 
         self._empty_logo = QLabel()
-        logo_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_main_dark.svg")
+        logo_path = os.path.join(
+            _ROOT_DIR, "assets", "icons",
+            f"logo_main_{_logo_variant(self._theme)}.svg",
+        )
         pixmap = _render_svg(logo_path, 300, 185)
         if pixmap:
             self._empty_logo.setPixmap(pixmap)
         self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        hint = QLabel("Drop an audio file or use File > Import")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color: #585b70; margin-top: 0px;")
-        empty_layout.addWidget(hint, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self._hint_label = QLabel("Drop an audio file or use File > Import")
+        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint_label.setStyleSheet(
+            f"color: {colors['surface2']}; margin-top: 0px;"
+        )
+        empty_layout.addWidget(self._hint_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        empty_layout.addStretch(1)  # Bottom spacer (centers content vertically)
+        empty_layout.addStretch(1)
 
         layout.addWidget(self._empty_widget, 1)
 
-        # ── Player controls (hidden until a song is loaded) ──
+        # -- Player controls (hidden until a song is loaded) --
         self._controls_widget = QWidget()
         controls_layout = QVBoxLayout(self._controls_widget)
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -216,9 +228,10 @@ class PlayerControls(QWidget):
         # -- Transport bar --
         transport = QHBoxLayout()
 
-        self._play_icon = _make_icon(_draw_play)
-        self._pause_icon = _make_icon(_draw_pause)
-        self._stop_icon = _make_icon(_draw_stop)
+        icon_color = QColor(colors["text"])
+        self._play_icon = _make_icon(_draw_play, icon_color)
+        self._pause_icon = _make_icon(_draw_pause, icon_color)
+        self._stop_icon = _make_icon(_draw_stop, icon_color)
 
         self._play_btn = QPushButton()
         self._play_btn.setIcon(self._play_icon)
@@ -284,7 +297,7 @@ class PlayerControls(QWidget):
         loop_bar.addWidget(self._loop_clear_btn)
 
         self._loop_label = QLabel("")
-        self._loop_label.setStyleSheet("color: #585b70;")
+        self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
         loop_bar.addWidget(self._loop_label)
 
         loop_bar.addStretch()
@@ -306,7 +319,7 @@ class PlayerControls(QWidget):
         speed_bar.addWidget(self._speed_combo)
 
         self._speed_status = QLabel("")
-        self._speed_status.setStyleSheet("color: #585b70;")
+        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
         speed_bar.addWidget(self._speed_status)
 
         speed_bar.addStretch()
@@ -325,28 +338,85 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(False)
         layout.addWidget(self._controls_widget, 1)
 
-        # ── Footer bar (aligns with library panel's bottom edge) ──
-        # Library panel bottom: 8px padding + ~36px button + 8px padding = ~52px
-        footer_widget = QWidget()
-        footer_widget.setStyleSheet("border-top: 1px solid #313244;")
-        footer_layout = QHBoxLayout(footer_widget)
+        # -- Footer bar --
+        self._footer_widget = QWidget()
+        self._footer_widget.setStyleSheet(
+            f"border-top: 1px solid {colors['surface0']};"
+        )
+        footer_layout = QHBoxLayout(self._footer_widget)
         footer_layout.setContentsMargins(0, 4, 0, 4)
 
-        copyright_label = QLabel("\u00A9 2026 stemma")
-        copyright_label.setStyleSheet("color: #45475a; font-size: 9pt; border: none;")
-        footer_layout.addWidget(copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self._copyright_label = QLabel("\u00A9 2026 stemma")
+        self._copyright_label.setStyleSheet(
+            f"color: {colors['surface1']}; font-size: 9pt; border: none;"
+        )
+        footer_layout.addWidget(
+            self._copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter
+        )
 
         footer_layout.addStretch()
 
-        arpeggio_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_arpeggio_dark.svg")
+        self._arpeggio_label = QLabel()
+        arpeggio_path = os.path.join(
+            _ROOT_DIR, "assets", "icons",
+            f"logo_arpeggio_{_logo_variant(self._theme)}.svg",
+        )
         arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
         if arpeggio_pixmap:
-            arpeggio_label = QLabel()
-            arpeggio_label.setPixmap(arpeggio_pixmap)
-            arpeggio_label.setStyleSheet("border: none;")
-            footer_layout.addWidget(arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+            self._arpeggio_label.setPixmap(arpeggio_pixmap)
+        self._arpeggio_label.setStyleSheet("border: none;")
+        footer_layout.addWidget(
+            self._arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter
+        )
 
-        layout.addWidget(footer_widget)
+        layout.addWidget(self._footer_widget)
+
+    def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
+        """Switch all theme-dependent visuals to *theme*."""
+        self._theme = theme
+        icon_color = QColor(colors["text"])
+
+        self._play_icon = _make_icon(_draw_play, icon_color)
+        self._pause_icon = _make_icon(_draw_pause, icon_color)
+        self._stop_icon = _make_icon(_draw_stop, icon_color)
+
+        if self._player.is_playing:
+            self._play_btn.setIcon(self._pause_icon)
+        else:
+            self._play_btn.setIcon(self._play_icon)
+        self._stop_btn.setIcon(self._stop_icon)
+
+        # Inline-styled labels
+        self._hint_label.setStyleSheet(
+            f"color: {colors['surface2']}; margin-top: 0px;"
+        )
+        self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
+        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
+        self._footer_widget.setStyleSheet(
+            f"border-top: 1px solid {colors['surface0']};"
+        )
+        self._copyright_label.setStyleSheet(
+            f"color: {colors['surface1']}; font-size: 9pt; border: none;"
+        )
+
+        # SVG logos
+        variant = _logo_variant(theme)
+        logo_path = os.path.join(
+            _ROOT_DIR, "assets", "icons", f"logo_main_{variant}.svg"
+        )
+        pixmap = _render_svg(logo_path, 300, 185)
+        if pixmap:
+            self._empty_logo.setPixmap(pixmap)
+
+        arpeggio_path = os.path.join(
+            _ROOT_DIR, "assets", "icons", f"logo_arpeggio_{variant}.svg"
+        )
+        arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
+        if arpeggio_pixmap:
+            self._arpeggio_label.setPixmap(arpeggio_pixmap)
+
+        # Waveform colors
+        self._waveform.set_theme_colors(colors)
 
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
@@ -356,7 +426,6 @@ class PlayerControls(QWidget):
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
-        # Clear existing rows.
         for row in self._stem_rows.values():
             row.setParent(None)
             row.deleteLater()
@@ -372,7 +441,6 @@ class PlayerControls(QWidget):
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
 
-        # Reset speed combo to 1.0x (load_stems resets the player speed).
         self._speed_combo.blockSignals(True)
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
@@ -424,7 +492,6 @@ class PlayerControls(QWidget):
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
         self._play_btn.setAccessibleName("Play")
-        # Show cursor at current position (which may be loop-A, not 0).
         total = self._player.total_seconds
         if total > 0:
             self._waveform.set_position(
@@ -443,7 +510,7 @@ class PlayerControls(QWidget):
 
     def _do_recompute_peaks(self) -> None:
         """Perform the actual waveform peak recomputation."""
-        self._peaks_timer.stop()  # Cancel any pending debounced call.
+        self._peaks_timer.stop()
         stems = self._player.stems
         if not stems:
             self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
@@ -524,7 +591,6 @@ class PlayerControls(QWidget):
     def _on_speed_applied(self, speed: float) -> None:
         """Player finished stretching; update UI."""
         self._speed_status.setText("")
-        # Update combo without re-triggering _on_speed_changed.
         self._speed_combo.blockSignals(True)
         label = f"{speed}x"
         idx = self._speed_combo.findText(label)

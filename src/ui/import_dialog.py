@@ -152,7 +152,8 @@ class ImportDialog(QDialog):
         # -- Separator label --
         or_label = QLabel("-- or --")
         or_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        or_label.setStyleSheet("color: #585b70; padding: 4px;")
+        or_label.setObjectName("subtle-label")
+        or_label.setStyleSheet("padding: 4px;")
         layout.addWidget(or_label)
 
         # -- File selection row --
