@@ -1,7 +1,7 @@
 """Waveform display widget with playback cursor and loop markers.
 
 Custom QWidget using QPainter for rendering. Supports click-to-seek
-and drag-to-seek.
+and drag-to-seek. Respects the active theme via set_theme_colors().
 """
 
 from __future__ import annotations
@@ -11,13 +11,7 @@ from PySide6.QtCore import Qt, Signal, QSize, QRect
 from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent
 from PySide6.QtWidgets import QWidget, QSizePolicy
 
-
-# Brand palette
-_BG_COLOR = QColor("#1e1e2e")
-_WAVEFORM_COLOR = QColor("#4fb8b8")  # Brand teal
-_CURSOR_COLOR = QColor("#cdd6f4")    # Text color
-_LOOP_MARKER_COLOR = QColor("#f38ba8")  # Red
-_LOOP_REGION_COLOR = QColor(79, 184, 184, 38)  # Brand teal at ~15% opacity
+from src.ui.styles import DARK_COLORS
 
 _WAVEFORM_HEIGHT = 80
 
@@ -39,9 +33,28 @@ class WaveformWidget(QWidget):
         self._cached_size: tuple[int, int] = (-1, -1)
         self._cached_rects: list[QRect] = []
 
+        self._apply_colors(DARK_COLORS)
+
         self.setFixedHeight(_WAVEFORM_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(False)
+
+    def _apply_colors(self, colors: dict[str, str]) -> None:
+        """Derive paint colors from a theme color dict."""
+        self._bg_color = QColor(colors["base"])
+        self._waveform_color = QColor(colors["accent"])
+        self._cursor_color = QColor(colors["text"])
+        self._loop_marker_color = QColor(colors["red"])
+        accent = QColor(colors["accent"])
+        self._loop_region_color = QColor(
+            accent.red(), accent.green(), accent.blue(), 38
+        )
+
+    def set_theme_colors(self, colors: dict[str, str]) -> None:
+        """Update paint colors for a new theme and repaint."""
+        self._apply_colors(colors)
+        self._cached_size = (0, 0)  # Force rect cache rebuild
+        self.update()
 
     def minimumSizeHint(self) -> QSize:
         return QSize(200, _WAVEFORM_HEIGHT)
@@ -79,17 +92,14 @@ class WaveformWidget(QWidget):
         w = self.width()
         h = self.height()
 
-        # Background
-        painter.fillRect(0, 0, w, h, _BG_COLOR)
+        painter.fillRect(0, 0, w, h, self._bg_color)
 
         if self._peaks is not None and len(self._peaks) > 0:
             self._draw_waveform(painter, w, h)
 
-        # Loop region
         if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
             self._draw_loop_region(painter, w, h)
 
-        # Playback cursor
         self._draw_cursor(painter, w, h)
 
         painter.end()
@@ -99,13 +109,12 @@ class WaveformWidget(QWidget):
         if w <= 0 or self._max_peak <= 0:
             return
 
-        # Rebuild rect cache only when size or peaks change.
         if self._cached_size != (w, h):
             self._cached_rects = self._build_waveform_rects(w, h)
             self._cached_size = (w, h)
 
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_WAVEFORM_COLOR)
+        painter.setBrush(self._waveform_color)
         painter.drawRects(self._cached_rects)
 
     def _build_waveform_rects(self, w: int, h: int) -> list[QRect]:
@@ -137,11 +146,9 @@ class WaveformWidget(QWidget):
         x_a = int(self._loop_a_ratio * w)
         x_b = int(self._loop_b_ratio * w)
 
-        # Shaded region
-        painter.fillRect(x_a, 0, x_b - x_a, h, _LOOP_REGION_COLOR)
+        painter.fillRect(x_a, 0, x_b - x_a, h, self._loop_region_color)
 
-        # Marker lines
-        painter.setPen(_LOOP_MARKER_COLOR)
+        painter.setPen(self._loop_marker_color)
         painter.drawLine(x_a, 0, x_a, h)
         painter.drawLine(x_b, 0, x_b, h)
 
@@ -150,7 +157,7 @@ class WaveformWidget(QWidget):
             return
         x = int(self._position_ratio * w)
         x = max(0, min(x, w - 1))
-        painter.setPen(_CURSOR_COLOR)
+        painter.setPen(self._cursor_color)
         painter.drawLine(x, 0, x, h)
         x2 = min(x + 1, w - 1)
         if x2 != x:
