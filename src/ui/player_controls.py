@@ -169,6 +169,14 @@ class StemRow(QWidget):
         """Programmatically set the mute button state (e.g. from keyboard shortcut)."""
         self._mute_btn.setChecked(muted)
 
+    def set_soloed(self, soloed: bool) -> None:
+        """Programmatically set the solo button state."""
+        self._solo_btn.setChecked(soloed)
+
+    def set_volume_slider(self, value: int) -> None:
+        """Programmatically set the volume slider (0-200)."""
+        self._volume_slider.setValue(value)
+
 
 class PlayerControls(QWidget):
     """Transport controls and stem mixer panel."""
@@ -456,6 +464,39 @@ class PlayerControls(QWidget):
         self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
         self._waveform.set_position(0.0)
         self._time_label.setText("0:00 / 0:00")
+
+    def restore_stem_state(
+        self,
+        muted: set[str],
+        soloed: set[str],
+        volumes: dict[str, float],
+    ) -> None:
+        """Restore per-stem mute/solo/volume state from a saved session.
+
+        Setting the UI widgets triggers the connected player methods, so
+        this also updates the player state.
+        """
+        for name, row in self._stem_rows.items():
+            row.set_muted(name in muted)
+            row.set_soloed(name in soloed)
+            vol = volumes.get(name, 1.0)
+            row.set_volume_slider(round(vol * 100))
+        self._do_recompute_peaks()
+
+    def restore_loop_state(
+        self,
+        loop_a: float | None,
+        loop_b: float | None,
+        looping: bool,
+    ) -> None:
+        """Restore A-B loop state from a saved session."""
+        if loop_a is not None:
+            self._player.set_loop_a(loop_a)
+        if loop_b is not None:
+            self._player.set_loop_b(loop_b)
+        self._loop_toggle_btn.setChecked(looping)
+        self._update_loop_label()
+        self._update_waveform_loop_markers()
 
     def toggle_stem_mute(self, stem_name: str) -> None:
         """Toggle the mute state of a stem and update the UI button."""
