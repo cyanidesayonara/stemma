@@ -1,7 +1,7 @@
 """Waveform display widget with playback cursor and loop markers.
 
 Custom QWidget using QPainter for rendering. Supports click-to-seek
-and drag-to-seek. Designed for the Catppuccin Mocha dark theme.
+and drag-to-seek.
 """
 
 from __future__ import annotations
