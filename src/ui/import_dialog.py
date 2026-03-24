@@ -37,6 +37,10 @@ from src.model_manager import ModelDownloader, ModelManager
 from src.separator import SeparatorWorker
 
 
+# Separation loads the full source into RAM; warn above this size (bytes).
+_LARGE_SOURCE_WARN_BYTES = 100 * 1024 * 1024
+
+
 def _safe_disconnect(signal) -> None:
     """Disconnect all slots from *signal*, ignoring RuntimeError."""
     try:
@@ -121,7 +125,7 @@ class ImportDialog(QDialog):
         self._download_worker: _DownloadWorker | None = None
         self._metadata_worker: _MetadataWorker | None = None
         self._model_downloader: ModelDownloader | None = None
-        self._song_pending_model_id: str | None = None
+        self._import_song_id: str | None = None
         self._pending_separation_is_6_stem: bool = False
         self._selected_path: str = ""
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
@@ -207,6 +211,11 @@ class ImportDialog(QDialog):
         self._status_label = QLabel("")
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
+
+        self._retry_btn = QPushButton("Retry import")
+        self._retry_btn.setVisible(False)
+        self._retry_btn.clicked.connect(self._on_retry_import)
+        layout.addWidget(self._retry_btn)
 
         # -- Buttons --
         self._button_box = QDialogButtonBox(
@@ -295,12 +304,17 @@ class ImportDialog(QDialog):
     def _on_import(self) -> None:
         url = self._url_edit.text().strip()
 
+        self._retry_btn.setVisible(False)
+
         # Disable immediately to prevent double-click race.
         self._button_box.setEnabled(False)
 
         if is_supported_url(url):
             self._start_youtube_import(url)
         elif self._selected_path:
+            if not self._warn_large_source_ok(self._selected_path):
+                self._button_box.setEnabled(True)
+                return
             self._start_local_import(self._selected_path)
         else:
             # Nothing selected -- re-enable.
@@ -341,6 +355,10 @@ class ImportDialog(QDialog):
         so the temp dir is cleaned up afterwards.
         """
         self._selected_path = path
+        if not self._warn_large_source_ok(path):
+            self._button_box.setEnabled(True)
+            self._cleanup_tmp_dir()
+            return
         self._start_local_import(path)
         self._cleanup_tmp_dir()
 
@@ -360,6 +378,8 @@ class ImportDialog(QDialog):
             self._on_error(str(exc))
             return
 
+        self._import_song_id = song.id
+
         # Start separation.
         is_6_stem = self._model_combo.currentData()
         model_path = self._model_manager.model_path(is_6_stem=is_6_stem)
@@ -372,7 +392,6 @@ class ImportDialog(QDialog):
 
     def _begin_model_download(self, song: Song, is_6_stem: bool) -> None:
         """Download the ONNX model in the background, then run separation."""
-        self._song_pending_model_id = song.id
         self._pending_separation_is_6_stem = is_6_stem
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
@@ -383,7 +402,7 @@ class ImportDialog(QDialog):
             is_6_stem=is_6_stem
         )
         self._model_downloader.progress.connect(self._on_progress)
-        self._model_downloader.finished.connect(
+        self._model_downloader.download_complete.connect(
             self._on_model_download_finished
         )
         self._model_downloader.error.connect(self._on_model_download_error)
@@ -391,11 +410,10 @@ class ImportDialog(QDialog):
 
     def _on_model_download_finished(self, _path: str) -> None:
         """Model file is on disk; continue with stem separation."""
-        song_id = self._song_pending_model_id
         is_6 = self._pending_separation_is_6_stem
-        self._song_pending_model_id = None
         self._model_downloader = None
 
+        song_id = self._import_song_id
         if song_id is None:
             return
         song = self._library.get_song(song_id)
@@ -408,27 +426,53 @@ class ImportDialog(QDialog):
                 self._library.remove_song(song_id)
             except KeyError:
                 pass
+            self._import_song_id = None
             self._on_error("Model file missing after download.")
             return
 
         self._start_separation_worker(song, model_path, is_6)
 
     def _on_model_download_error(self, message: str) -> None:
-        """Remove the library entry and show a readable download error."""
-        self._rollback_pending_model_song()
+        """Show a readable download error and roll back the library entry."""
         self._model_downloader = None
         self._on_error(message)
 
-    def _rollback_pending_model_song(self) -> None:
-        """Drop the song created for an import that failed before separation."""
-        if self._song_pending_model_id is None:
+    def _discard_failed_import_song(self) -> None:
+        """Remove the song row created for an import that did not complete."""
+        if self._import_song_id is None:
             return
-        sid = self._song_pending_model_id
-        self._song_pending_model_id = None
+        sid = self._import_song_id
+        self._import_song_id = None
+        if self._library.get_song(sid) is not None:
+            try:
+                self._library.remove_song(sid)
+            except KeyError:
+                pass
+
+    def _warn_large_source_ok(self, path: str) -> bool:
+        """If *path* is very large, ask the user to confirm. Return False to abort."""
         try:
-            self._library.remove_song(sid)
-        except KeyError:
-            pass
+            size = os.path.getsize(path)
+        except OSError:
+            return True
+        if size < _LARGE_SOURCE_WARN_BYTES:
+            return True
+        mb = size / (1024 * 1024)
+        reply = QMessageBox.question(
+            self,
+            "Large file",
+            f"This file is about {mb:.0f} MB. Separation loads the full track "
+            "into memory and may be slow or fail on systems with limited RAM.\n\n"
+            "Continue with import?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _on_retry_import(self) -> None:
+        """Re-run import with the same path or URL after an error."""
+        self._retry_btn.setVisible(False)
+        self._on_import()
 
     def _start_separation_worker(
         self,
@@ -457,15 +501,18 @@ class ImportDialog(QDialog):
         self._status_label.setText(message)
 
     def _on_finished(self, song_id: str) -> None:
+        self._import_song_id = None
         self._library.update_song(song_id, model_used="htdemucs")
         self.accept()
 
     def _on_error(self, message: str) -> None:
+        self._discard_failed_import_song()
         self._status_label.setVisible(True)
         self._status_label.setText(f"Error: {format_import_error(message)}")
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._button_box.setEnabled(True)
+        self._retry_btn.setVisible(True)
         self._cleanup_tmp_dir()
 
     def _cleanup_tmp_dir(self) -> None:
@@ -490,7 +537,7 @@ class ImportDialog(QDialog):
             _safe_disconnect(self._download_worker.error)
         if self._model_downloader is not None:
             _safe_disconnect(self._model_downloader.progress)
-            _safe_disconnect(self._model_downloader.finished)
+            _safe_disconnect(self._model_downloader.download_complete)
             _safe_disconnect(self._model_downloader.error)
         if self._worker is not None:
             _safe_disconnect(self._worker.progress)
@@ -515,14 +562,20 @@ class ImportDialog(QDialog):
                     self._download_worker.deleteLater
                 )
         if self._model_downloader is not None:
-            if self._model_downloader.isRunning():
-                self._model_downloader.cancel()
-                self._model_downloader.wait(5000)
+            dl = self._model_downloader
             self._model_downloader = None
-        self._rollback_pending_model_song()
+            if dl.isRunning():
+                dl.cancel()
+                dl.wait(5000)
+            if dl.isRunning():
+                dl.setParent(None)
+                dl.finished.connect(dl.deleteLater)
+            else:
+                dl.deleteLater()
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(5000)
+        self._discard_failed_import_song()
 
         self._cleanup_tmp_dir()
         super().reject()
