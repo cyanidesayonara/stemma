@@ -13,6 +13,24 @@ import sys
 
 from PySide6.QtCore import QSettings
 
+_DATA_DIR_RESET_FLAG = "internal/data_dir_was_reset"
+_DATA_DIR_RESET_NOTICE = (
+    "The saved data folder path was invalid or could not be used.\n\n"
+    "Your library and models now use the default location. "
+    "You can choose another folder in Edit > Preferences."
+)
+
+
+def consume_data_dir_reset_notice(settings: QSettings) -> str | None:
+    """If startup recovered from a bad custom data path, return a one-shot message.
+
+    Clears the internal flag so the dialog is shown at most once.
+    """
+    if not settings.value(_DATA_DIR_RESET_FLAG, False, type=bool):
+        return None
+    settings.remove(_DATA_DIR_RESET_FLAG)
+    return _DATA_DIR_RESET_NOTICE
+
 
 def platform_user_data_dir() -> str:
     """Return the default per-user data directory for stemma."""
@@ -66,7 +84,11 @@ def _merge_legacy_tree(legacy_dir: str, dest_dir: str) -> None:
 def _maybe_migrate_legacy(
     app_root: str, dest_dir: str, settings: QSettings
 ) -> None:
-    """If appropriate, copy legacy ``data/`` into *dest_dir* once."""
+    """If appropriate, copy legacy ``data/`` into *dest_dir* once.
+
+    If copying fails mid-way, the migration flag stays false so a later run
+    can retry (the destination may be partially populated).
+    """
     if settings.value("migration/repo_data_migrated", False, type=bool):
         return
     if os.path.isfile(os.path.join(dest_dir, "library.json")):
@@ -86,12 +108,24 @@ def resolve_data_dir(app_root: str, settings: QSettings) -> str:
     If ``paths/data_dir`` is set in *settings*, that path is used (created if
     needed) and no repo migration is performed. Otherwise the platform default
     user directory is used and legacy ``<app_root>/data`` may be merged in.
+
+    If the custom path is missing, not a directory, or cannot be created, the
+    setting is cleared, :func:`consume_data_dir_reset_notice` will report it,
+    and resolution continues with the default user directory.
     """
     custom = settings.value("paths/data_dir", "")
     if isinstance(custom, str) and custom.strip():
         path = os.path.normpath(os.path.expanduser(custom.strip()))
-        os.makedirs(path, exist_ok=True)
-        return path
+        try:
+            if os.path.lexists(path) and not os.path.isdir(path):
+                raise NotADirectoryError(path)
+            os.makedirs(path, exist_ok=True)
+            if not os.path.isdir(path):
+                raise NotADirectoryError(path)
+            return path
+        except OSError:
+            settings.setValue("paths/data_dir", "")
+            settings.setValue(_DATA_DIR_RESET_FLAG, True)
 
     dest = platform_user_data_dir()
     os.makedirs(dest, exist_ok=True)

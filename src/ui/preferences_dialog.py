@@ -23,10 +23,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    output_device_indices_with_output,
+    parse_stored_output_device_index,
     read_default_export_format,
     read_default_import_6_stem,
     read_default_mp3_bitrate,
-    read_output_device_index,
 )
 from src.data_paths import platform_user_data_dir
 from src.version import __version__
@@ -125,7 +126,7 @@ class PreferencesDialog(QDialog):
     def _populate_output_devices(self) -> None:
         try:
             devices = sd.query_devices()
-        except Exception:
+        except (OSError, ValueError, RuntimeError):
             return
         for i, dev in enumerate(devices):
             ch = int(dev.get("max_output_channels", 0) or 0)
@@ -139,7 +140,10 @@ class PreferencesDialog(QDialog):
         if isinstance(raw, str):
             self._data_dir_edit.setText(raw.strip())
 
-        dev = read_output_device_index(self._settings)
+        dev = parse_stored_output_device_index(self._settings)
+        valid = output_device_indices_with_output()
+        if dev is not None and valid is not None and dev not in valid:
+            dev = None
         target = -1 if dev is None else dev
         for i in range(self._device_combo.count()):
             raw = self._device_combo.itemData(i)
