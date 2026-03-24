@@ -314,15 +314,16 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(False)
         layout.addWidget(self._controls_widget, 1)
 
-        # ── Footer bar (matches library panel's Remove button row) ──
+        # ── Footer bar (aligns with library panel's bottom edge) ──
+        # Library panel bottom: 8px padding + ~36px button + 8px padding = ~52px
         footer_widget = QWidget()
         footer_widget.setStyleSheet("border-top: 1px solid #313244;")
         footer_layout = QHBoxLayout(footer_widget)
-        footer_layout.setContentsMargins(0, 4, 0, 4)
+        footer_layout.setContentsMargins(0, 8, 0, 8)
 
         copyright_label = QLabel("\u00A9 2026 stemma")
         copyright_label.setStyleSheet("color: #45475a; font-size: 9pt; border: none;")
-        footer_layout.addWidget(copyright_label)
+        footer_layout.addWidget(copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         footer_layout.addStretch()
 
@@ -338,13 +339,13 @@ class PlayerControls(QWidget):
             renderer2.render(p2)
             p2.end()
             arpeggio_pixmap = QPixmap.fromImage(img2).scaled(
-                180, 30, Qt.AspectRatioMode.KeepAspectRatio,
+                260, 46, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             arpeggio_label = QLabel()
             arpeggio_label.setPixmap(arpeggio_pixmap)
             arpeggio_label.setStyleSheet("border: none;")
-            footer_layout.addWidget(arpeggio_label)
+            footer_layout.addWidget(arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         layout.addWidget(footer_widget)
 
