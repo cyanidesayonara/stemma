@@ -1,7 +1,7 @@
 """Waveform display widget with playback cursor and loop markers.
 
 Custom QWidget using QPainter for rendering. Supports click-to-seek
-and drag-to-seek. Designed for the Catppuccin Mocha dark theme.
+and drag-to-seek.
 """
 
 from __future__ import annotations
@@ -12,12 +12,12 @@ from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent
 from PySide6.QtWidgets import QWidget, QSizePolicy
 
 
-# Catppuccin Mocha palette
+# Brand palette
 _BG_COLOR = QColor("#1e1e2e")
-_WAVEFORM_COLOR = QColor("#89b4fa")  # Accent blue
+_WAVEFORM_COLOR = QColor("#4fb8b8")  # Brand teal
 _CURSOR_COLOR = QColor("#cdd6f4")    # Text color
 _LOOP_MARKER_COLOR = QColor("#f38ba8")  # Red
-_LOOP_REGION_COLOR = QColor(137, 180, 250, 38)  # Accent at ~15% opacity
+_LOOP_REGION_COLOR = QColor(79, 184, 184, 38)  # Brand teal at ~15% opacity
 
 _WAVEFORM_HEIGHT = 80
 

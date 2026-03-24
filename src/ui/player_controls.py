@@ -5,9 +5,13 @@ Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
+import os
+
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap, QPolygonF
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -23,7 +27,60 @@ from src.ui.styles import STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _PEAK_DEBOUNCE_MS = 80
+_ICON_SIZE = 24
+_ICON_COLOR = QColor("#cdd6f4")
+
+
+def _make_icon(draw_fn) -> QIcon:
+    """Create a crisp QIcon by painting with *draw_fn(painter, size)*."""
+    pixmap = QPixmap(QSize(_ICON_SIZE, _ICON_SIZE))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_ICON_COLOR)
+    draw_fn(p, _ICON_SIZE)
+    p.end()
+    return QIcon(pixmap)
+
+
+def _draw_play(p: QPainter, s: int) -> None:
+    m = int(s * 0.2)
+    p.drawPolygon(QPolygonF([
+        QPointF(m + 2, m), QPointF(s - m, s / 2), QPointF(m + 2, s - m),
+    ]))
+
+
+def _draw_pause(p: QPainter, s: int) -> None:
+    m = int(s * 0.22)
+    w = int(s * 0.18)
+    p.drawRect(m, m, w, s - 2 * m)
+    p.drawRect(s - m - w, m, w, s - 2 * m)
+
+
+def _draw_stop(p: QPainter, s: int) -> None:
+    m = int(s * 0.22)
+    p.drawRect(m, m, s - 2 * m, s - 2 * m)
+
+
+def _render_svg(svg_path: str, width: int, height: int) -> QPixmap | None:
+    """Render an SVG file to a QPixmap at the given size, or None on failure."""
+    renderer = QSvgRenderer(svg_path)
+    if not renderer.isValid():
+        return None
+    # Render at 2x for crisp display, then scale down.
+    img = QImage(width * 2, height * 2, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    painter = QPainter(img)
+    renderer.render(painter)
+    painter.end()
+    return QPixmap.fromImage(img).scaled(
+        width, height,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 def _format_time(seconds: float) -> str:
@@ -59,6 +116,7 @@ class StemRow(QWidget):
         self._mute_btn.setFixedSize(32, 28)
         self._mute_btn.setStyleSheet("padding: 2px;")
         self._mute_btn.setToolTip(f"Mute {stem_name}")
+        self._mute_btn.setAccessibleName(f"Mute {stem_name}")
         self._mute_btn.toggled.connect(self._on_mute)
         layout.addWidget(self._mute_btn)
 
@@ -67,19 +125,22 @@ class StemRow(QWidget):
         self._solo_btn.setFixedSize(32, 28)
         self._solo_btn.setStyleSheet("padding: 2px;")
         self._solo_btn.setToolTip(f"Solo {stem_name}")
+        self._solo_btn.setAccessibleName(f"Solo {stem_name}")
         self._solo_btn.toggled.connect(self._on_solo)
         layout.addWidget(self._solo_btn)
 
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
-        self._volume_slider.setToolTip(f"{stem_name} volume")
+        self._volume_slider.setToolTip(f"{stem_name} volume (0–200%, double-click to reset)")
+        self._volume_slider.setAccessibleName(f"{stem_name} volume")
         self._volume_slider.valueChanged.connect(self._on_volume)
+        self._volume_slider.mouseDoubleClickEvent = lambda _: self._volume_slider.setValue(100)
         layout.addWidget(self._volume_slider)
 
         self._vol_label = QLabel("100%")
-        self._vol_label.setFixedWidth(40)
+        self._vol_label.setFixedWidth(45)
         self._vol_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self._vol_label)
 
@@ -125,16 +186,55 @@ class PlayerControls(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
 
+        # ── Empty state (shown when no song is loaded) ──
+        self._empty_widget = QWidget()
+        empty_layout = QVBoxLayout(self._empty_widget)
+        empty_layout.addStretch(1)  # Top spacer
+
+        self._empty_logo = QLabel()
+        logo_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_main_dark.svg")
+        pixmap = _render_svg(logo_path, 300, 185)
+        if pixmap:
+            self._empty_logo.setPixmap(pixmap)
+        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        hint = QLabel("Drop an audio file or use File > Import")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color: #585b70; margin-top: 0px;")
+        empty_layout.addWidget(hint, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        empty_layout.addStretch(1)  # Bottom spacer (centers content vertically)
+
+        layout.addWidget(self._empty_widget, 1)
+
+        # ── Player controls (hidden until a song is loaded) ──
+        self._controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self._controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+
         # -- Transport bar --
         transport = QHBoxLayout()
 
-        self._play_btn = QPushButton("Play")
-        self._play_btn.setFixedWidth(70)
+        self._play_icon = _make_icon(_draw_play)
+        self._pause_icon = _make_icon(_draw_pause)
+        self._stop_icon = _make_icon(_draw_stop)
+
+        self._play_btn = QPushButton()
+        self._play_btn.setIcon(self._play_icon)
+        self._play_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._play_btn.setFixedSize(36, 36)
+        self._play_btn.setToolTip("Play / Pause (Space)")
+        self._play_btn.setAccessibleName("Play")
         self._play_btn.clicked.connect(self._on_play_pause)
         transport.addWidget(self._play_btn)
 
-        self._stop_btn = QPushButton("Stop")
-        self._stop_btn.setFixedWidth(60)
+        self._stop_btn = QPushButton()
+        self._stop_btn.setIcon(self._stop_icon)
+        self._stop_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._stop_btn.setFixedSize(36, 36)
+        self._stop_btn.setToolTip("Stop (S)")
+        self._stop_btn.setAccessibleName("Stop")
         self._stop_btn.clicked.connect(self._on_stop)
         transport.addWidget(self._stop_btn)
 
@@ -144,12 +244,12 @@ class PlayerControls(QWidget):
         transport.addWidget(self._time_label)
 
         transport.addStretch()
-        layout.addLayout(transport)
+        controls_layout.addLayout(transport)
 
-        # -- Waveform display (replaces seek slider) --
+        # -- Waveform display --
         self._waveform = WaveformWidget()
         self._waveform.seek_requested.connect(self._on_waveform_seek)
-        layout.addWidget(self._waveform)
+        controls_layout.addWidget(self._waveform)
 
         # -- A-B loop controls --
         loop_bar = QHBoxLayout()
@@ -157,12 +257,14 @@ class PlayerControls(QWidget):
         self._loop_a_btn = QPushButton("Set A")
         self._loop_a_btn.setFixedWidth(60)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
+        self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
         self._loop_b_btn.setFixedWidth(60)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
+        self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
         loop_bar.addWidget(self._loop_b_btn)
 
@@ -170,12 +272,14 @@ class PlayerControls(QWidget):
         self._loop_toggle_btn.setCheckable(True)
         self._loop_toggle_btn.setFixedWidth(60)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
+        self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
         loop_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
         self._loop_clear_btn.setFixedWidth(60)
         self._loop_clear_btn.setToolTip("Clear loop points")
+        self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
         loop_bar.addWidget(self._loop_clear_btn)
 
@@ -184,7 +288,7 @@ class PlayerControls(QWidget):
         loop_bar.addWidget(self._loop_label)
 
         loop_bar.addStretch()
-        layout.addLayout(loop_bar)
+        controls_layout.addLayout(loop_bar)
 
         # -- Speed control --
         speed_bar = QHBoxLayout()
@@ -197,6 +301,7 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.setFixedWidth(80)
         self._speed_combo.setToolTip("Playback speed ([ / ])")
+        self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
         speed_bar.addWidget(self._speed_combo)
 
@@ -205,23 +310,43 @@ class PlayerControls(QWidget):
         speed_bar.addWidget(self._speed_status)
 
         speed_bar.addStretch()
-        layout.addLayout(speed_bar)
+        controls_layout.addLayout(speed_bar)
 
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
-        layout.addWidget(self._mixer_label)
+        controls_layout.addWidget(self._mixer_label)
 
         self._stem_container = QVBoxLayout()
-        layout.addLayout(self._stem_container)
+        controls_layout.addLayout(self._stem_container)
 
-        # Placeholder when no stems are loaded.
-        self._empty_label = QLabel("Import a song to get started.")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet("color: #585b70; padding: 40px;")
-        layout.addWidget(self._empty_label)
+        controls_layout.addStretch()
 
-        layout.addStretch()
+        self._controls_widget.setVisible(False)
+        layout.addWidget(self._controls_widget, 1)
+
+        # ── Footer bar (aligns with library panel's bottom edge) ──
+        # Library panel bottom: 8px padding + ~36px button + 8px padding = ~52px
+        footer_widget = QWidget()
+        footer_widget.setStyleSheet("border-top: 1px solid #313244;")
+        footer_layout = QHBoxLayout(footer_widget)
+        footer_layout.setContentsMargins(0, 4, 0, 4)
+
+        copyright_label = QLabel("\u00A9 2026 stemma")
+        copyright_label.setStyleSheet("color: #45475a; font-size: 9pt; border: none;")
+        footer_layout.addWidget(copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        footer_layout.addStretch()
+
+        arpeggio_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_arpeggio_dark.svg")
+        arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
+        if arpeggio_pixmap:
+            arpeggio_label = QLabel()
+            arpeggio_label.setPixmap(arpeggio_pixmap)
+            arpeggio_label.setStyleSheet("border: none;")
+            footer_layout.addWidget(arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(footer_widget)
 
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
@@ -237,7 +362,9 @@ class PlayerControls(QWidget):
             row.deleteLater()
         self._stem_rows.clear()
 
-        self._empty_label.setVisible(not stem_names)
+        has_stems = bool(stem_names)
+        self._empty_widget.setVisible(not has_stems)
+        self._controls_widget.setVisible(has_stems)
 
         for name in stem_names:
             row = StemRow(name, self._player)
@@ -251,8 +378,15 @@ class PlayerControls(QWidget):
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
 
-        self._do_recompute_peaks()
-        self._update_waveform_loop_markers()
+        if stem_names:
+            self._do_recompute_peaks()
+
+    def clear_song(self) -> None:
+        """Return to the empty logo state."""
+        self.set_stem_names([])
+        self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
+        self._waveform.set_position(0.0)
+        self._time_label.setText("0:00 / 0:00")
 
     def toggle_stem_mute(self, stem_name: str) -> None:
         """Toggle the mute state of a stem and update the UI button."""
@@ -284,10 +418,12 @@ class PlayerControls(QWidget):
             self._waveform.set_position(pos_s / total)
 
     def _on_state_changed(self, playing: bool) -> None:
-        self._play_btn.setText("Pause" if playing else "Play")
+        self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
+        self._play_btn.setAccessibleName("Pause" if playing else "Play")
 
     def _on_play_finished(self) -> None:
-        self._play_btn.setText("Play")
+        self._play_btn.setIcon(self._play_icon)
+        self._play_btn.setAccessibleName("Play")
         # Show cursor at current position (which may be loop-A, not 0).
         total = self._player.total_seconds
         if total > 0:

@@ -8,8 +8,7 @@ Menu bar: File > Import / Export.
 import os
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QImage, QKeySequence, QPainter, QPixmap, QShortcut
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -86,6 +85,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 3)
 
         self.setCentralWidget(splitter)
+        self.setStatusBar(None)  # No global status bar
 
     def _setup_menu(self) -> None:
         """Create the menu bar."""
@@ -97,6 +97,9 @@ class MainWindow(QMainWindow):
 
         export_action = file_menu.addAction("&Export Mix...")
         export_action.triggered.connect(self._on_export)
+
+        close_song_action = file_menu.addAction("&Close Song")
+        close_song_action.triggered.connect(self._on_close_song)
 
         file_menu.addSeparator()
 
@@ -174,28 +177,16 @@ class MainWindow(QMainWindow):
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
 
-        root = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)
-        )))
-        svg_path = os.path.join(root, "assets", "icons", "logo_main_dark.svg")
+        from src.ui.player_controls import _ROOT_DIR, _render_svg
+
+        svg_path = os.path.join(_ROOT_DIR, "assets", "icons", "logo_main_dark.svg")
 
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
 
         logo_label = QLabel()
-        # Render SVG at 2x for crisp display, then scale down
-        render_w, render_h = 600, 370
-        renderer = QSvgRenderer(svg_path)
-        if renderer.isValid():
-            image = QImage(render_w, render_h, QImage.Format.Format_ARGB32_Premultiplied)
-            image.fill(0)
-            painter = QPainter(image)
-            renderer.render(painter)
-            painter.end()
-            pixmap = QPixmap.fromImage(image).scaled(
-                300, 240, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+        pixmap = _render_svg(svg_path, 300, 240)
+        if pixmap:
             logo_label.setPixmap(pixmap)
         logo_label.setFixedSize(300, 240)
         outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
@@ -271,6 +262,14 @@ class MainWindow(QMainWindow):
             self._player.load_stems(stem_paths)
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
+            self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
+
+    def _on_close_song(self) -> None:
+        """Stop playback and return to the empty logo state."""
+        self._player.stop()
+        self._player_controls.clear_song()
+        self._current_song_id = None
+        self.setWindowTitle("stemma")
 
     def _on_import(self) -> None:
         """Open the import dialog."""
@@ -363,13 +362,10 @@ class MainWindow(QMainWindow):
             self._export_worker.finished.connect(self._on_export_finished)
             self._export_worker.error.connect(self._on_export_error)
             
-            self.statusBar().showMessage("Exporting mix... please wait.", 10000)
             self._export_worker.start()
 
     def _on_export_finished(self, path: str) -> None:
-        self.statusBar().showMessage("Export complete.", 5000)
         QMessageBox.information(self, "Export", f"Mix successfully exported to {path}")
 
     def _on_export_error(self, err: str) -> None:
-        self.statusBar().clearMessage()
         QMessageBox.critical(self, "Export Error", f"Failed to export mix:\n{err}")
