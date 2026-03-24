@@ -92,13 +92,18 @@ class SongLibrary:
         """
         song_id = uuid.uuid4().hex[:12]
         song_dir = os.path.join(self._songs_dir, song_id)
-        os.makedirs(song_dir, exist_ok=True)
+        try:
+            os.makedirs(song_dir, exist_ok=True)
 
-        # Copy the source audio into the song directory so the library is
-        # self-contained and does not break if the original file moves.
-        ext = os.path.splitext(original_path)[1]
-        internal_path = os.path.join(song_dir, f"original{ext}")
-        shutil.copy2(original_path, internal_path)
+            # Copy the source audio into the song directory so the library is
+            # self-contained and does not break if the original file moves.
+            ext = os.path.splitext(original_path)[1]
+            internal_path = os.path.join(song_dir, f"original{ext}")
+            shutil.copy2(original_path, internal_path)
+        except OSError:
+            if os.path.isdir(song_dir):
+                shutil.rmtree(song_dir, ignore_errors=True)
+            raise
 
         song = Song(
             id=song_id,
@@ -110,7 +115,12 @@ class SongLibrary:
             date_added=datetime.now(timezone.utc).isoformat(),
         )
         self._songs.append(song)
-        self._save()
+        try:
+            self._save()
+        except OSError:
+            self._songs = [s for s in self._songs if s.id != song_id]
+            shutil.rmtree(song_dir, ignore_errors=True)
+            raise
         return song
 
     def remove_song(self, song_id: str) -> None:

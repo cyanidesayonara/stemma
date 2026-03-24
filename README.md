@@ -10,12 +10,13 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - GPU-accelerated inference via ONNX Runtime + DirectML
 - Multi-track player with per-stem mute/solo/volume controls
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
-- Import from YouTube URL (requires ffmpeg)
+- Import from YouTube URL (bundled ffmpeg when available; otherwise ffmpeg on PATH)
+- Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
-- A-B loop for practice sections
-- Keyboard shortcuts for transport and stem control
-- Dark-themed Qt desktop interface with window state persistence
+- A-B loop for practice sections; pitch-preserving playback speed presets
+- Keyboard shortcuts for transport, stems, loop, and speed
+- Dark / light Qt themes; window state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
 
 ## Requirements
@@ -23,7 +24,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Windows 10/11
 - Python 3.14
 - NVIDIA GPU recommended (DirectML, falls back to CPU)
-- ffmpeg on PATH (required for YouTube import)
+- ffmpeg on PATH only if the bundled binary (imageio-ffmpeg) is unavailable (YouTube import)
 
 ## Development Setup
 
@@ -44,7 +45,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~8 seconds)
+# Fast tests (~10 seconds, ~286 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)
@@ -66,6 +67,7 @@ pytest -m hardware
 | A | Set loop start point |
 | B | Set loop end point |
 | L | Toggle A-B loop |
+| [ / ] | Slower / faster playback speed |
 
 ## Project Documentation
 
