@@ -8,12 +8,17 @@ Menu bar: File > Import / Export.
 import os
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QVBoxLayout,
 )
 
 from src.version import __version__
@@ -164,19 +169,47 @@ class MainWindow(QMainWindow):
             self._player.play()
 
     def _on_about(self) -> None:
-        """Show the About dialog."""
-        QMessageBox.about(
-            self,
-            "About stemma",
-            f"<h2>stemma</h2>"
+        """Show the About dialog with the main logo."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About stemma")
+        dlg.setFixedSize(420, 200)
+
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icons", "logo_about.png",
+        )
+
+        outer = QHBoxLayout(dlg)
+        outer.setContentsMargins(20, 20, 20, 20)
+
+        logo_label = QLabel()
+        pixmap = QPixmap(logo_path)
+        if not pixmap.isNull():
+            logo_label.setPixmap(pixmap)
+        logo_label.setFixedSize(200, 150)
+        outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        right = QVBoxLayout()
+        right.setSpacing(6)
+
+        info = QLabel(
+            f"<h2 style='margin:0'>stemma</h2>"
             f"<p>Version {__version__}</p>"
             f"<p>A music player with AI stem separation.</p>"
-            f"<p>Separate songs into vocals, drums, bass, and more — "
-            f"then mute, solo, and remix in real time.</p>"
             f'<p><a href="https://github.com/cyanidesayonara/stemma">'
             f"github.com/cyanidesayonara/stemma</a></p>"
-            f"<p>MIT License</p>",
+            f"<p>MIT License</p>"
         )
+        info.setOpenExternalLinks(True)
+        info.setWordWrap(True)
+        right.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(dlg.accept)
+        right.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
+
+        outer.addLayout(right)
+        dlg.exec()
 
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
