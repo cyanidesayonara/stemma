@@ -234,24 +234,25 @@ class TestThemeToggleButton:
         assert "\u2600" in win._theme_btn.text()
 
     def test_toggle_button_shows_moon_in_light_mode(self, app):
-        """In light mode the button shows a crescent moon (switch to dark)."""
-        win = self._make_window()
-        win._theme_action.setChecked(True)
+        """In light mode the button shows a drawn moon icon (switch to dark)."""
+        win = self._make_window(theme="light")
         assert win._theme == "light"
-        assert "\u263D" in win._theme_btn.text()
+        assert win._theme_btn.text() == ""
+        assert not win._theme_btn.icon().isNull()
 
-    def test_toggle_button_syncs_with_menu_action(self, app):
-        """Clicking the toggle button toggles the menu action."""
+    def test_button_click_toggles_theme(self, app):
+        """Clicking the toggle switches dark -> light."""
         win = self._make_window()
-        assert not win._theme_action.isChecked()
+        assert win._theme == "dark"
         win._theme_btn.click()
-        assert win._theme_action.isChecked()
         assert win._theme == "light"
+        assert not win._theme_btn.icon().isNull()
 
-    def test_menu_action_syncs_with_toggle_button(self, app):
-        """Toggling the menu action updates the button text."""
+    def test_second_click_returns_to_dark(self, app):
+        """Two clicks cycle back to dark with sun text."""
         win = self._make_window()
-        win._theme_action.setChecked(True)
-        assert "\u263D" in win._theme_btn.text()
-        win._theme_action.setChecked(False)
+        win._theme_btn.click()
+        win._theme_btn.click()
+        assert win._theme == "dark"
         assert "\u2600" in win._theme_btn.text()
+        assert win._theme_btn.icon().isNull()
