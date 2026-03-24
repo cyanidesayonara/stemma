@@ -8,7 +8,8 @@ Menu bar: File > Import / Export.
 import os
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -169,24 +170,35 @@ class MainWindow(QMainWindow):
             self._player.play()
 
     def _on_about(self) -> None:
-        """Show the About dialog with the main logo."""
+        """Show the About dialog with the main logo rendered from SVG."""
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
-        dlg.setFixedSize(420, 200)
+        dlg.setFixedSize(480, 220)
 
-        logo_path = os.path.join(
+        svg_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "icons", "logo_about.png",
+            "assets", "icons", "logo_main_dark.svg",
         )
 
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
 
         logo_label = QLabel()
-        pixmap = QPixmap(logo_path)
-        if not pixmap.isNull():
+        # Render SVG at 2x for crisp display, then scale down
+        render_w, render_h = 480, 296
+        renderer = QSvgRenderer(svg_path)
+        if renderer.isValid():
+            image = QImage(render_w, render_h, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(0)
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+            pixmap = QPixmap.fromImage(image).scaled(
+                240, 148, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
             logo_label.setPixmap(pixmap)
-        logo_label.setFixedSize(200, 150)
+        logo_label.setFixedSize(240, 150)
         outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         right = QVBoxLayout()
