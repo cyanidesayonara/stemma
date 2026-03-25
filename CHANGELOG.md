@@ -4,6 +4,18 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-26 -- Metronome (#57, PR #86) and count-in (#78, PR #87)
+
+### Done
+- **Metronome:** BPM spinbox (20--300), tap tempo, toggle (M), volume slider, click mixed in the audio callback with phase tied to full PortAudio block size; `set_metronome_bpm` rejects non-finite values; `tap_tempo` in `src/metronome.py`.
+- **Count-in:** Optional pre-roll (1--8 beats, default 4) before stems start; uses metronome BPM/volume; optional count-in before each A-B repeat; arms only from position 0 or loop A (not on resume mid-song); `C` shortcut; Help > Keyboard Shortcuts dialog; session keys for count-in state; QCheckBox styling for loop-repeat option.
+- **A-B loop UX:** With looping active and a valid region, Stop jumps to loop A; seek clamps into `[loop_a, loop_b)` (outside snaps to A). Count-in boundary uses the same valid-region check as the callback.
+
+### Metrics
+- 362 fast tests, 5 slow ONNX tests, 1 hardware playback test.
+
+---
+
 ## 2026-03-25 -- Session persistence (#55, PR #85)
 
 ### Done

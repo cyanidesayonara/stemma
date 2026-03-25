@@ -234,11 +234,11 @@ stemma/
 
 ### Post-1.0 Backlog
 Tickets ship as incremental 1.x releases (semver).
-- [ ] Session persistence (#55)
-- [ ] Metronome with BPM entry (#57)
-- [ ] Count-in before playback/loop start (#78)
+- [x] Session persistence (#55, PR #85)
+- [x] Metronome with BPM entry (#57, PR #86)
+- [x] Count-in before playback/loop start (#78, PR #87)
 - [ ] Record audio track (#79)
-- [ ] Key transposition / tempo manipulation (#42)
+- [ ] Tempo/key detection and beat-synced metronome (#42)
 - [ ] Animated startup logo (#76)
 - [ ] MSIX packaging for Microsoft Store (#74)
 - [ ] Real-time streaming stem separation (#13)
