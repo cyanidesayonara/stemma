@@ -5,8 +5,8 @@ def tap_tempo(tap_times: list[float], max_taps: int = 8) -> float:
     """Calculate BPM from a list of tap timestamps.
 
     Args:
-        tap_times: Monotonic timestamps in seconds (e.g. from time.time()).
-            Only the last *max_taps* entries are used.
+        tap_times: Monotonic timestamps in seconds (e.g. from
+            ``time.monotonic()``).  Only the last *max_taps* entries are used.
         max_taps: Maximum number of recent taps to average over.
 
     Returns:
