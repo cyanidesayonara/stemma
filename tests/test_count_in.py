@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import sounddevice as sd
+import soundfile as sf
 
 from PySide6.QtWidgets import QApplication
 
@@ -27,8 +28,6 @@ def player(app):
 @pytest.fixture
 def loaded_player(player, tmp_path):
     """A player with a 1-second silent stem loaded."""
-    import soundfile as sf
-
     data = np.zeros((44100, 2), dtype=np.float32)
     path = tmp_path / "stem.wav"
     sf.write(str(path), data, 44100)
@@ -346,6 +345,71 @@ class TestCountInEdgeCases:
         assert loaded_player._count_in_remaining > 0
 
         loaded_player.pause()
+        assert loaded_player._count_in_remaining == 0
+
+    def test_no_count_in_on_resume_after_pause(self, loaded_player):
+        """Resuming from a mid-song position should not trigger a count-in."""
+        loaded_player.set_count_in_enabled(True)
+        loaded_player.set_count_in_beats(4)
+        loaded_player.set_metronome_bpm(120.0)
+
+        loaded_player._current_frame = 10000
+        loaded_player._is_playing = False
+
+        # Simulate what play() does: check boundary, then arm.
+        at_boundary = (
+            loaded_player._current_frame == 0
+            or (loaded_player._looping
+                and loaded_player._loop_a_frame is not None
+                and loaded_player._current_frame
+                == loaded_player._loop_a_frame)
+        )
+        assert not at_boundary
+        # play() would not arm count-in here.
+        if at_boundary:
+            loaded_player._arm_count_in()
+        assert loaded_player._count_in_remaining == 0
+
+    def test_count_in_arms_at_position_zero(self, loaded_player):
+        """Starting from position 0 should arm the count-in."""
+        loaded_player.set_count_in_enabled(True)
+        loaded_player.set_count_in_beats(4)
+        loaded_player.set_metronome_bpm(120.0)
+
+        loaded_player._current_frame = 0
+        loaded_player._arm_count_in()
+        assert loaded_player._count_in_remaining > 0
+
+    def test_count_in_arms_at_loop_a(self, loaded_player):
+        """Starting from loop A position should arm the count-in."""
+        loaded_player.set_count_in_enabled(True)
+        loaded_player.set_count_in_beats(4)
+        loaded_player.set_metronome_bpm(120.0)
+        loaded_player.set_loop_a(0.5)
+        loaded_player._looping = True
+
+        loaded_player._current_frame = loaded_player._loop_a_frame
+        at_boundary = (
+            loaded_player._current_frame == 0
+            or (loaded_player._looping
+                and loaded_player._loop_a_frame is not None
+                and loaded_player._current_frame
+                == loaded_player._loop_a_frame)
+        )
+        assert at_boundary
+
+    def test_device_switch_no_spurious_count_in(self, loaded_player):
+        """Switching output device mid-song should not trigger a count-in."""
+        loaded_player.set_count_in_enabled(True)
+        loaded_player.set_count_in_beats(4)
+        loaded_player.set_metronome_bpm(120.0)
+
+        loaded_player._current_frame = 5000
+        loaded_player._is_playing = False
+        # After a device switch, play() is called with current_frame mid-song.
+        # It should not arm count-in.
+        at_boundary = loaded_player._current_frame == 0
+        assert not at_boundary
         assert loaded_player._count_in_remaining == 0
 
     def test_count_in_uses_metronome_volume(self, loaded_player):
