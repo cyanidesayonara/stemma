@@ -46,6 +46,7 @@ stemma/
     paths.py           # app_root(): frozen-build-aware root dir (sys._MEIPASS)
     version.py         # __version__ string
     import_messages.py # User-facing import / download / separation error text
+    metronome.py       # Tap tempo / BPM helpers for metronome UI
     separator.py       # ONNX stem separation engine
     model_manager.py   # Download/cache ONNX models
     player.py          # Multi-track audio player
@@ -62,7 +63,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~286 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~362 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -84,6 +85,8 @@ stemma/
     test_theme.py
     test_integration.py
     test_session_persistence.py
+    test_metronome.py
+    test_count_in.py
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
@@ -121,7 +124,7 @@ All core functionality implemented and tested:
 
 ### Phase 2 (Polish) -- Complete
 - MP3 export (lameenc, 320kbps)
-- Keyboard shortcuts (Space, S, arrows, 1-6, A/B/L for loop)
+- Keyboard shortcuts (Space, S, arrows, 1-6, A/B/L, [ / ], M, C; Help > Keyboard Shortcuts)
 - Per-stem volume sliders
 - Window state persistence
 - Wiener filter + soft gate post-processing
@@ -145,17 +148,20 @@ All core functionality implemented and tested:
 - [x] User data directory, preferences, single-instance lock (#72, PR #81)
 - [x] PyInstaller packaging + GitHub Release (#56, PR #83)
 
-### Post-1.0 Backlog
-Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
+### v1.1 Release -- Shipped
 - [x] Session persistence (#55, PR #85)
 - [x] Metronome with BPM entry (#57, PR #86)
-- [x] Count-in before playback/loop start (#78)
+- [x] Count-in before playback/loop start (#78, PR #87)
+
+### Post-1.0 Backlog
+Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
 - [ ] Record audio track (#79)
 - [ ] Tempo/key detection and beat-synced metronome (#42)
 - [ ] Animated startup logo (#76)
 - [ ] MSIX packaging (#74)
 - [ ] Experimental DSP (#28)
 - [ ] Real-time streaming (#13)
+
 ## Test Suite
 
 ```

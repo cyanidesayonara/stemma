@@ -4,6 +4,20 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-26 -- v1.1.0 release
+
+Shipped as GitHub Release **v1.1.0** (tag `v1.1.0`). User-facing highlights:
+
+- Metronome with BPM (20--300), tap tempo, toggle and volume (#57, PR #86).
+- Count-in pre-roll (1--8 beats), optional on loop repeats, `C` shortcut (#78, PR #87).
+- Session persistence for song, position, stems, loop, speed, metronome, and count-in (#55, PR #85).
+- A-B loop: while **L** is on, Stop jumps to loop A; seek clamps into the loop region (PR #87).
+- **Help > Keyboard Shortcuts** dialog (PR #87).
+
+`src/version.py` set to **1.1.0**.
+
+---
+
 ## 2026-03-26 -- Metronome (#57, PR #86) and count-in (#78, PR #87)
 
 ### Done

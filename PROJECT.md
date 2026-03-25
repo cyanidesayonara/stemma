@@ -81,6 +81,7 @@ stemma/
 │   ├── app_settings.py        # Typed QSettings (audio device, import/export defaults)
 │   ├── data_paths.py          # Per-user data directory resolution
 │   ├── import_messages.py     # User-facing text for import/download failures
+│   ├── metronome.py           # Tap tempo helper for metronome UI
 │   ├── paths.py               # app_root(): frozen-build-aware root dir
 │   ├── version.py             # __version__ string
 │   ├── separator.py           # ONNX Runtime stem separation
@@ -93,8 +94,8 @@ stemma/
 │   ├── waveform.py            # Waveform peak computation (numpy)
 │   └── ui/
 │       ├── __init__.py
-│       ├── main_window.py     # Main window layout, menus, drag-and-drop import
-│       ├── player_controls.py # Transport + waveform + stem mixer
+│       ├── main_window.py     # Main window, session restore, shortcuts, drag-and-drop
+│       ├── player_controls.py # Transport, waveform, metronome, count-in, stem mixer
 │       ├── waveform_widget.py # Waveform display (QPainter)
 │       ├── library_panel.py   # Song list with remove
 │       ├── import_dialog.py   # Import songs + YouTube URL + model download
@@ -104,7 +105,7 @@ stemma/
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_separator.py      # 22 tests
 │   ├── test_model_manager.py  # 9 tests
-│   ├── test_player.py         # 25 tests
+│   ├── test_player.py         # Player, A-B loop, metronome-related behaviour
 │   ├── test_library.py        # 22 tests
 │   ├── test_downloader.py     # 26 tests
 │   ├── test_exporter.py       # 18 tests
@@ -115,6 +116,8 @@ stemma/
 │   ├── test_import_messages.py
 │   ├── test_data_paths.py
 │   ├── test_app_settings.py
+│   ├── test_metronome.py
+│   ├── test_count_in.py
 │   ├── test_theme.py
 │   └── test_integration.py    # includes slow + hardware markers
 └── data/                      # Created at runtime
@@ -152,10 +155,11 @@ stemma/
 
 ### `player.py` — Multi-Track Audio Player
 - Loads stem WAVs as NumPy arrays
-- `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output
+- `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output; optional metronome click mix; optional count-in pre-roll before advancing `_current_frame`
 - API: `play()`, `pause()`, `stop()`, `seek()`, `set_mute()`, `set_solo()`, `set_volume()`
 - Per-stem volume control (0.0-2.0)
-- A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`
+- A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`. While looping is on and the region is valid (`B > A`), **Stop** seeks to loop A (not track start); **seek** clamps into `[A, B)` (outside snaps to A)
+- Metronome and count-in settings (BPM, volume, beats, loop-repeat count-in)
 - Tracks playback position for UI sync
 - PortAudioError on open/start: stream cleanup and **`playback_failed`** signal (user-facing message for UI dialogs)
 
@@ -183,8 +187,8 @@ stemma/
 - Respects mute/solo state (same logic as audio callback)
 
 ### UI Modules
-- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File / Edit (Preferences) / Help. Keyboard shortcuts. Window state persistence via QSettings. Drag-and-drop audio import. Connects **`playback_failed`** and startup warning when no audio output devices exist.
-- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform display with click-to-seek, playback cursor, and A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems (vocals=purple, drums=orange, bass=blue, guitar=red, piano=green, other=gray). Waveform recomputes on mute/solo/volume changes. Playback speed presets.
+- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File / Edit (Preferences) / Help (Keyboard Shortcuts, About). Keyboard shortcuts. Window geometry/state and **session persistence** (last song, position, mixer, loop, speed, metronome, count-in) via QSettings. Drag-and-drop audio import. Connects **`playback_failed`** and startup warning when no audio output devices exist.
+- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform with click-to-seek, cursor, A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Metronome row (BPM, tap, toggle, volume). Count-in row (toggle, beats, loop-repeat option). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems. Waveform recomputes on mute/solo/volume changes. Playback speed presets.
 - **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
 - **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
 - **`import_dialog.py`** — File browser or YouTube URL, metadata fields, model variant (4/6 stem). If ONNX is missing, downloads model with progress; on any failure before successful import completion, removes the new library row. Large file (100 MiB+) confirmation. **Retry import** after errors. Workers cancelled and rolled back on dialog reject.
@@ -243,6 +247,13 @@ Tickets ship as incremental 1.x releases (semver).
 - [ ] MSIX packaging for Microsoft Store (#74)
 - [ ] Real-time streaming stem separation (#13)
 - [ ] Experimental DSP (#28)
+
+### Release 1.1.0 (shipped)
+- Session persistence across restarts (#55).
+- Metronome: BPM 20--300, tap tempo, mix in callback (#57).
+- Count-in: optional beats before playback; optional before each loop repeat (#78).
+- Loop UX: Stop and seek respect the A-B region while looping is on.
+- Help > Keyboard Shortcuts dialog.
 
 ---
 
