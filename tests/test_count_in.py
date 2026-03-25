@@ -359,8 +359,7 @@ class TestCountInEdgeCases:
         # Simulate what play() does: check boundary, then arm.
         at_boundary = (
             loaded_player._current_frame == 0
-            or (loaded_player._looping
-                and loaded_player._loop_a_frame is not None
+            or (loaded_player._loop_region_is_active()
                 and loaded_player._current_frame
                 == loaded_player._loop_a_frame)
         )
@@ -386,13 +385,13 @@ class TestCountInEdgeCases:
         loaded_player.set_count_in_beats(4)
         loaded_player.set_metronome_bpm(120.0)
         loaded_player.set_loop_a(0.5)
-        loaded_player._looping = True
+        loaded_player.set_loop_b(0.8)
+        loaded_player.set_looping(True)
 
         loaded_player._current_frame = loaded_player._loop_a_frame
         at_boundary = (
             loaded_player._current_frame == 0
-            or (loaded_player._looping
-                and loaded_player._loop_a_frame is not None
+            or (loaded_player._loop_region_is_active()
                 and loaded_player._current_frame
                 == loaded_player._loop_a_frame)
         )
