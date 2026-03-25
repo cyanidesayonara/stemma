@@ -148,10 +148,10 @@ All core functionality implemented and tested:
 ### Post-1.0 Backlog
 Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
 - [x] Session persistence (#55, PR #85)
-- [ ] Metronome with BPM entry (#57)
-- [ ] Count-in before playback/loop start (#78)
+- [x] Metronome with BPM entry (#57, PR #86)
+- [x] Count-in before playback/loop start (#78)
 - [ ] Record audio track (#79)
-- [ ] Tempo/key manipulation (#42)
+- [ ] Tempo/key detection and beat-synced metronome (#42)
 - [ ] Animated startup logo (#76)
 - [ ] MSIX packaging (#74)
 - [ ] Experimental DSP (#28)
@@ -159,7 +159,7 @@ Tickets ship as incremental 1.x releases (semver: minor for features, patch for 
 ## Test Suite
 
 ```
-pytest                                    # ~286 fast tests (~10s)
+pytest                                    # ~354 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
