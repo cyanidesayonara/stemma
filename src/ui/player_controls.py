@@ -6,6 +6,7 @@ Color-coded stems. Full implementation in ticket #9.
 """
 
 import os
+import time
 
 import numpy as np
 
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -333,6 +335,59 @@ class PlayerControls(QWidget):
 
         speed_bar.addStretch()
         controls_layout.addLayout(speed_bar)
+
+        # -- Metronome --
+        metronome_bar = QHBoxLayout()
+
+        metronome_bar.addWidget(QLabel("Metronome:"))
+
+        self._bpm_spin = QSpinBox()
+        self._bpm_spin.setRange(20, 300)
+        self._bpm_spin.setValue(120)
+        self._bpm_spin.setSuffix(" BPM")
+        self._bpm_spin.setFixedWidth(100)
+        self._bpm_spin.setToolTip("Metronome tempo")
+        self._bpm_spin.setAccessibleName("Metronome BPM")
+        self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
+        metronome_bar.addWidget(self._bpm_spin)
+
+        self._tap_times: list[float] = []
+        self._tap_btn = QPushButton("Tap")
+        self._tap_btn.setFixedWidth(60)
+        self._tap_btn.setToolTip("Tap to set tempo")
+        self._tap_btn.setAccessibleName("Tap tempo")
+        self._tap_btn.clicked.connect(self._on_tap)
+        metronome_bar.addWidget(self._tap_btn)
+
+        self._metronome_toggle = QPushButton()
+        self._metronome_toggle.setCheckable(True)
+        self._metronome_toggle.setFixedSize(36, 36)
+        self._metronome_toggle.setToolTip("Toggle metronome (M)")
+        self._metronome_toggle.setAccessibleName("Toggle metronome")
+        self._metronome_toggle.setText("M")
+        self._metronome_toggle.toggled.connect(self._on_metronome_toggled)
+        metronome_bar.addWidget(self._metronome_toggle)
+
+        self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self._metronome_vol_slider.setRange(0, 200)
+        self._metronome_vol_slider.setValue(50)
+        self._metronome_vol_slider.setFixedWidth(80)
+        self._metronome_vol_slider.setToolTip("Metronome volume")
+        self._metronome_vol_slider.setAccessibleName("Metronome volume")
+        self._metronome_vol_slider.valueChanged.connect(
+            self._on_metronome_vol_changed
+        )
+        metronome_bar.addWidget(self._metronome_vol_slider)
+
+        self._metronome_vol_label = QLabel("50%")
+        self._metronome_vol_label.setFixedWidth(36)
+        self._metronome_vol_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        metronome_bar.addWidget(self._metronome_vol_label)
+
+        metronome_bar.addStretch()
+        controls_layout.addLayout(metronome_bar)
 
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
@@ -650,3 +705,58 @@ class PlayerControls(QWidget):
         idx = self._speed_combo.currentIndex() + direction
         idx = max(0, min(idx, self._speed_combo.count() - 1))
         self._speed_combo.setCurrentIndex(idx)
+
+    # -- Metronome handlers --
+
+    def _on_bpm_changed(self, value: int) -> None:
+        """User changed the BPM spinbox."""
+        self._player.set_metronome_bpm(float(value))
+
+    def _on_tap(self) -> None:
+        """Record a tap timestamp and update BPM."""
+        from src.metronome import tap_tempo
+
+        now = time.monotonic()
+        # Discard stale taps (> 2 seconds since last tap).
+        if self._tap_times and (now - self._tap_times[-1]) > 2.0:
+            self._tap_times.clear()
+        self._tap_times.append(now)
+        bpm = tap_tempo(self._tap_times)
+        if bpm > 0:
+            clamped = max(20, min(300, round(bpm)))
+            self._bpm_spin.setValue(clamped)
+
+    def _on_metronome_toggled(self, checked: bool) -> None:
+        """User toggled the metronome on/off."""
+        self._player.set_metronome_enabled(checked)
+
+    def _on_metronome_vol_changed(self, value: int) -> None:
+        """User moved the metronome volume slider."""
+        self._metronome_vol_label.setText(f"{value}%")
+        self._player.set_metronome_volume(value / 100.0)
+
+    def toggle_metronome(self) -> None:
+        """Toggle metronome on/off (for keyboard shortcut)."""
+        self._metronome_toggle.setChecked(
+            not self._metronome_toggle.isChecked()
+        )
+
+    def restore_metronome_state(
+        self, bpm: int, enabled: bool, volume: float
+    ) -> None:
+        """Restore metronome UI state from saved session."""
+        self._bpm_spin.blockSignals(True)
+        self._bpm_spin.setValue(bpm)
+        self._bpm_spin.blockSignals(False)
+        self._player.set_metronome_bpm(float(bpm))
+
+        self._metronome_vol_slider.blockSignals(True)
+        self._metronome_vol_slider.setValue(round(volume * 100))
+        self._metronome_vol_slider.blockSignals(False)
+        self._metronome_vol_label.setText(f"{round(volume * 100)}%")
+        self._player.set_metronome_volume(volume)
+
+        self._metronome_toggle.blockSignals(True)
+        self._metronome_toggle.setChecked(enabled)
+        self._metronome_toggle.blockSignals(False)
+        self._player.set_metronome_enabled(enabled)
