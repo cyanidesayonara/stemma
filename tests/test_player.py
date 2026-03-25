@@ -391,3 +391,55 @@ class TestABLoop:
 
         # Entire buffer should be non-zero (filled with stem data)
         assert np.all(outdata != 0.0)
+
+    def test_stop_seeks_to_loop_a_when_looping(self, mock_stems):
+        """Stop should place the playhead at A, not at the start of the song."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_loop_a(0.2)
+        player.set_loop_b(0.8)
+        player.set_looping(True)
+        player.seek(0.5)
+        player._is_playing = True
+
+        player.stop()
+
+        assert player.current_seconds == pytest.approx(0.2, abs=0.002)
+        assert not player.is_playing
+
+    def test_stop_seeks_to_zero_without_loop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.seek(0.5)
+        player._is_playing = True
+        player.stop()
+        assert player.current_seconds == pytest.approx(0.0, abs=0.001)
+
+    def test_seek_clamps_before_loop_a_when_looping(self, mock_stems):
+        """Scrubbing before the loop region snaps to loop A."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_loop_a(0.3)
+        player.set_loop_b(0.7)
+        player.set_looping(True)
+        player.seek(0.1)
+        assert player.current_seconds == pytest.approx(0.3, abs=0.002)
+
+    def test_seek_clamps_at_or_after_loop_b_when_looping(self, mock_stems):
+        """Scrubbing at or past B snaps to loop A."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_loop_a(0.3)
+        player.set_loop_b(0.7)
+        player.set_looping(True)
+        player.seek(0.75)
+        assert player.current_seconds == pytest.approx(0.3, abs=0.002)
+
+    def test_seek_within_loop_unchanged_when_looping(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_loop_a(0.2)
+        player.set_loop_b(0.8)
+        player.set_looping(True)
+        player.seek(0.5)
+        assert player.current_seconds == pytest.approx(0.5, abs=0.002)
