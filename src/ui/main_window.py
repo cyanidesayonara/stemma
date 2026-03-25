@@ -204,6 +204,9 @@ class MainWindow(QMainWindow):
         self._update_theme_btn()
         menu_bar.setCornerWidget(self._theme_corner)
 
+        shortcuts_action = help_menu.addAction("&Keyboard Shortcuts")
+        shortcuts_action.triggered.connect(self._on_keyboard_shortcuts)
+
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
 
@@ -243,6 +246,9 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence(Qt.Key.Key_M), self).activated.connect(
             self._player_controls.toggle_metronome
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_C), self).activated.connect(
+            self._player_controls.toggle_count_in
         )
 
         stem_order = list(ALL_STEM_NAMES)
@@ -304,6 +310,39 @@ class MainWindow(QMainWindow):
         colors = get_colors(self._theme)
         self.apply_theme(self._theme, colors)
         self._update_theme_btn()
+
+    def _on_keyboard_shortcuts(self) -> None:
+        """Show a dialog listing all keyboard shortcuts."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Keyboard Shortcuts")
+        dlg.setMinimumWidth(340)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        shortcuts_text = (
+            "<table cellspacing='6'>"
+            "<tr><td><b>Space</b></td><td>Play / Pause</td></tr>"
+            "<tr><td><b>S</b></td><td>Stop</td></tr>"
+            "<tr><td><b>Left / Right</b></td><td>Seek -5s / +5s</td></tr>"
+            "<tr><td><b>A</b></td><td>Set loop point A</td></tr>"
+            "<tr><td><b>B</b></td><td>Set loop point B</td></tr>"
+            "<tr><td><b>L</b></td><td>Toggle A-B loop</td></tr>"
+            "<tr><td><b>] / [</b></td><td>Speed up / down</td></tr>"
+            "<tr><td><b>M</b></td><td>Toggle metronome</td></tr>"
+            "<tr><td><b>C</b></td><td>Toggle count-in</td></tr>"
+            "<tr><td><b>1-6</b></td><td>Mute/unmute stem</td></tr>"
+            "</table>"
+        )
+        label = QLabel(shortcuts_text)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(dlg.accept)
+        layout.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
+
+        dlg.exec()
 
     def _on_about(self) -> None:
         """Show the About dialog with the main logo rendered from SVG."""
@@ -390,6 +429,15 @@ class MainWindow(QMainWindow):
         )
         self._settings.setValue(
             "session/metronome_volume", self._player.metronome_volume
+        )
+        self._settings.setValue(
+            "session/count_in_enabled", self._player.count_in_enabled
+        )
+        self._settings.setValue(
+            "session/count_in_beats", self._player.count_in_beats
+        )
+        self._settings.setValue(
+            "session/count_in_on_repeats", self._player.count_in_on_repeats
         )
 
     def _restore_session(self) -> None:
@@ -486,6 +534,27 @@ class MainWindow(QMainWindow):
             met_vol = 0.5
         self._player_controls.restore_metronome_state(
             met_bpm, bool(met_enabled), met_vol
+        )
+
+        # Count-in state
+        ci_enabled = self._settings.value(
+            "session/count_in_enabled", False
+        )
+        if isinstance(ci_enabled, str):
+            ci_enabled = ci_enabled.lower() == "true"
+        try:
+            ci_beats = int(
+                float(self._settings.value("session/count_in_beats", 4))
+            )
+        except (TypeError, ValueError):
+            ci_beats = 4
+        ci_repeats = self._settings.value(
+            "session/count_in_on_repeats", False
+        )
+        if isinstance(ci_repeats, str):
+            ci_repeats = ci_repeats.lower() == "true"
+        self._player_controls.restore_count_in_state(
+            bool(ci_enabled), ci_beats, bool(ci_repeats)
         )
 
     def closeEvent(self, event) -> None:
