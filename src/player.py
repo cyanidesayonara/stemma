@@ -125,6 +125,14 @@ class MultiTrackPlayer(QObject):
         self._metronome_phase: int = 0
         self._click_buf: np.ndarray = self._generate_click(self._sample_rate)
 
+        # Count-in state.
+        self._count_in_enabled: bool = False
+        self._count_in_beats: int = 4
+        self._count_in_on_repeats: bool = False
+        self._count_in_remaining: int = 0
+        self._count_in_phase: int = 0
+        self._count_in_beat: int = 0
+
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
         self._output_device: int | None = None
@@ -207,6 +215,59 @@ class MultiTrackPlayer(QObject):
     def set_metronome_volume(self, volume: float) -> None:
         """Set the metronome volume. Clamped to 0.0-2.0."""
         self._metronome_volume = max(0.0, min(2.0, float(volume)))
+
+    # -- Count-in API -------------------------------------------------------
+
+    @property
+    def count_in_enabled(self) -> bool:
+        """Return True if the count-in is active."""
+        return self._count_in_enabled
+
+    @property
+    def count_in_beats(self) -> int:
+        """Return the number of count-in beats (1--8)."""
+        return self._count_in_beats
+
+    @property
+    def count_in_on_repeats(self) -> bool:
+        """Return True if the count-in plays before A-B loop repeats."""
+        return self._count_in_on_repeats
+
+    @property
+    def counting_in(self) -> bool:
+        """Return True if a count-in is currently playing."""
+        return self._count_in_remaining > 0
+
+    @property
+    def count_in_current_beat(self) -> int:
+        """Return the 1-based beat number during an active count-in, or 0."""
+        return self._count_in_beat
+
+    def set_count_in_enabled(self, enabled: bool) -> None:
+        """Enable or disable the count-in before playback."""
+        self._count_in_enabled = enabled
+
+    def set_count_in_beats(self, beats: int) -> None:
+        """Set the number of count-in beats. Clamped to 1--8."""
+        self._count_in_beats = max(1, min(8, int(beats)))
+
+    def set_count_in_on_repeats(self, enabled: bool) -> None:
+        """Enable or disable count-in before A-B loop repeats."""
+        self._count_in_on_repeats = enabled
+
+    def _arm_count_in(self) -> None:
+        """Prepare the count-in pre-roll if enabled and BPM is set."""
+        if self._count_in_enabled and self._metronome_bpm > 0:
+            beat_interval = int(
+                60.0 / self._metronome_bpm * self._sample_rate
+            )
+            self._count_in_remaining = self._count_in_beats * beat_interval
+            self._count_in_phase = 0
+            self._count_in_beat = 1
+        else:
+            self._count_in_remaining = 0
+            self._count_in_phase = 0
+            self._count_in_beat = 0
 
     def load_stems(self, stem_paths: dict[str, str]) -> None:
         """Load all stem WAV files into memory.
@@ -291,6 +352,7 @@ class MultiTrackPlayer(QObject):
             )
             return
 
+        self._arm_count_in()
         self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
@@ -301,6 +363,8 @@ class MultiTrackPlayer(QObject):
             return
 
         self._is_playing = False
+        self._count_in_remaining = 0
+        self._count_in_beat = 0
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
@@ -324,6 +388,8 @@ class MultiTrackPlayer(QObject):
         target_frame = max(0, min(target_frame, self._total_frames))
         self._current_frame = target_frame
         self._metronome_phase = 0
+        self._count_in_remaining = 0
+        self._count_in_beat = 0
         self.position_changed.emit(self._current_frame / self._sample_rate)
 
     def set_mute(self, stem_name: str, muted: bool) -> None:
@@ -572,6 +638,37 @@ class MultiTrackPlayer(QObject):
         # Update phase for the next callback.
         self._metronome_phase = (phase + frames_written) % beat_interval
 
+    def _mix_count_in(self, outdata: np.ndarray, ci_frames: int,
+                      beat_interval: int, click_len: int) -> None:
+        """Overlay count-in clicks onto the output buffer.
+
+        Uses its own phase counter (``_count_in_phase``) independent of the
+        metronome phase so the two features don't interfere with each other.
+        Updates ``_count_in_beat`` (1-based) for UI feedback.
+        """
+        gain = self._metronome_volume
+        phase = self._count_in_phase
+
+        if phase < click_len:
+            n = min(click_len - phase, ci_frames)
+            outdata[:n] += self._click_buf[phase:phase + n] * gain
+
+        pos = beat_interval - phase
+        while pos < ci_frames:
+            n = min(click_len, ci_frames - pos)
+            if n > 0:
+                outdata[pos:pos + n] += self._click_buf[:n] * gain
+            pos += beat_interval
+
+        new_phase = (phase + ci_frames) % beat_interval
+        self._count_in_phase = new_phase
+
+        total_elapsed = (self._count_in_beats * beat_interval
+                         - self._count_in_remaining + ci_frames)
+        self._count_in_beat = min(
+            total_elapsed // beat_interval + 1, self._count_in_beats
+        )
+
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags) -> None:
         """PortAudio callback for pushing mixed audio to the hardware.
@@ -582,6 +679,30 @@ class MultiTrackPlayer(QObject):
         if not self._is_playing:
             outdata.fill(0.0)
             raise sd.CallbackStop
+
+        # -- Count-in pre-roll -----------------------------------------------
+        # During count-in, output metronome clicks over silence and do not
+        # advance the stem playback position.
+        if self._count_in_remaining > 0:
+            outdata.fill(0.0)
+            beat_interval = int(
+                60.0 / self._metronome_bpm * self._sample_rate
+            )
+            if beat_interval > 0:
+                ci_frames = min(frames, self._count_in_remaining)
+                click_len = len(self._click_buf)
+                self._mix_count_in(
+                    outdata, ci_frames, beat_interval, click_len
+                )
+                self._count_in_remaining -= ci_frames
+                if self._count_in_remaining <= 0:
+                    self._count_in_remaining = 0
+                    self._count_in_beat = 0
+                    self._metronome_phase = 0
+            np.clip(outdata, -1.0, 1.0, out=outdata)
+            return
+
+        # -- Normal playback -------------------------------------------------
 
         # If at or past end and not looping, stop playback.
         looping = (self._looping
@@ -642,10 +763,12 @@ class MultiTrackPlayer(QObject):
             # Check if we hit the boundary.
             if self._current_frame >= boundary:
                 if looping:
-                    # Wrap back to loop A.
                     self._current_frame = self._loop_a_frame
+                    if (self._count_in_enabled
+                            and self._count_in_on_repeats):
+                        self._arm_count_in()
+                        break
                 else:
-                    # End of track.
                     break
 
         # Mix in metronome click track.  Use *frames* (the full PortAudio
@@ -663,7 +786,8 @@ class MultiTrackPlayer(QObject):
         # Apply clipping protection.
         np.clip(outdata, -1.0, 1.0, out=outdata)
 
-        # If we didn't fill the entire buffer, we hit EOF without looping.
-        if remaining > 0:
+        # If we didn't fill the entire buffer and no count-in was just armed,
+        # we hit EOF without looping.
+        if remaining > 0 and self._count_in_remaining == 0:
             self._is_playing = False
             raise sd.CallbackStop

@@ -265,6 +265,23 @@ QLineEdit:focus {{
     border: 1px solid {c["accent"]};
 }}
 
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {c["surface1"]};
+    border-radius: 3px;
+    background-color: {c["surface0"]};
+}}
+
+QCheckBox::indicator:checked {{
+    background-color: {c["accent"]};
+    border-color: {c["accent"]};
+}}
+
+QCheckBox::indicator:hover {{
+    border-color: {c["accent"]};
+}}
+
 QComboBox {{
     background-color: {c["surface0"]};
     color: {c["text"]};
