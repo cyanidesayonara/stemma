@@ -14,6 +14,7 @@ from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap, QPolygonF
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -390,6 +391,52 @@ class PlayerControls(QWidget):
         metronome_bar.addStretch()
         controls_layout.addLayout(metronome_bar)
 
+        # -- Count-in --
+        count_in_bar = QHBoxLayout()
+
+        count_in_bar.addWidget(QLabel("Count-in:"))
+
+        self._count_in_toggle = QPushButton()
+        self._count_in_toggle.setCheckable(True)
+        self._count_in_toggle.setFixedSize(36, 36)
+        self._count_in_toggle.setToolTip("Toggle count-in before playback (C)")
+        self._count_in_toggle.setAccessibleName("Toggle count-in")
+        self._count_in_toggle.setText("CI")
+        self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
+        count_in_bar.addWidget(self._count_in_toggle)
+
+        self._count_in_beats_spin = QSpinBox()
+        self._count_in_beats_spin.setRange(1, 8)
+        self._count_in_beats_spin.setValue(4)
+        self._count_in_beats_spin.setSuffix(" beats")
+        self._count_in_beats_spin.setFixedWidth(90)
+        self._count_in_beats_spin.setToolTip("Number of count-in beats")
+        self._count_in_beats_spin.setAccessibleName("Count-in beats")
+        self._count_in_beats_spin.valueChanged.connect(
+            self._on_count_in_beats_changed
+        )
+        count_in_bar.addWidget(self._count_in_beats_spin)
+
+        self._count_in_repeats_cb = QCheckBox("Loop repeats")
+        self._count_in_repeats_cb.setToolTip(
+            "Also count in before each A-B loop repeat"
+        )
+        self._count_in_repeats_cb.setAccessibleName(
+            "Count-in on loop repeats"
+        )
+        self._count_in_repeats_cb.toggled.connect(
+            self._on_count_in_repeats_toggled
+        )
+        count_in_bar.addWidget(self._count_in_repeats_cb)
+
+        self._count_in_label = QLabel("")
+        self._count_in_label.setFixedWidth(60)
+        self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        count_in_bar.addWidget(self._count_in_label)
+
+        count_in_bar.addStretch()
+        controls_layout.addLayout(count_in_bar)
+
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
@@ -582,10 +629,13 @@ class PlayerControls(QWidget):
         )
         if total > 0:
             self._waveform.set_position(pos_s / total)
+        self.update_count_in_display()
 
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
         self._play_btn.setAccessibleName("Pause" if playing else "Play")
+        if not playing:
+            self._count_in_label.setText("")
 
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
@@ -759,3 +809,51 @@ class PlayerControls(QWidget):
         self._metronome_toggle.setChecked(enabled)
         self._metronome_toggle.blockSignals(False)
         self._player.set_metronome_enabled(enabled)
+
+    # -- Count-in handlers --
+
+    def _on_count_in_toggled(self, checked: bool) -> None:
+        """User toggled the count-in on/off."""
+        self._player.set_count_in_enabled(checked)
+
+    def _on_count_in_beats_changed(self, value: int) -> None:
+        """User changed the count-in beat count."""
+        self._player.set_count_in_beats(value)
+
+    def _on_count_in_repeats_toggled(self, checked: bool) -> None:
+        """User toggled count-in on loop repeats."""
+        self._player.set_count_in_on_repeats(checked)
+
+    def toggle_count_in(self) -> None:
+        """Toggle count-in on/off (for keyboard shortcut)."""
+        self._count_in_toggle.setChecked(
+            not self._count_in_toggle.isChecked()
+        )
+
+    def update_count_in_display(self) -> None:
+        """Update the count-in beat indicator from current player state."""
+        if self._player.counting_in:
+            beat = self._player.count_in_current_beat
+            total = self._player.count_in_beats
+            self._count_in_label.setText(f"{beat}/{total}")
+        else:
+            self._count_in_label.setText("")
+
+    def restore_count_in_state(
+        self, enabled: bool, beats: int, on_repeats: bool
+    ) -> None:
+        """Restore count-in UI state from a saved session."""
+        self._count_in_beats_spin.blockSignals(True)
+        self._count_in_beats_spin.setValue(beats)
+        self._count_in_beats_spin.blockSignals(False)
+        self._player.set_count_in_beats(beats)
+
+        self._count_in_repeats_cb.blockSignals(True)
+        self._count_in_repeats_cb.setChecked(on_repeats)
+        self._count_in_repeats_cb.blockSignals(False)
+        self._player.set_count_in_on_repeats(on_repeats)
+
+        self._count_in_toggle.blockSignals(True)
+        self._count_in_toggle.setChecked(enabled)
+        self._count_in_toggle.blockSignals(False)
+        self._player.set_count_in_enabled(enabled)
