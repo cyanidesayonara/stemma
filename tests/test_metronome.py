@@ -220,10 +220,70 @@ class TestMetronomeCallback:
         # First callback
         out1 = np.zeros((256, 2), dtype=np.float32)
         loaded_player._audio_callback(out1, 256, {}, sd.CallbackFlags())
-        phase_after = loaded_player._metronome_phase
+        phase_after_1 = loaded_player._metronome_phase
+        assert phase_after_1 == 256
 
-        # Phase should have advanced by 256 frames.
-        assert phase_after == 256
+        # Second callback: phase should continue from 256.
+        out2 = np.zeros((256, 2), dtype=np.float32)
+        loaded_player._audio_callback(out2, 256, {}, sd.CallbackFlags())
+        phase_after_2 = loaded_player._metronome_phase
+        assert phase_after_2 == 512
+
+    def test_metronome_phase_advances_full_block_at_eof(self, loaded_player):
+        """At EOF the phase must advance by the full block size, not just the
+        stem-filled portion, so the metronome stays in sync with wall-clock
+        time through partial buffers."""
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_bpm(120.0)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        # Seek close to the end so the next callback only partially fills.
+        total = loaded_player._total_frames
+        loaded_player._current_frame = total - 100
+
+        block_size = 512
+        outdata = np.zeros((block_size, 2), dtype=np.float32)
+        try:
+            loaded_player._audio_callback(
+                outdata, block_size, {}, sd.CallbackFlags()
+            )
+        except sd.CallbackStop:
+            pass
+
+        # Phase should reflect the full block (512), not the partial fill (100).
+        assert loaded_player._metronome_phase == block_size
+
+
+# -----------------------------------------------------------------------
+# NaN / non-finite guard
+# -----------------------------------------------------------------------
+
+class TestMetronomeNanGuard:
+    """set_metronome_bpm must reject non-finite values."""
+
+    @pytest.fixture
+    def player(self, app):
+        return MultiTrackPlayer()
+
+    def test_nan_bpm_is_ignored(self, player):
+        player.set_metronome_bpm(100.0)
+        player.set_metronome_bpm(float("nan"))
+        assert player.metronome_bpm == 100.0
+
+    def test_inf_bpm_is_ignored(self, player):
+        player.set_metronome_bpm(100.0)
+        player.set_metronome_bpm(float("inf"))
+        assert player.metronome_bpm == 100.0
+
+    def test_negative_inf_bpm_is_ignored(self, player):
+        player.set_metronome_bpm(100.0)
+        player.set_metronome_bpm(float("-inf"))
+        assert player.metronome_bpm == 100.0
+
+    def test_valid_bpm_still_accepted(self, player):
+        player.set_metronome_bpm(90.0)
+        assert player.metronome_bpm == 90.0
 
 
 # -----------------------------------------------------------------------
