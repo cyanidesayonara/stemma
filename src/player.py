@@ -354,8 +354,7 @@ class MultiTrackPlayer(QObject):
 
         at_boundary = (
             self._current_frame == 0
-            or (self._looping
-                and self._loop_a_frame is not None
+            or (self._loop_region_is_active()
                 and self._current_frame == self._loop_a_frame)
         )
         if at_boundary:
@@ -382,18 +381,36 @@ class MultiTrackPlayer(QObject):
         self.state_changed.emit(False)
 
     def stop(self) -> None:
-        """Stop playback and reset position to 0."""
+        """Stop playback and reset the playhead.
+
+        When A-B looping is active with a valid region, the playhead moves to
+        loop A; otherwise it moves to the start of the track.
+        """
         self.pause()
-        self.seek(0.0)
+        if self._loop_region_is_active():
+            self.seek(self._loop_a_frame / self._sample_rate)
+        else:
+            self.seek(0.0)
 
     def seek(self, position_s: float) -> None:
         """Seek to a specific position in seconds.
+
+        When A-B looping is active with a valid region, the playhead is
+        clamped into ``[loop_a, loop_b)``: positions before A or at/after B
+        snap to loop A.
 
         Args:
             position_s: Target time in seconds.
         """
         target_frame = int(position_s * self._sample_rate)
         target_frame = max(0, min(target_frame, self._total_frames))
+        if self._loop_region_is_active():
+            la = self._loop_a_frame
+            lb = self._loop_b_frame
+            if target_frame < la:
+                target_frame = la
+            elif target_frame >= lb:
+                target_frame = la
         self._current_frame = target_frame
         self._metronome_phase = 0
         self._count_in_remaining = 0
@@ -455,6 +472,17 @@ class MultiTrackPlayer(QObject):
     # ------------------------------------------------------------------
     # A-B Loop
     # ------------------------------------------------------------------
+
+    def _loop_region_is_active(self) -> bool:
+        """True when looping is on and A/B form a non-empty region (same
+        condition the audio callback uses for wrap behaviour).
+        """
+        return (
+            self._looping
+            and self._loop_a_frame is not None
+            and self._loop_b_frame is not None
+            and self._loop_b_frame > self._loop_a_frame
+        )
 
     @property
     def loop_a(self) -> float | None:
