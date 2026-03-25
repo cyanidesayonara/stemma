@@ -117,6 +117,13 @@ class MultiTrackPlayer(QObject):
         self._original_stems: dict[str, np.ndarray] = {}
         self._speed_worker: SpeedWorker | None = None
 
+        # Metronome state.
+        self._metronome_enabled: bool = False
+        self._metronome_bpm: float = 120.0
+        self._metronome_volume: float = 0.5
+        self._metronome_phase: int = 0
+        self._click_buf: np.ndarray = self._generate_click(self._sample_rate)
+
         # Hardware stream.
         self._stream: sd.OutputStream | None = None
         self._output_device: int | None = None
@@ -149,6 +156,50 @@ class MultiTrackPlayer(QObject):
         if self._sample_rate == 0:
             return 0.0
         return self._total_frames / self._sample_rate
+
+    @staticmethod
+    def _generate_click(sample_rate: int) -> np.ndarray:
+        """Generate a short click sound for the metronome.
+
+        Returns a stereo numpy array (shape (N, 2), dtype float32) containing
+        a 1000 Hz sine tone with an exponential decay envelope, lasting 30ms.
+        """
+        duration = 0.03  # 30 ms
+        n_frames = int(sample_rate * duration)
+        t = np.arange(n_frames, dtype=np.float32) / sample_rate
+        tone = np.sin(2.0 * np.pi * 1000.0 * t)
+        envelope = np.exp(-t / 0.006).astype(np.float32)  # ~6ms decay constant
+        click_mono = (tone * envelope).astype(np.float32)
+        return np.column_stack((click_mono, click_mono))
+
+    @property
+    def metronome_enabled(self) -> bool:
+        """Return True if the metronome is active."""
+        return self._metronome_enabled
+
+    @property
+    def metronome_bpm(self) -> float:
+        """Return the current metronome BPM."""
+        return self._metronome_bpm
+
+    @property
+    def metronome_volume(self) -> float:
+        """Return the current metronome volume (0.0-2.0)."""
+        return self._metronome_volume
+
+    def set_metronome_enabled(self, enabled: bool) -> None:
+        """Enable or disable the metronome click track."""
+        self._metronome_enabled = enabled
+        self._metronome_phase = 0
+
+    def set_metronome_bpm(self, bpm: float) -> None:
+        """Set the metronome tempo. Clamped to 20-300 BPM."""
+        self._metronome_bpm = max(20.0, min(300.0, float(bpm)))
+        self._metronome_phase = 0
+
+    def set_metronome_volume(self, volume: float) -> None:
+        """Set the metronome volume. Clamped to 0.0-2.0."""
+        self._metronome_volume = max(0.0, min(2.0, float(volume)))
 
     def load_stems(self, stem_paths: dict[str, str]) -> None:
         """Load all stem WAV files into memory.
@@ -190,6 +241,8 @@ class MultiTrackPlayer(QObject):
         self._total_frames = max_frames
         self._current_frame = 0
         self._original_stems = dict(self._stems)
+        self._click_buf = self._generate_click(self._sample_rate)
+        self._metronome_phase = 0
 
         self.position_changed.emit(0.0)
 
@@ -263,6 +316,7 @@ class MultiTrackPlayer(QObject):
         target_frame = int(position_s * self._sample_rate)
         target_frame = max(0, min(target_frame, self._total_frames))
         self._current_frame = target_frame
+        self._metronome_phase = 0
         self.position_changed.emit(self._current_frame / self._sample_rate)
 
     def set_mute(self, stem_name: str, muted: bool) -> None:
@@ -483,6 +537,34 @@ class MultiTrackPlayer(QObject):
         pos_s = self._current_frame / self._sample_rate
         self.position_changed.emit(pos_s)
 
+    def _mix_metronome(self, outdata: np.ndarray, frames_written: int,
+                       beat_interval: int, click_len: int) -> None:
+        """Overlay metronome clicks onto the output buffer.
+
+        Tracks beat phase across callbacks so clicks stay in sync.
+        Handles both continuing a click that started in a previous buffer
+        and starting new clicks within this buffer.
+        """
+        gain = self._metronome_volume
+        phase = self._metronome_phase
+
+        # Continue any click that started in a previous callback.
+        if phase < click_len:
+            n = min(click_len - phase, frames_written)
+            outdata[:n] += self._click_buf[phase:phase + n] * gain
+
+        # Walk through the buffer finding beat boundaries.
+        pos = beat_interval - phase  # Frames until next beat start
+        while pos < frames_written:
+            # Overlay click starting at this beat.
+            n = min(click_len, frames_written - pos)
+            if n > 0:
+                outdata[pos:pos + n] += self._click_buf[:n] * gain
+            pos += beat_interval
+
+        # Update phase for the next callback.
+        self._metronome_phase = (phase + frames_written) % beat_interval
+
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags) -> None:
         """PortAudio callback for pushing mixed audio to the hardware.
@@ -558,6 +640,16 @@ class MultiTrackPlayer(QObject):
                 else:
                     # End of track.
                     break
+
+        # Mix in metronome click track.
+        if self._metronome_enabled and self._metronome_bpm > 0:
+            beat_interval = int(60.0 / self._metronome_bpm * self._sample_rate)
+            if beat_interval > 0:
+                click_len = len(self._click_buf)
+                frames_written = buf_offset
+                self._mix_metronome(
+                    outdata, frames_written, beat_interval, click_len
+                )
 
         # Apply clipping protection.
         np.clip(outdata, -1.0, 1.0, out=outdata)

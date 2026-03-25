@@ -241,6 +241,10 @@ class MainWindow(QMainWindow):
             lambda: self._player_controls.cycle_speed(-1)
         )
 
+        QShortcut(QKeySequence(Qt.Key.Key_M), self).activated.connect(
+            self._player_controls.toggle_metronome
+        )
+
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
             Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
@@ -378,6 +382,15 @@ class MainWindow(QMainWindow):
         self._settings.setValue("session/loop_b", loop_b if loop_b is not None else -1)
         self._settings.setValue("session/looping", self._player.looping)
         self._settings.setValue("session/speed", self._player.speed)
+        self._settings.setValue(
+            "session/metronome_bpm", self._player.metronome_bpm
+        )
+        self._settings.setValue(
+            "session/metronome_enabled", self._player.metronome_enabled
+        )
+        self._settings.setValue(
+            "session/metronome_volume", self._player.metronome_volume
+        )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -454,6 +467,26 @@ class MainWindow(QMainWindow):
             self._player.set_speed(speed)
         else:
             self._player.seek(position)
+
+        # Metronome state
+        try:
+            met_bpm = int(
+                float(self._settings.value("session/metronome_bpm", 120))
+            )
+        except (TypeError, ValueError):
+            met_bpm = 120
+        met_enabled = self._settings.value("session/metronome_enabled", False)
+        if isinstance(met_enabled, str):
+            met_enabled = met_enabled.lower() == "true"
+        try:
+            met_vol = float(
+                self._settings.value("session/metronome_volume", 0.5)
+            )
+        except (TypeError, ValueError):
+            met_vol = 0.5
+        self._player_controls.restore_metronome_state(
+            met_bpm, bool(met_enabled), met_vol
+        )
 
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
