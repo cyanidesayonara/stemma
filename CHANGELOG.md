@@ -4,6 +4,38 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-25 -- Session persistence (#55, PR #85)
+
+### Done
+- `MainWindow._save_session()`: writes 9 QSettings keys on close -- song ID, position, muted/soloed stems (JSON lists), per-stem volumes (JSON dict), loop A/B (float, -1 for unset), looping flag, and playback speed.
+- `MainWindow._restore_session()`: deferred via `QTimer.singleShot(0)`, validates song still in library, selects it to trigger stem load, then restores stem state, loop points, and speed. Speed != 1.0 uses a one-shot `speed_changed` connection to seek after time-stretch completes.
+- `LibraryPanel.select_song(song_id)`: programmatic selection by ID, returns bool.
+- `StemRow.set_soloed()` / `set_volume_slider()`: programmatic setters for restore path.
+- `PlayerControls.restore_stem_state()` / `restore_loop_state()`: batch-apply saved state through UI widgets so player and UI stay in sync.
+
+### Metrics
+- 286 fast tests, 5 slow ONNX tests, 1 hardware playback test.
+
+---
+
+## 2026-03-24 -- v1.0.0 Release: PyInstaller packaging + GitHub Release (#56, PR #83)
+
+### Done
+- `src/paths.py`: `app_root()` returns `sys._MEIPASS` in frozen builds, repo root otherwise.
+- `stemma.spec`: one-file windowed PyInstaller build. Collects ONNX Runtime DirectML DLLs, PortAudio, imageio-ffmpeg binary, and PySide6 QtSvg. UPX disabled to avoid corrupting native DLLs.
+- `.github/workflows/release.yml`: builds .exe on `v*` tag push, creates GitHub Release with the artifact via `softprops/action-gh-release@v2`.
+- `requirements-dev.txt` for pyinstaller as dev dependency.
+- `.gitignore` updated to track `stemma.spec` while still ignoring other `.spec` files.
+- Updated `src/app.py` and `src/ui/player_controls.py` to use `app_root()` for asset path resolution.
+- Version bumped from `1.0.0-dev` to `1.0.0`.
+
+### Metrics
+- Local build: 202 MB exe, launches correctly with icon.
+- 282 fast tests, 5 slow ONNX tests, 1 hardware playback test (288 total).
+- All v1.0 tickets closed. First GitHub Release published.
+
+---
+
 ## 2026-03-24 -- Error handling, model download UX, playback warnings (#73, PR #82)
 
 ### Done
