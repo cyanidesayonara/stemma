@@ -109,7 +109,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -159,7 +159,7 @@ Tickets ship as incremental 1.x releases (semver: minor for features, patch for 
 ## Test Suite
 
 ```
-pytest                                    # ~354 fast tests (~10s)
+pytest                                    # ~362 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
