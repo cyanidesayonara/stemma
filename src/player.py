@@ -352,7 +352,15 @@ class MultiTrackPlayer(QObject):
             )
             return
 
-        self._arm_count_in()
+        at_boundary = (
+            self._current_frame == 0
+            or (self._looping
+                and self._loop_a_frame is not None
+                and self._current_frame == self._loop_a_frame)
+        )
+        if at_boundary:
+            self._arm_count_in()
+
         self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
