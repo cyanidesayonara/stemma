@@ -62,7 +62,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~282 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~286 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -83,6 +83,7 @@ stemma/
     test_app_settings.py
     test_theme.py
     test_integration.py
+    test_session_persistence.py
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
@@ -108,7 +109,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-03-24
+Last updated: 2026-03-25
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -146,7 +147,7 @@ All core functionality implemented and tested:
 
 ### Post-1.0 Backlog
 Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
-- [ ] Session persistence (#55)
+- [x] Session persistence (#55, PR #85)
 - [ ] Metronome with BPM entry (#57)
 - [ ] Count-in before playback/loop start (#78)
 - [ ] Record audio track (#79)
@@ -158,7 +159,7 @@ Tickets ship as incremental 1.x releases (semver: minor for features, patch for 
 ## Test Suite
 
 ```
-pytest                                    # ~282 fast tests (~10s)
+pytest                                    # ~286 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

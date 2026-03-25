@@ -4,6 +4,20 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-25 -- Session persistence (#55, PR #85)
+
+### Done
+- `MainWindow._save_session()`: writes 9 QSettings keys on close -- song ID, position, muted/soloed stems (JSON lists), per-stem volumes (JSON dict), loop A/B (float, -1 for unset), looping flag, and playback speed.
+- `MainWindow._restore_session()`: deferred via `QTimer.singleShot(0)`, validates song still in library, selects it to trigger stem load, then restores stem state, loop points, and speed. Speed != 1.0 uses a one-shot `speed_changed` connection to seek after time-stretch completes.
+- `LibraryPanel.select_song(song_id)`: programmatic selection by ID, returns bool.
+- `StemRow.set_soloed()` / `set_volume_slider()`: programmatic setters for restore path.
+- `PlayerControls.restore_stem_state()` / `restore_loop_state()`: batch-apply saved state through UI widgets so player and UI stay in sync.
+
+### Metrics
+- 286 fast tests, 5 slow ONNX tests, 1 hardware playback test.
+
+---
+
 ## 2026-03-24 -- v1.0.0 Release: PyInstaller packaging + GitHub Release (#56, PR #83)
 
 ### Done

@@ -49,7 +49,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~10 seconds, ~282 tests)
+# Fast tests (~10 seconds, ~286 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)
