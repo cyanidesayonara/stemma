@@ -5,6 +5,7 @@ into RAM entirely and summed dynamically inside the C-level audio callback,
 allowing instant, click-free muting and soloing.
 """
 
+import math
 from typing import Any
 
 import numpy as np
@@ -193,8 +194,14 @@ class MultiTrackPlayer(QObject):
         self._metronome_phase = 0
 
     def set_metronome_bpm(self, bpm: float) -> None:
-        """Set the metronome tempo. Clamped to 20-300 BPM."""
-        self._metronome_bpm = max(20.0, min(300.0, float(bpm)))
+        """Set the metronome tempo. Clamped to 20--300 BPM.
+
+        Non-finite values (NaN, inf) are silently ignored.
+        """
+        value = float(bpm)
+        if not math.isfinite(value):
+            return
+        self._metronome_bpm = max(20.0, min(300.0, value))
         self._metronome_phase = 0
 
     def set_metronome_volume(self, volume: float) -> None:
@@ -641,14 +648,16 @@ class MultiTrackPlayer(QObject):
                     # End of track.
                     break
 
-        # Mix in metronome click track.
+        # Mix in metronome click track.  Use *frames* (the full PortAudio
+        # block size) rather than buf_offset so the beat phase stays in sync
+        # with wall-clock time even when stems don't fill the entire buffer
+        # (e.g. at EOF without looping).
         if self._metronome_enabled and self._metronome_bpm > 0:
             beat_interval = int(60.0 / self._metronome_bpm * self._sample_rate)
             if beat_interval > 0:
                 click_len = len(self._click_buf)
-                frames_written = buf_offset
                 self._mix_metronome(
-                    outdata, frames_written, beat_interval, click_len
+                    outdata, frames, beat_interval, click_len
                 )
 
         # Apply clipping protection.

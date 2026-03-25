@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.metronome import tap_tempo
 from src.paths import app_root
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.styles import DARK_COLORS, STEM_COLORS
@@ -714,8 +715,6 @@ class PlayerControls(QWidget):
 
     def _on_tap(self) -> None:
         """Record a tap timestamp and update BPM."""
-        from src.metronome import tap_tempo
-
         now = time.monotonic()
         # Discard stale taps (> 2 seconds since last tap).
         if self._tap_times and (now - self._tap_times[-1]) > 2.0:
