@@ -19,12 +19,16 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Dark / light Qt themes; window state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
 
-## Requirements
+## Download
+
+Grab **stemma.exe** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest). No installation required -- just run the .exe. ONNX models download automatically on first import.
+
+Windows SmartScreen may show a warning for unsigned executables. Click **More info** then **Run anyway**.
+
+### Requirements
 
 - Windows 10/11
-- Python 3.14
 - NVIDIA GPU recommended (DirectML, falls back to CPU)
-- ffmpeg on PATH only if the bundled binary (imageio-ffmpeg) is unavailable (YouTube import)
 
 ## Development Setup
 
