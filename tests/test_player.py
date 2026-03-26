@@ -8,7 +8,7 @@ import pytest
 import sounddevice as sd
 import soundfile as sf
 
-from src.player import MultiTrackPlayer
+from src.player import MultiTrackPlayer, next_take_number
 
 
 @pytest.fixture
@@ -443,3 +443,251 @@ class TestABLoop:
         player.set_looping(True)
         player.seek(0.5)
         assert player.current_seconds == pytest.approx(0.5, abs=0.002)
+
+
+class TestRecordingArm:
+    """Test recording arm/disarm logic."""
+
+    def test_arm_sets_flag(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        assert player.recording_armed
+
+    def test_disarm_clears_flag(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        player.arm_recording(False)
+        assert not player.recording_armed
+
+    def test_arm_rejected_without_stems(self):
+        player = MultiTrackPlayer()
+        player.arm_recording(True)
+        assert not player.recording_armed
+
+    def test_arm_rejected_at_non_1x_speed(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._playback_speed = 0.75
+        player.arm_recording(True)
+        assert not player.recording_armed
+
+    def test_load_stems_clears_armed(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        player.load_stems(mock_stems)
+        assert not player.recording_armed
+
+
+class TestRecordingBuffer:
+    """Test recording buffer allocation and capture."""
+
+    def test_buffer_allocated_with_correct_shape(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        assert player._recording_buffer is not None
+        assert player._recording_buffer.shape == (44100, 2)
+        assert np.all(player._recording_buffer == 0.0)
+
+    def test_duplex_callback_captures_input(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        player._recording = True
+        player._is_playing = True
+
+        indata = np.full((100, 2), 0.42, dtype=np.float32)
+        outdata = np.zeros((100, 2), dtype=np.float32)
+
+        player._full_duplex_callback(
+            indata, outdata, 100, {}, sd.CallbackFlags()
+        )
+
+        assert np.allclose(
+            player._recording_buffer[:100], 0.42, atol=1e-6
+        )
+        assert player._indata_capture is None
+
+    def test_duplex_callback_skips_input_during_count_in(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        player._recording = True
+        player._is_playing = True
+        player._count_in_remaining = 44100
+        player._metronome_bpm = 120.0
+
+        indata = np.full((100, 2), 0.99, dtype=np.float32)
+        outdata = np.zeros((100, 2), dtype=np.float32)
+
+        player._full_duplex_callback(
+            indata, outdata, 100, {}, sd.CallbackFlags()
+        )
+
+        assert np.allclose(player._recording_buffer[:100], 0.0)
+
+    def test_mono_input_duplicated_to_stereo(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        player._recording = True
+        player._is_playing = True
+
+        indata = np.full((100, 1), 0.33, dtype=np.float32)
+        outdata = np.zeros((100, 2), dtype=np.float32)
+
+        player._full_duplex_callback(
+            indata, outdata, 100, {}, sd.CallbackFlags()
+        )
+
+        assert np.allclose(
+            player._recording_buffer[:100, 0], 0.33, atol=1e-6
+        )
+        assert np.allclose(
+            player._recording_buffer[:100, 1], 0.33, atol=1e-6
+        )
+
+
+class TestRecordingLoopCapture:
+    """Test that recording follows loop wraps correctly."""
+
+    def test_recording_overwrites_same_region_on_loop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        player._recording = True
+        player._is_playing = True
+
+        player.set_loop_a(0.0)
+        player.set_loop_b(200 / 44100)
+        player.set_looping(True)
+
+        indata_pass1 = np.full((200, 2), 0.1, dtype=np.float32)
+        outdata = np.zeros((200, 2), dtype=np.float32)
+        player._full_duplex_callback(
+            indata_pass1, outdata, 200, {}, sd.CallbackFlags()
+        )
+        assert np.allclose(
+            player._recording_buffer[:200], 0.1, atol=1e-6
+        )
+
+        indata_pass2 = np.full((200, 2), 0.9, dtype=np.float32)
+        outdata2 = np.zeros((200, 2), dtype=np.float32)
+        player._full_duplex_callback(
+            indata_pass2, outdata2, 200, {}, sd.CallbackFlags()
+        )
+        assert np.allclose(
+            player._recording_buffer[:200], 0.9, atol=1e-6
+        )
+
+
+class TestRecordingSave:
+    """Test writing recording to disk."""
+
+    def test_save_creates_wav(self, mock_stems, tmp_path):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording_buffer = np.full(
+            (44100, 2), 0.5, dtype=np.float32
+        )
+
+        song_dir = str(tmp_path / "song")
+        os.makedirs(song_dir)
+        path = player.save_recording(song_dir)
+
+        assert path is not None
+        assert os.path.isfile(path)
+        assert "recording_take1.wav" in path
+
+        data, sr = sf.read(path, dtype="float32")
+        assert sr == 44100
+        assert data.shape == (44100, 2)
+        assert np.allclose(data, 0.5, atol=1e-4)
+
+    def test_take_numbering_increments(self, tmp_path):
+        song_dir = str(tmp_path / "song")
+        os.makedirs(song_dir)
+        sf.write(
+            os.path.join(song_dir, "recording_take1.wav"),
+            np.zeros((100, 2), dtype=np.float32),
+            44100,
+        )
+        assert next_take_number(song_dir) == 2
+
+    def test_save_returns_none_without_buffer(self, mock_stems, tmp_path):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        assert player.save_recording(str(tmp_path)) is None
+
+    def test_latency_offset_shifts_buffer(self, mock_stems, tmp_path):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        buf = np.zeros((44100, 2), dtype=np.float32)
+        buf[441:541] = 0.8
+        player._recording_buffer = buf
+        player.set_latency_offset_ms(10.0)
+
+        song_dir = str(tmp_path / "song")
+        os.makedirs(song_dir)
+        path = player.save_recording(song_dir)
+
+        data, _ = sf.read(path, dtype="float32")
+        peak_pos = np.argmax(np.abs(data[:, 0]))
+        assert peak_pos < 441
+
+    def test_next_take_number_empty_dir(self, tmp_path):
+        assert next_take_number(str(tmp_path)) == 1
+
+    def test_next_take_number_multiple(self, tmp_path):
+        for n in (1, 2, 5):
+            sf.write(
+                os.path.join(str(tmp_path), f"recording_take{n}.wav"),
+                np.zeros((10, 2), dtype=np.float32),
+                44100,
+            )
+        assert next_take_number(str(tmp_path)) == 6
+
+
+class TestRecordingInputDevice:
+    """Test input device configuration."""
+
+    def test_set_input_device(self):
+        player = MultiTrackPlayer()
+        player.set_input_device(3)
+        assert player._input_device == 3
+
+    def test_set_input_device_none(self):
+        player = MultiTrackPlayer()
+        player.set_input_device(None)
+        assert player._input_device is None
+
+    def test_play_with_recording_creates_duplex_stream(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+
+        with patch("src.player.sd.Stream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        mock_stream.assert_called_once()
+        call_kwargs = mock_stream.call_args[1]
+        assert call_kwargs["channels"] == 2
+        assert player._recording is True
+
+    def test_play_without_recording_creates_output_stream(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        with patch("src.player.sd.OutputStream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        mock_stream.assert_called_once()
+        assert player._recording is False

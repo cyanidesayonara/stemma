@@ -5,9 +5,12 @@ Center: player controls and stem mixer.
 Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 """
 
+import glob
 import json
 import os
 
+import numpy as np
+import soundfile as sf
 from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
@@ -33,10 +36,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    normalize_input_device_setting,
     normalize_output_device_setting,
     output_device_indices_with_output,
     read_default_export_format,
     read_default_mp3_bitrate,
+    read_latency_offset_ms,
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter
@@ -116,6 +121,12 @@ class MainWindow(QMainWindow):
         self._restore_state()
         self.setAcceptDrops(True)
 
+        self._player.set_input_device(
+            normalize_input_device_setting(self._settings)
+        )
+        self._player.set_latency_offset_ms(
+            read_latency_offset_ms(self._settings)
+        )
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
         QTimer.singleShot(0, self._maybe_warn_no_audio_output)
         QTimer.singleShot(0, self._restore_session)
@@ -250,6 +261,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_C), self).activated.connect(
             self._player_controls.toggle_count_in
         )
+        QShortcut(QKeySequence(Qt.Key.Key_R), self).activated.connect(
+            self._player_controls.toggle_record
+        )
 
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
@@ -280,6 +294,12 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._player.set_output_device(
                 normalize_output_device_setting(self._settings)
+            )
+            self._player.set_input_device(
+                normalize_input_device_setting(self._settings)
+            )
+            self._player.set_latency_offset_ms(
+                read_latency_offset_ms(self._settings)
             )
 
     def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
@@ -331,6 +351,7 @@ class MainWindow(QMainWindow):
             "<tr><td><b>] / [</b></td><td>Speed up / down</td></tr>"
             "<tr><td><b>M</b></td><td>Toggle metronome</td></tr>"
             "<tr><td><b>C</b></td><td>Toggle count-in</td></tr>"
+            "<tr><td><b>R</b></td><td>Arm/disarm recording</td></tr>"
             "<tr><td><b>1-6</b></td><td>Mute/unmute stem</td></tr>"
             "</table>"
         )
@@ -577,6 +598,7 @@ class MainWindow(QMainWindow):
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
         self._player.playback_failed.connect(self._on_playback_failed)
+        self._player.recording_saved.connect(self._on_recording_saved)
 
     # ------------------------------------------------------------------
     # Slots
@@ -600,11 +622,90 @@ class MainWindow(QMainWindow):
             self._player.load_stems(stem_paths)
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
+            self._player._recording_song_dir = song.stems_path
             self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
+            self._load_existing_recordings(song.stems_path)
+
+    def _load_existing_recordings(self, song_dir: str) -> None:
+        """Scan *song_dir* for recording_take*.wav and load them as stems."""
+        takes = sorted(glob.glob(
+            os.path.join(song_dir, "recording_take*.wav")
+        ))
+        for take_path in takes:
+            base = os.path.basename(take_path)
+            stem_name = base.replace(".wav", "")
+            try:
+                num = int(
+                    stem_name.replace("recording_take", "")
+                )
+                display = f"Take {num}"
+            except ValueError:
+                display = stem_name
+            self._add_recording_stem(stem_name, take_path, display)
+
+    def _on_recording_saved(self, path: str) -> None:
+        """Handle a newly saved recording: load it and add a UI row."""
+        base = os.path.basename(path)
+        stem_name = base.replace(".wav", "")
+        try:
+            num = int(stem_name.replace("recording_take", ""))
+            display = f"Take {num}"
+        except ValueError:
+            display = stem_name
+        self._add_recording_stem(stem_name, path, display)
+        self._player_controls._do_recompute_peaks()
+
+    def _add_recording_stem(
+        self, stem_name: str, path: str, display: str
+    ) -> None:
+        """Load a recording WAV into the player and add a mixer row."""
+        data, sr = sf.read(path, always_2d=True, dtype="float32")
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)
+        self._player._stems[stem_name] = data
+        self._player._original_stems[stem_name] = data
+        self._player._total_frames = max(
+            self._player._total_frames, data.shape[0]
+        )
+        row = self._player_controls.add_recording_row(
+            stem_name, display
+        )
+        row.delete_requested.connect(self._on_delete_recording)
+
+    def _on_delete_recording(self, stem_name: str) -> None:
+        """Delete a recording take from disk and player."""
+        if self._current_song_id is None:
+            return
+        song = self._library.get_song(self._current_song_id)
+        if song is None:
+            return
+
+        path = os.path.join(song.stems_path, f"{stem_name}.wav")
+        reply = QMessageBox.question(
+            self,
+            "Delete Recording",
+            f"Delete {stem_name}? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if os.path.isfile(path):
+            os.remove(path)
+
+        self._player._stems.pop(stem_name, None)
+        self._player._original_stems.pop(stem_name, None)
+        self._player._muted_stems.discard(stem_name)
+        self._player._soloed_stems.discard(stem_name)
+        self._player._volumes.pop(stem_name, None)
+        self._player_controls.remove_recording_row(stem_name)
+        self._player_controls._do_recompute_peaks()
 
     def _on_close_song(self) -> None:
         """Stop playback and return to the empty logo state."""
         self._player.stop()
+        self._player._recording_song_dir = None
         self._player_controls.clear_song()
         self._current_song_id = None
         self.setWindowTitle("stemma")
@@ -677,6 +778,12 @@ class MainWindow(QMainWindow):
             path = os.path.join(song.stems_path, f"{name}.wav")
             if os.path.isfile(path):
                 stem_paths[name] = path
+
+        for take_file in sorted(glob.glob(
+            os.path.join(song.stems_path, "recording_take*.wav")
+        )):
+            take_name = os.path.basename(take_file).replace(".wav", "")
+            stem_paths[take_name] = take_file
 
         if not stem_paths:
             return

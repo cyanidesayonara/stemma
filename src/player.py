@@ -3,9 +3,16 @@
 Uses `sounddevice` for zero-latency memory buffer mixing. Stems are loaded
 into RAM entirely and summed dynamically inside the C-level audio callback,
 allowing instant, click-free muting and soloing.
+
+Recording is supported via ``sd.Stream`` (full-duplex): when recording is
+armed, ``play()`` creates a duplex stream whose single callback captures
+input audio at the exact playback frame position -- guaranteeing perfect
+frame synchronisation with the stems being mixed to output.
 """
 
+import glob
 import math
+import os
 from typing import Any
 
 import numpy as np
@@ -24,6 +31,20 @@ def _safe_disconnect(signal) -> None:
         signal.disconnect()
     except RuntimeError:
         pass
+
+
+def next_take_number(song_dir: str) -> int:
+    """Return the next recording take number for *song_dir*."""
+    existing = glob.glob(os.path.join(song_dir, "recording_take*.wav"))
+    nums: list[int] = []
+    for p in existing:
+        base = os.path.basename(p)
+        try:
+            n = int(base.replace("recording_take", "").replace(".wav", ""))
+            nums.append(n)
+        except ValueError:
+            continue
+    return max(nums, default=0) + 1
 
 
 class SpeedWorker(QThread):
@@ -92,6 +113,7 @@ class MultiTrackPlayer(QObject):
     play_finished = Signal()
     speed_changed = Signal(float)
     playback_failed = Signal(str)
+    recording_saved = Signal(str)  # emitted with the saved WAV path
 
     def __init__(self) -> None:
         super().__init__()
@@ -133,8 +155,17 @@ class MultiTrackPlayer(QObject):
         self._count_in_phase: int = 0
         self._count_in_beat: int = 0
 
+        # Recording state.
+        self._recording_armed: bool = False
+        self._recording: bool = False
+        self._recording_buffer: np.ndarray | None = None
+        self._indata_capture: np.ndarray | None = None
+        self._input_device: int | None = None
+        self._latency_offset_frames: int = 0
+        self._recording_song_dir: str | None = None
+
         # Hardware stream.
-        self._stream: sd.OutputStream | None = None
+        self._stream: sd.OutputStream | sd.Stream | None = None
         self._output_device: int | None = None
 
         # UI updater.
@@ -269,6 +300,75 @@ class MultiTrackPlayer(QObject):
             self._count_in_phase = 0
             self._count_in_beat = 0
 
+    # -- Recording API -------------------------------------------------------
+
+    @property
+    def recording_armed(self) -> bool:
+        """Return True if recording is armed (will start on next play)."""
+        return self._recording_armed
+
+    @property
+    def is_recording(self) -> bool:
+        """Return True if audio is actively being recorded."""
+        return self._recording
+
+    def arm_recording(self, armed: bool) -> None:
+        """Arm or disarm recording.
+
+        Recording cannot be armed when playback speed is not 1.0x or when
+        no stems are loaded.  Arming while already recording is a no-op.
+        """
+        if armed:
+            if self._playback_speed != 1.0:
+                return
+            if not self._stems:
+                return
+        self._recording_armed = armed
+
+    def set_input_device(self, device: int | None) -> None:
+        """Select the PortAudio input device index, or None for system default."""
+        self._input_device = device
+
+    def set_latency_offset_ms(self, ms: float) -> None:
+        """Set recording latency compensation in milliseconds.
+
+        Positive values shift the recording earlier (compensate for input
+        device latency).
+        """
+        ms = max(-200.0, min(200.0, float(ms)))
+        self._latency_offset_frames = int(ms / 1000.0 * self._sample_rate)
+
+    def _allocate_recording_buffer(self) -> None:
+        """Create a zeroed stereo buffer the same length as the current stems."""
+        self._recording_buffer = np.zeros(
+            (self._total_frames, 2), dtype=np.float32
+        )
+
+    def save_recording(self, song_dir: str) -> str | None:
+        """Write the recording buffer to a WAV file in *song_dir*.
+
+        Returns the path to the saved file, or None if there is no recording.
+        The take number auto-increments based on existing files.
+        """
+        if self._recording_buffer is None:
+            return None
+
+        buf = self._recording_buffer
+
+        if self._latency_offset_frames != 0:
+            buf = np.roll(buf, -self._latency_offset_frames, axis=0)
+            if self._latency_offset_frames > 0:
+                buf[-self._latency_offset_frames:] = 0.0
+            else:
+                buf[:-self._latency_offset_frames] = 0.0
+
+        take_num = next_take_number(song_dir)
+        filename = f"recording_take{take_num}.wav"
+        path = os.path.join(song_dir, filename)
+        sf.write(path, buf, self._sample_rate)
+        self._recording_buffer = None
+        return path
+
     def load_stems(self, stem_paths: dict[str, str]) -> None:
         """Load all stem WAV files into memory.
 
@@ -286,6 +386,9 @@ class MultiTrackPlayer(QObject):
         self._loop_b_frame = None
         self._looping = False
         self._playback_speed = 1.0
+        self._recording_armed = False
+        self._recording = False
+        self._recording_buffer = None
 
         max_frames = 0
         sample_rate = 0
@@ -331,22 +434,39 @@ class MultiTrackPlayer(QObject):
 
         try:
             if self._stream is None:
-                kwargs: dict[str, Any] = {
-                    "samplerate": self._sample_rate,
-                    "channels": 2,
-                    "callback": self._audio_callback,
-                }
-                if self._output_device is not None:
-                    kwargs["device"] = self._output_device
-                self._stream = sd.OutputStream(**kwargs)
+                if self._recording_armed:
+                    self._allocate_recording_buffer()
+                    out_dev = self._output_device
+                    in_dev = self._input_device
+                    device_arg: Any = (
+                        in_dev if in_dev is not None else sd.default.device[0],
+                        out_dev if out_dev is not None else sd.default.device[1],
+                    )
+                    self._stream = sd.Stream(
+                        samplerate=self._sample_rate,
+                        channels=2,
+                        callback=self._full_duplex_callback,
+                        device=device_arg,
+                    )
+                    self._recording = True
+                else:
+                    kwargs: dict[str, Any] = {
+                        "samplerate": self._sample_rate,
+                        "channels": 2,
+                        "callback": self._audio_callback,
+                    }
+                    if self._output_device is not None:
+                        kwargs["device"] = self._output_device
+                    self._stream = sd.OutputStream(**kwargs)
             self._stream.start()
         except sd.PortAudioError:
-            # No audio device or device error — clean up and bail.
             if self._stream is not None:
                 self._stream.close()
                 self._stream = None
+            self._recording = False
+            self._recording_buffer = None
             self.playback_failed.emit(
-                "No audio output device is available, or playback failed to "
+                "No audio device is available, or playback failed to "
                 "start. Connect speakers or headphones, or choose another "
                 "device in Edit > Preferences."
             )
@@ -369,7 +489,10 @@ class MultiTrackPlayer(QObject):
         if not self._is_playing:
             return
 
+        was_recording = self._recording
+
         self._is_playing = False
+        self._recording = False
         self._count_in_remaining = 0
         self._count_in_beat = 0
         if self._stream is not None:
@@ -379,6 +502,12 @@ class MultiTrackPlayer(QObject):
 
         self._timer.stop()
         self.state_changed.emit(False)
+
+        if was_recording and self._recording_song_dir:
+            path = self.save_recording(self._recording_song_dir)
+            if path:
+                self._recording_armed = False
+                self.recording_saved.emit(path)
 
     def stop(self) -> None:
         """Stop playback and reset the playhead.
@@ -634,6 +763,8 @@ class MultiTrackPlayer(QObject):
     def _emit_position(self) -> None:
         """Emit the current playback position for UI updates."""
         if not self._is_playing and self._timer.isActive():
+            was_recording = self._recording
+            self._recording = False
             self._timer.stop()
             if self._stream is not None:
                 self._stream.stop()
@@ -641,6 +772,11 @@ class MultiTrackPlayer(QObject):
                 self._stream = None
             self.state_changed.emit(False)
             self.play_finished.emit()
+            if was_recording and self._recording_song_dir:
+                path = self.save_recording(self._recording_song_dir)
+                if path:
+                    self._recording_armed = False
+                    self.recording_saved.emit(path)
             return
 
         pos_s = self._current_frame / self._sample_rate
@@ -704,6 +840,29 @@ class MultiTrackPlayer(QObject):
         self._count_in_beat = min(
             total_elapsed // beat_interval + 1, self._count_in_beats
         )
+
+    def _full_duplex_callback(
+        self,
+        indata: np.ndarray,
+        outdata: np.ndarray,
+        frames: int,
+        time_info: dict,
+        status: sd.CallbackFlags,
+    ) -> None:
+        """Full-duplex PortAudio callback for simultaneous record + playback.
+
+        Stashes *indata* so ``_audio_callback`` can write it into the
+        recording buffer at the correct (loop-aware) frame position, then
+        delegates to ``_audio_callback`` for output mixing.
+        """
+        if self._recording and self._count_in_remaining == 0:
+            self._indata_capture = indata.copy()
+        else:
+            self._indata_capture = None
+        try:
+            self._audio_callback(outdata, frames, time_info, status)
+        finally:
+            self._indata_capture = None
 
     def _audio_callback(self, outdata: np.ndarray, frames: int,
                         time_info: dict, status: sd.CallbackFlags) -> None:
@@ -791,6 +950,24 @@ class MultiTrackPlayer(QObject):
                         outdata[buf_offset:buf_offset + read_len] += (
                             stem_data[start:stem_end] * gain
                         )
+
+                if (self._recording
+                        and self._indata_capture is not None
+                        and self._recording_buffer is not None):
+                    rec_end = min(end, self._recording_buffer.shape[0])
+                    rec_len = rec_end - start
+                    if rec_len > 0:
+                        chunk = self._indata_capture[
+                            buf_offset:buf_offset + rec_len
+                        ]
+                        if chunk.ndim == 1:
+                            chunk = chunk[:, np.newaxis]
+                        if chunk.shape[1] == 1:
+                            chunk = np.repeat(chunk, 2, axis=1)
+                        actual = min(rec_len, chunk.shape[0])
+                        self._recording_buffer[
+                            start:start + actual
+                        ] = chunk[:actual, :2]
 
                 self._current_frame += frames_to_read
                 buf_offset += frames_to_read

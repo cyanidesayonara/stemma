@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -23,11 +24,14 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    input_device_indices_with_input,
     output_device_indices_with_output,
+    parse_stored_input_device_index,
     parse_stored_output_device_index,
     read_default_export_format,
     read_default_import_6_stem,
     read_default_mp3_bitrate,
+    read_latency_offset_ms,
 )
 from src.data_paths import platform_user_data_dir
 from src.version import __version__
@@ -78,9 +82,25 @@ class PreferencesDialog(QDialog):
         self._device_combo.addItem("System default", -1)
         self._populate_output_devices()
 
+        self._input_device_combo = QComboBox()
+        self._input_device_combo.addItem("System default", -1)
+        self._populate_input_devices()
+
+        self._latency_spin = QDoubleSpinBox()
+        self._latency_spin.setRange(-200.0, 200.0)
+        self._latency_spin.setValue(0.0)
+        self._latency_spin.setSuffix(" ms")
+        self._latency_spin.setSingleStep(1.0)
+        self._latency_spin.setToolTip(
+            "Shift recording earlier (positive) or later (negative) "
+            "to compensate for audio interface latency"
+        )
+
         audio_box = QGroupBox("Audio")
         aform = QFormLayout(audio_box)
         aform.addRow("Output device:", self._device_combo)
+        aform.addRow("Input device:", self._input_device_combo)
+        aform.addRow("Recording latency offset:", self._latency_spin)
 
         self._model_combo = QComboBox()
         self._model_combo.addItem("4-stem (vocals, drums, bass, other)", False)
@@ -135,6 +155,18 @@ class PreferencesDialog(QDialog):
             name = str(dev.get("name", f"Device {i}"))[:120]
             self._device_combo.addItem(name, i)
 
+    def _populate_input_devices(self) -> None:
+        try:
+            devices = sd.query_devices()
+        except (OSError, ValueError, RuntimeError):
+            return
+        for i, dev in enumerate(devices):
+            ch = int(dev.get("max_input_channels", 0) or 0)
+            if ch <= 0:
+                continue
+            name = str(dev.get("name", f"Device {i}"))[:120]
+            self._input_device_combo.addItem(name, i)
+
     def _load_from_settings(self) -> None:
         raw = self._settings.value("paths/data_dir", "")
         if isinstance(raw, str):
@@ -155,6 +187,26 @@ class PreferencesDialog(QDialog):
                     break
             except (TypeError, ValueError):
                 continue
+
+        in_dev = parse_stored_input_device_index(self._settings)
+        valid_in = input_device_indices_with_input()
+        if in_dev is not None and valid_in is not None and in_dev not in valid_in:
+            in_dev = None
+        in_target = -1 if in_dev is None else in_dev
+        for i in range(self._input_device_combo.count()):
+            raw = self._input_device_combo.itemData(i)
+            if raw is None:
+                continue
+            try:
+                if int(raw) == in_target:
+                    self._input_device_combo.setCurrentIndex(i)
+                    break
+            except (TypeError, ValueError):
+                continue
+
+        self._latency_spin.setValue(
+            read_latency_offset_ms(self._settings)
+        )
 
         self._model_combo.setCurrentIndex(
             1 if read_default_import_6_stem(self._settings) else 0
@@ -212,6 +264,16 @@ class PreferencesDialog(QDialog):
         self._settings.setValue(
             "audio/output_device",
             _combo_int_data(self._device_combo, -1),
+        )
+
+        self._settings.setValue(
+            "audio/input_device",
+            _combo_int_data(self._input_device_combo, -1),
+        )
+
+        self._settings.setValue(
+            "audio/latency_offset_ms",
+            self._latency_spin.value(),
         )
 
         mdata = self._model_combo.currentData()

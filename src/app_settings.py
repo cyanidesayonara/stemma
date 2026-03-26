@@ -83,3 +83,66 @@ def read_default_export_format(settings: QSettings) -> str:
 def read_default_import_6_stem(settings: QSettings) -> bool:
     """Return True if the import dialog should default to the 6-stem model."""
     return bool(settings.value("import/default_6_stem", False, type=bool))
+
+
+# -- Input device helpers ---------------------------------------------------
+
+def input_device_indices_with_input() -> frozenset[int] | None:
+    """Return indices with at least one input channel, or None if query fails."""
+    try:
+        devices = sd.query_devices()
+        result: list[int] = []
+        for i, dev in enumerate(devices):
+            ch = int(dev.get("max_input_channels", 0) or 0)
+            if ch > 0:
+                result.append(i)
+        return frozenset(result)
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def parse_stored_input_device_index(settings: QSettings) -> int | None:
+    """Read the stored PortAudio input device index without mutating settings.
+
+    Returns ``None`` for system default (unset, empty, negative, or non-numeric).
+    """
+    v = settings.value("audio/input_device", -1)
+    if v in (None, ""):
+        return None
+    try:
+        i = int(v)
+    except (TypeError, ValueError):
+        return None
+    if i < 0:
+        return None
+    return i
+
+
+def normalize_input_device_setting(settings: QSettings) -> int | None:
+    """Resolve the input device for recording: valid index, or None for default.
+
+    If the stored index is not a current input device, it is cleared in
+    *settings* (set to -1) and None is returned.
+    """
+    i = parse_stored_input_device_index(settings)
+    if i is None:
+        return None
+    valid = input_device_indices_with_input()
+    if valid is not None and i not in valid:
+        settings.setValue("audio/input_device", -1)
+        return None
+    return i
+
+
+def read_latency_offset_ms(settings: QSettings) -> float:
+    """Return the manual recording latency compensation in milliseconds.
+
+    Positive values shift the recording earlier (compensate for input latency).
+    Clamped to -200..+200 ms.
+    """
+    v = settings.value("audio/latency_offset_ms", 0.0)
+    try:
+        ms = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(-200.0, min(200.0, ms))

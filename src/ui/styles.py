@@ -14,6 +14,8 @@ STEM_COLORS = {
     "other": "#95a5a6",    # Gray
 }
 
+RECORDING_COLOR = "#e53935"  # Material Red 600 -- used for recording stem rows
+
 DARK_COLORS = {
     "base": "#1e1e2e",
     "mantle": "#181825",

@@ -63,7 +63,7 @@ stemma/
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
       styles.py        # Dark / light themes
-  tests/               # pytest test suite (~362 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~382 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -112,7 +112,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-03-26
+Last updated: 2026-03-26 (recording feature)
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -153,9 +153,11 @@ All core functionality implemented and tested:
 - [x] Metronome with BPM entry (#57, PR #86)
 - [x] Count-in before playback/loop start (#78, PR #87)
 
+### v1.2.0 Release -- In Progress
+- [x] Record audio track: full-duplex recording, multiple takes, input device, latency compensation (#79, PR pending)
+
 ### Post-1.0 Backlog
 Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
-- [ ] Record audio track (#79)
 - [ ] Tempo/key detection and beat-synced metronome (#42)
 - [ ] Animated startup logo (#76)
 - [ ] MSIX packaging (#74)
@@ -165,7 +167,7 @@ Tickets ship as incremental 1.x releases (semver: minor for features, patch for 
 ## Test Suite
 
 ```
-pytest                                    # ~362 fast tests (~10s)
+pytest                                    # ~382 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
