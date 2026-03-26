@@ -14,9 +14,12 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
-- A-B loop for practice sections; pitch-preserving playback speed presets
-- Keyboard shortcuts for transport, stems, loop, and speed
-- Dark / light Qt themes; window state persistence; configurable data folder and audio device (Edit > Preferences)
+- A-B loop for practice sections (Stop returns to loop A while looping; seek stays inside the loop); pitch-preserving playback speed presets
+- Metronome with BPM entry, tap tempo, mute/solo-friendly click track
+- Optional count-in beats before playback (and optionally before each loop repeat)
+- Session persistence: restore last song, position, mixer, loop, speed, metronome, and count-in after restart
+- Keyboard shortcuts for transport, stems, loop, speed, metronome, and count-in; full list under **Help > Keyboard Shortcuts**
+- Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
 
 ## Download
@@ -49,7 +52,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~10 seconds, ~286 tests)
+# Fast tests (~10 seconds, ~360 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)
@@ -72,6 +75,10 @@ pytest -m hardware
 | B | Set loop end point |
 | L | Toggle A-B loop |
 | [ / ] | Slower / faster playback speed |
+| M | Toggle metronome |
+| C | Toggle count-in |
+
+Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bindings as above).
 
 ## Project Documentation
 
