@@ -4,7 +4,16 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
-## 2026-03-26 -- Record audio track (#79, PR pending)
+## 2026-03-26 -- v1.2.0 release
+
+Shipped as GitHub Release **v1.2.0** (tag `v1.2.0`). User-facing highlights:
+
+- Record audio track: full-duplex play-along recording with multiple takes (#79, PR #91).
+- Input device selection and latency compensation in Preferences.
+- Recordings included in mix export.
+- Count-in now fires at any play position (not just position 0 or loop A).
+
+## 2026-03-26 -- Record audio track (#79, PR #91)
 
 ### Done
 - **Recording engine:** Full-duplex `sd.Stream` callback captures input audio at the exact playback frame position, guaranteeing frame-synchronised recording with stem playback. Recording buffer is position-indexed so A-B loop recording naturally overwrites the same region on each pass.
@@ -16,10 +25,11 @@ All notable development sessions are documented here in reverse chronological or
 - **Export integration:** Recordings are included in mix export alongside stems.
 - **Take management:** Delete individual takes with confirmation dialog. Removes file from disk, stem from player, and row from mixer.
 - **Song loading:** Existing recordings in a song's stems directory are auto-discovered and loaded on song selection.
+- **Review fixes:** Mono mic support (channels tuple), safe default device resolution, stop-only finalization (pause keeps buffer for resume, stop saves take), `_total_frames` recalculation on recording deletion, encapsulated recording stem management via public methods, sample rate validation, count-in at any play position with device-switch suppression, record button sync on pause-then-stop.
 
 ### Metrics
-- 382 fast tests, 5 slow ONNX tests, 1 hardware playback test.
-- 20 new recording-specific tests.
+- 395 fast tests, 5 slow ONNX tests, 1 hardware playback test.
+- 33 new recording-specific tests.
 
 ---
 
