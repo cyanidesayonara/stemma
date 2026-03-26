@@ -50,7 +50,7 @@ from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import LibraryPanel
-from src.ui.player_controls import PlayerControls
+from src.ui.player_controls import PlayerControls, _format_time
 from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
 
@@ -875,8 +875,6 @@ class MainWindow(QMainWindow):
 
         Returns a dict with option values, or None if the user cancelled.
         """
-        from src.ui.player_controls import _format_time
-
         dlg = QDialog(self)
         dlg.setWindowTitle("Export Options")
         layout = QVBoxLayout(dlg)

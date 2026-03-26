@@ -71,18 +71,14 @@ class WaveformWidget(QWidget):
         self._build_gradients()
 
     def _build_gradients(self) -> None:
-        """Pre-build the upper and lower waveform gradients."""
+        """Pre-build the waveform gradient (bright at center, faded at peaks)."""
         h = self.height() if self.height() > 0 else _WAVEFORM_HEIGHT
         center = h / 2.0
         accent = self._waveform_color
 
-        self._upper_gradient = QLinearGradient(0, center, 0, 0)
-        self._upper_gradient.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 220))
-        self._upper_gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 80))
-
-        self._lower_gradient = QLinearGradient(0, center, 0, h)
-        self._lower_gradient.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 220))
-        self._lower_gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 80))
+        self._waveform_gradient = QLinearGradient(0, center, 0, 0)
+        self._waveform_gradient.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 220))
+        self._waveform_gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 80))
 
     def set_theme_colors(self, colors: dict[str, str]) -> None:
         """Update paint colors for a new theme and repaint."""
@@ -157,7 +153,7 @@ class WaveformWidget(QWidget):
 
         painter.setPen(Qt.PenStyle.NoPen)
 
-        painter.setBrush(self._upper_gradient)
+        painter.setBrush(self._waveform_gradient)
         painter.drawPath(self._cached_path)
 
     def _build_waveform_path(self, w: int, h: int) -> QPainterPath:
