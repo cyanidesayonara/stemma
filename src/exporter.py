@@ -11,6 +11,7 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.click_utils import generate_count_in
 from src.separator import SAMPLE_RATE
 
 # Supported output formats by extension.
@@ -121,6 +122,11 @@ class StemExporter:
         muted_stems: set[str] | None = None,
         volumes: dict[str, float] | None = None,
         mp3_bitrate: int = 320,
+        start_frame: int | None = None,
+        end_frame: int | None = None,
+        count_in_beats: int = 0,
+        count_in_bpm: float = 120.0,
+        count_in_volume: float = 0.5,
     ) -> None:
         """Export a mix of selected stems to a WAV or MP3 file.
 
@@ -129,8 +135,16 @@ class StemExporter:
             stem_names: Stems to include. Defaults to all available stems.
             muted_stems: Stems to exclude from the mix. Applied after
                 *stem_names* filtering.
-            volumes: Per-stem gain levels (0.0–2.0). Missing stems
+            volumes: Per-stem gain levels (0.0--2.0). Missing stems
                 default to 1.0.
+            mp3_bitrate: Bitrate for MP3 output (default 320 kbps).
+            start_frame: First frame to include (for loop-region export).
+                When ``None`` (default), starts from the beginning.
+            end_frame: Frame after the last included frame. When ``None``
+                (default), goes to the end of the audio.
+            count_in_beats: Number of metronome beats to prepend (0 = none).
+            count_in_bpm: Tempo for the prepended count-in (default 120).
+            count_in_volume: Volume for count-in clicks (0.0--2.0).
 
         Raises:
             ValueError: If the resulting stem list is empty.
@@ -147,10 +161,13 @@ class StemExporter:
         if volumes is None:
             volumes = {}
 
-        # Load and sum the selected stems with volume applied.
         mixed = None
         for name in stem_names:
             audio, sr = sf.read(self.stem_paths[name], dtype="float32")
+            if start_frame is not None or end_frame is not None:
+                sf_start = start_frame if start_frame is not None else 0
+                sf_end = end_frame if end_frame is not None else audio.shape[0]
+                audio = audio[sf_start:sf_end]
             gain = volumes.get(name, 1.0)
             audio = audio * gain
             if mixed is None:
@@ -159,13 +176,22 @@ class StemExporter:
                 min_len = min(mixed.shape[0], audio.shape[0])
                 mixed[:min_len] += audio[:min_len]
 
-        # Prevent hard digital clipping distortion by auto-normalizing 
-        # the master bus down if it exceeds 0dBFS (1.0).
         peak = np.max(np.abs(mixed))
         if peak > 1.0:
             mixed /= peak
         else:
             np.clip(mixed, -1.0, 1.0, out=mixed)
+
+        if count_in_beats > 0:
+            ci_audio = generate_count_in(
+                beats=count_in_beats,
+                bpm=count_in_bpm,
+                sample_rate=SAMPLE_RATE,
+                volume=count_in_volume,
+            )
+            if mixed.ndim == 1:
+                ci_audio = ci_audio[:, 0]
+            mixed = np.concatenate([ci_audio, mixed], axis=0)
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         _write_audio(output_path, mixed, SAMPLE_RATE, mp3_bitrate=mp3_bitrate)
@@ -189,6 +215,11 @@ class ExportWorker(QThread):
         muted_stems: set[str],
         volumes: dict[str, float],
         mp3_bitrate: int = 320,
+        start_frame: int | None = None,
+        end_frame: int | None = None,
+        count_in_beats: int = 0,
+        count_in_bpm: float = 120.0,
+        count_in_volume: float = 0.5,
     ) -> None:
         super().__init__()
         self.exporter = exporter
@@ -196,6 +227,11 @@ class ExportWorker(QThread):
         self.muted_stems = muted_stems
         self.volumes = volumes
         self.mp3_bitrate = mp3_bitrate
+        self.start_frame = start_frame
+        self.end_frame = end_frame
+        self.count_in_beats = count_in_beats
+        self.count_in_bpm = count_in_bpm
+        self.count_in_volume = count_in_volume
 
     def run(self) -> None:
         try:
@@ -204,6 +240,11 @@ class ExportWorker(QThread):
                 muted_stems=self.muted_stems,
                 volumes=self.volumes,
                 mp3_bitrate=self.mp3_bitrate,
+                start_frame=self.start_frame,
+                end_frame=self.end_frame,
+                count_in_beats=self.count_in_beats,
+                count_in_bpm=self.count_in_bpm,
+                count_in_volume=self.count_in_volume,
             )
             self.finished.emit(self.output_path)
         except Exception as exc:

@@ -21,6 +21,8 @@ import soundfile as sf
 import librosa
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
+from src.click_utils import generate_click
+
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
 
@@ -202,16 +204,10 @@ class MultiTrackPlayer(QObject):
     def _generate_click(sample_rate: int) -> np.ndarray:
         """Generate a short click sound for the metronome.
 
-        Returns a stereo numpy array (shape (N, 2), dtype float32) containing
-        a 1000 Hz sine tone with an exponential decay envelope, lasting 30ms.
+        Delegates to the shared ``generate_click`` utility so the same
+        click waveform is used by both the live player and the exporter.
         """
-        duration = 0.03  # 30 ms
-        n_frames = int(sample_rate * duration)
-        t = np.arange(n_frames, dtype=np.float32) / sample_rate
-        tone = np.sin(2.0 * np.pi * 1000.0 * t)
-        envelope = np.exp(-t / 0.006).astype(np.float32)  # ~6ms decay constant
-        click_mono = (tone * envelope).astype(np.float32)
-        return np.column_stack((click_mono, click_mono))
+        return generate_click(sample_rate)
 
     @property
     def metronome_enabled(self) -> bool:

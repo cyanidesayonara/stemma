@@ -21,6 +21,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -806,6 +807,30 @@ class MainWindow(QMainWindow):
         if not stem_paths:
             return
 
+        loop_a = self._player.loop_a
+        loop_b = self._player.loop_b
+        has_loop = loop_a is not None and loop_b is not None and loop_b > loop_a
+        has_bpm = self._player.metronome_bpm > 0
+
+        start_frame: int | None = None
+        end_frame: int | None = None
+        count_in_beats = 0
+        count_in_bpm = self._player.metronome_bpm
+        count_in_volume = self._player.metronome_volume
+
+        if has_loop or has_bpm:
+            opts = self._show_export_options_dialog(
+                has_loop, loop_a, loop_b, has_bpm, count_in_bpm
+            )
+            if opts is None:
+                return
+            if opts.get("loop_region") and has_loop:
+                sr = self._player.sample_rate
+                start_frame = int(loop_a * sr)
+                end_frame = int(loop_b * sr)
+            if opts.get("count_in"):
+                count_in_beats = self._player.count_in_beats
+
         fmt = read_default_export_format(self._settings)
         if fmt == "mp3":
             filters = "MP3 Files (*.mp3);;WAV Files (*.wav)"
@@ -827,11 +852,65 @@ class MainWindow(QMainWindow):
                 muted_stems=self._player.muted_stems,
                 volumes=volumes,
                 mp3_bitrate=bitrate,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                count_in_beats=count_in_beats,
+                count_in_bpm=count_in_bpm,
+                count_in_volume=count_in_volume,
             )
             self._export_worker.finished.connect(self._on_export_finished)
             self._export_worker.error.connect(self._on_export_error)
 
             self._export_worker.start()
+
+    def _show_export_options_dialog(
+        self,
+        has_loop: bool,
+        loop_a: float | None,
+        loop_b: float | None,
+        has_bpm: bool,
+        bpm: float,
+    ) -> dict | None:
+        """Show a dialog with export options (loop region, count-in).
+
+        Returns a dict with option values, or None if the user cancelled.
+        """
+        from src.ui.player_controls import _format_time
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Export Options")
+        layout = QVBoxLayout(dlg)
+
+        loop_cb = None
+        if has_loop:
+            a_str = _format_time(loop_a)
+            b_str = _format_time(loop_b)
+            loop_cb = QCheckBox(f"Export loop region only ({a_str} -- {b_str})")
+            layout.addWidget(loop_cb)
+
+        ci_cb = None
+        if has_bpm:
+            beats = self._player.count_in_beats
+            ci_cb = QCheckBox(
+                f"Include count-in ({beats} beats at {int(bpm)} BPM)"
+            )
+            layout.addWidget(ci_cb)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+        return {
+            "loop_region": loop_cb.isChecked() if loop_cb else False,
+            "count_in": ci_cb.isChecked() if ci_cb else False,
+        }
 
     def _on_export_finished(self, path: str) -> None:
         QMessageBox.information(self, "Export", f"Mix successfully exported to {path}")
