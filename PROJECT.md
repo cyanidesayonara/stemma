@@ -160,6 +160,7 @@ stemma/
 - Per-stem volume control (0.0-2.0)
 - A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`. While looping is on and the region is valid (`B > A`), **Stop** seeks to loop A (not track start); **seek** clamps into `[A, B)` (outside snaps to A)
 - Metronome and count-in settings (BPM, volume, beats, loop-repeat count-in)
+- Recording: full-duplex `sd.Stream` captures input at the playback frame position; position-indexed buffer auto-handles loop wraps; saves as `recording_takeN.wav` with optional latency offset via `np.roll`; `recording_saved` signal
 - Tracks playback position for UI sync
 - PortAudioError on open/start: stream cleanup and **`playback_failed`** signal (user-facing message for UI dialogs)
 
@@ -188,11 +189,11 @@ stemma/
 
 ### UI Modules
 - **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File / Edit (Preferences) / Help (Keyboard Shortcuts, About). Keyboard shortcuts. Window geometry/state and **session persistence** (last song, position, mixer, loop, speed, metronome, count-in) via QSettings. Drag-and-drop audio import. Connects **`playback_failed`** and startup warning when no audio output devices exist.
-- **`player_controls.py`** — Transport (Play/Pause/Stop + time display). Waveform with click-to-seek, cursor, A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Metronome row (BPM, tap, toggle, volume). Count-in row (toggle, beats, loop-repeat option). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems. Waveform recomputes on mute/solo/volume changes. Playback speed presets.
+- **`player_controls.py`** — Transport (Play/Pause/Stop/Record + time display). Waveform with click-to-seek, cursor, A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Metronome row (BPM, tap, toggle, volume). Count-in row (toggle, beats, loop-repeat option). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems. Recording stem rows (`RecordingStemRow`) with delete button. Waveform recomputes on mute/solo/volume changes. Playback speed presets.
 - **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
 - **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
 - **`import_dialog.py`** — File browser or YouTube URL, metadata fields, model variant (4/6 stem). If ONNX is missing, downloads model with progress; on any failure before successful import completion, removes the new library row. Large file (100 MiB+) confirmation. **Retry import** after errors. Workers cancelled and rolled back on dialog reject.
-- **`preferences_dialog.py`** — Data directory, output device, default import model, export format and MP3 bitrate
+- **`preferences_dialog.py`** — Data directory, output device, input device (recording), latency compensation, default import model, export format and MP3 bitrate
 
 ### `downloader.py` — YouTube Audio Download
 - URL validation for youtube.com, youtu.be, music.youtube.com
@@ -241,7 +242,7 @@ Tickets ship as incremental 1.x releases (semver).
 - [x] Session persistence (#55, PR #85)
 - [x] Metronome with BPM entry (#57, PR #86)
 - [x] Count-in before playback/loop start (#78, PR #87)
-- [ ] Record audio track (#79)
+- [x] Record audio track (#79, PR pending)
 - [ ] Tempo/key detection and beat-synced metronome (#42)
 - [ ] Animated startup logo (#76)
 - [ ] MSIX packaging for Microsoft Store (#74)

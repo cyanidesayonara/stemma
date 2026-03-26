@@ -4,6 +4,25 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-26 -- Record audio track (#79, PR pending)
+
+### Done
+- **Recording engine:** Full-duplex `sd.Stream` callback captures input audio at the exact playback frame position, guaranteeing frame-synchronised recording with stem playback. Recording buffer is position-indexed so A-B loop recording naturally overwrites the same region on each pass.
+- **Record button:** Red circle icon in the transport bar, checkable (arm/disarm). `R` keyboard shortcut. Disabled when speed != 1.0x.
+- **Multiple takes:** Recordings saved as `recording_take1.wav`, `recording_take2.wav`, etc. in the song's stems directory. Take numbering auto-increments. Each take gets its own stem row in the mixer.
+- **Recording stem rows:** `RecordingStemRow` subclass with mute/solo/volume controls and a delete button (X). Colored in Material Red. Shown in a separate "Recordings" section below stems.
+- **Input device selection:** Preferences > Audio now has an input device dropdown (mirrors output device). Stored as `audio/input_device` in QSettings.
+- **Latency compensation:** Manual ms offset in Preferences (-200 to +200 ms). Applied via `np.roll` when saving the recording. Stored as `audio/latency_offset_ms`.
+- **Export integration:** Recordings are included in mix export alongside stems.
+- **Take management:** Delete individual takes with confirmation dialog. Removes file from disk, stem from player, and row from mixer.
+- **Song loading:** Existing recordings in a song's stems directory are auto-discovered and loaded on song selection.
+
+### Metrics
+- 382 fast tests, 5 slow ONNX tests, 1 hardware playback test.
+- 20 new recording-specific tests.
+
+---
+
 ## 2026-03-26 -- v1.1.0 release
 
 Shipped as GitHub Release **v1.1.0** (tag `v1.1.0`). User-facing highlights:

@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from src.metronome import tap_tempo
 from src.paths import app_root
 from src.player import SPEED_PRESETS, MultiTrackPlayer
-from src.ui.styles import DARK_COLORS, STEM_COLORS
+from src.ui.styles import DARK_COLORS, RECORDING_COLOR, STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
@@ -67,6 +67,12 @@ def _draw_pause(p: QPainter, s: int) -> None:
 def _draw_stop(p: QPainter, s: int) -> None:
     m = int(s * 0.22)
     p.drawRect(m, m, s - 2 * m, s - 2 * m)
+
+
+def _draw_record(p: QPainter, s: int) -> None:
+    cx = s / 2.0
+    r = s * 0.30
+    p.drawEllipse(QPointF(cx, cx), r, r)
 
 
 def _render_svg(svg_path: str, width: int, height: int) -> QPixmap | None:
@@ -182,6 +188,32 @@ class StemRow(QWidget):
         self._volume_slider.setValue(value)
 
 
+class RecordingStemRow(StemRow):
+    """A stem row for a recording take, with a delete button."""
+
+    delete_requested = Signal(str)
+
+    def __init__(self, stem_name: str, display_name: str,
+                 player: MultiTrackPlayer,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(stem_name, player, parent)
+
+        self._label.setText(display_name)
+        self._label.setStyleSheet(
+            f"color: {RECORDING_COLOR}; font-weight: bold;"
+        )
+
+        self._delete_btn = QPushButton("X")
+        self._delete_btn.setFixedSize(28, 28)
+        self._delete_btn.setStyleSheet("padding: 2px;")
+        self._delete_btn.setToolTip(f"Delete {display_name}")
+        self._delete_btn.setAccessibleName(f"Delete {display_name}")
+        self._delete_btn.clicked.connect(
+            lambda: self.delete_requested.emit(self._stem_name)
+        )
+        self.layout().insertWidget(self.layout().count() - 1, self._delete_btn)
+
+
 class PlayerControls(QWidget):
     """Transport controls and stem mixer panel."""
 
@@ -190,6 +222,7 @@ class PlayerControls(QWidget):
         super().__init__(parent)
         self._player = player
         self._stem_rows: dict[str, StemRow] = {}
+        self._recording_rows: dict[str, RecordingStemRow] = {}
         self._theme = "dark"
 
         self._peaks_timer = QTimer(self)
@@ -263,6 +296,19 @@ class PlayerControls(QWidget):
         self._stop_btn.setAccessibleName("Stop")
         self._stop_btn.clicked.connect(self._on_stop)
         transport.addWidget(self._stop_btn)
+
+        self._record_icon = _make_icon(
+            _draw_record, QColor(RECORDING_COLOR)
+        )
+        self._record_btn = QPushButton()
+        self._record_btn.setIcon(self._record_icon)
+        self._record_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._record_btn.setFixedSize(36, 36)
+        self._record_btn.setCheckable(True)
+        self._record_btn.setToolTip("Arm recording (R)")
+        self._record_btn.setAccessibleName("Record")
+        self._record_btn.toggled.connect(self._on_record_toggled)
+        transport.addWidget(self._record_btn)
 
         self._time_label = QLabel("0:00 / 0:00")
         self._time_label.setFixedWidth(100)
@@ -445,6 +491,14 @@ class PlayerControls(QWidget):
         self._stem_container = QVBoxLayout()
         controls_layout.addLayout(self._stem_container)
 
+        self._recordings_label = QLabel("Recordings")
+        self._recordings_label.setObjectName("title-label")
+        self._recordings_label.setVisible(False)
+        controls_layout.addWidget(self._recordings_label)
+
+        self._recordings_container = QVBoxLayout()
+        controls_layout.addLayout(self._recordings_container)
+
         controls_layout.addStretch()
 
         self._controls_widget.setVisible(False)
@@ -542,6 +596,7 @@ class PlayerControls(QWidget):
             row.setParent(None)
             row.deleteLater()
         self._stem_rows.clear()
+        self.clear_recording_rows()
 
         has_stems = bool(stem_names)
         self._empty_widget.setVisible(not has_stems)
@@ -557,6 +612,11 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
+
+        self._record_btn.blockSignals(True)
+        self._record_btn.setChecked(False)
+        self._record_btn.blockSignals(False)
+        self.update_record_button_state()
 
         if stem_names:
             self._do_recompute_peaks()
@@ -636,6 +696,10 @@ class PlayerControls(QWidget):
         self._play_btn.setAccessibleName("Pause" if playing else "Play")
         if not playing:
             self._count_in_label.setText("")
+            if not self._player.recording_armed:
+                self._record_btn.blockSignals(True)
+                self._record_btn.setChecked(False)
+                self._record_btn.blockSignals(False)
 
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
@@ -746,6 +810,7 @@ class PlayerControls(QWidget):
             self._speed_combo.setCurrentIndex(idx)
         self._speed_combo.blockSignals(False)
         self._do_recompute_peaks()
+        self.update_record_button_state()
 
     def cycle_speed(self, direction: int) -> None:
         """Cycle to the next/previous speed preset.
@@ -857,3 +922,63 @@ class PlayerControls(QWidget):
         self._count_in_toggle.setChecked(enabled)
         self._count_in_toggle.blockSignals(False)
         self._player.set_count_in_enabled(enabled)
+
+    # -- Recording handlers --
+
+    def _on_record_toggled(self, checked: bool) -> None:
+        """User toggled the record arm button."""
+        self._player.arm_recording(checked)
+        if checked and not self._player.recording_armed:
+            self._record_btn.blockSignals(True)
+            self._record_btn.setChecked(False)
+            self._record_btn.blockSignals(False)
+
+    def toggle_record(self) -> None:
+        """Toggle recording arm (for keyboard shortcut)."""
+        self._record_btn.setChecked(not self._record_btn.isChecked())
+
+    def add_recording_row(
+        self, stem_name: str, display_name: str
+    ) -> RecordingStemRow:
+        """Add a recording take row to the recordings section."""
+        row = RecordingStemRow(
+            stem_name, display_name, self._player
+        )
+        row.mix_changed.connect(self._recompute_peaks)
+        self._recordings_container.addWidget(row)
+        self._recording_rows[stem_name] = row
+        self._recordings_label.setVisible(True)
+        return row
+
+    def remove_recording_row(self, stem_name: str) -> None:
+        """Remove a recording take row by stem name."""
+        row = self._recording_rows.pop(stem_name, None)
+        if row is not None:
+            row.setParent(None)
+            row.deleteLater()
+        if not self._recording_rows:
+            self._recordings_label.setVisible(False)
+
+    def clear_recording_rows(self) -> None:
+        """Remove all recording rows."""
+        for row in self._recording_rows.values():
+            row.setParent(None)
+            row.deleteLater()
+        self._recording_rows.clear()
+        self._recordings_label.setVisible(False)
+
+    def update_record_button_state(self) -> None:
+        """Sync Record button enabled state with current speed."""
+        at_1x = self._player.speed == 1.0
+        self._record_btn.setEnabled(at_1x and self._player.has_stems)
+        if not at_1x:
+            self._record_btn.setToolTip(
+                "Recording requires 1.0x speed"
+            )
+            if self._record_btn.isChecked():
+                self._record_btn.blockSignals(True)
+                self._record_btn.setChecked(False)
+                self._record_btn.blockSignals(False)
+                self._player.arm_recording(False)
+        else:
+            self._record_btn.setToolTip("Arm recording (R)")
