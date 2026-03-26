@@ -498,9 +498,17 @@ class TestFullPipeline:
         player._audio_callback(outdata, 2048, {}, sd.CallbackFlags())
         assert np.max(np.abs(outdata)) > 0.0
 
-        # 6. Verify mute works end-to-end.
+        # 6. Verify mute works end-to-end. Mute a stem that actually contributes
+        # in this window: with real ONNX output, "other" can be near-silent in
+        # the first chunk, so muting it does not change the mix and the
+        # assertion flakes.
+        n_frames = min(2048, min(player._stems[s].shape[0] for s in STEMS_4))
+        stem_to_mute = max(
+            STEMS_4,
+            key=lambda s: float(np.sum(player._stems[s][:n_frames] ** 2)),
+        )
         player._current_frame = 0
-        player.set_mute("other", True)
+        player.set_mute(stem_to_mute, True)
         out_muted = np.zeros((2048, 2), dtype=np.float32)
         player._audio_callback(out_muted, 2048, {}, sd.CallbackFlags())
 
