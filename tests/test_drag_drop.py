@@ -160,7 +160,7 @@ class TestMainWindowDrop:
     def test_single_audio_file_opens_dialog(self, main_window):
         """Dropping one audio file opens ImportDialog once."""
         event = _make_event(["C:/music/song.mp3"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_dlg = MagicMock()
             mock_dlg.exec.return_value = False
             mock_cls.return_value = mock_dlg
@@ -172,7 +172,7 @@ class TestMainWindowDrop:
     def test_drop_event_is_accepted(self, main_window):
         """dropEvent calls acceptProposedAction on the event."""
         event = _make_event(["C:/music/song.mp3"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_cls.return_value.exec.return_value = False
             main_window.dropEvent(event)
         event.acceptProposedAction.assert_called_once()
@@ -180,7 +180,7 @@ class TestMainWindowDrop:
     def test_multiple_audio_files_open_multiple_dialogs(self, main_window):
         """Dropping two audio files opens ImportDialog twice."""
         event = _make_event(["a.mp3", "b.wav"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_dlg = MagicMock()
             mock_dlg.exec.return_value = False
             mock_cls.return_value = mock_dlg
@@ -190,14 +190,14 @@ class TestMainWindowDrop:
     def test_non_audio_files_are_skipped(self, main_window):
         """Dropping non-audio files does not open ImportDialog."""
         event = _make_event(["report.pdf", "image.png"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             main_window.dropEvent(event)
         mock_cls.assert_not_called()
 
     def test_mixed_drop_only_imports_audio(self, main_window):
         """Only audio files in a mixed drop trigger import."""
         event = _make_event(["report.pdf", "song.flac"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_dlg = MagicMock()
             mock_dlg.exec.return_value = False
             mock_cls.return_value = mock_dlg
@@ -209,7 +209,7 @@ class TestMainWindowDrop:
     def test_accepted_import_refreshes_library(self, main_window):
         """If dialog is accepted, library panel is refreshed."""
         event = _make_event(["song.mp3"])
-        with patch("src.ui.main_window.ImportDialog") as mock_cls:
+        with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_dlg = MagicMock()
             mock_dlg.exec.return_value = True
             mock_cls.return_value = mock_dlg

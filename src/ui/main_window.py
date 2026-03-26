@@ -47,16 +47,19 @@ from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
-from src.ui.import_dialog import ImportDialog
-from src.ui.preferences_dialog import PreferencesDialog
+from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import LibraryPanel
-from src.ui.player_controls import PlayerControls, _ROOT_DIR, _logo_variant, _render_svg
+from src.ui.player_controls import PlayerControls
 from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
 
-# Try loading all components in this preferred visual layout order
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
+
+
+def _skip_modal_startup_dialogs_on_ci() -> bool:
+    """True when modal QMessageBox would block with no user (e.g. GitHub Actions)."""
+    return os.environ.get("CI") == "true"
 
 
 def _is_audio_path(path: str) -> bool:
@@ -126,9 +129,15 @@ class MainWindow(QMainWindow):
         self._player.set_latency_offset_ms(
             read_latency_offset_ms(self._settings)
         )
+        self._intro_pending = True
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
         QTimer.singleShot(0, self._maybe_warn_no_audio_output)
         QTimer.singleShot(0, self._restore_session)
+
+    @property
+    def player_controls(self) -> PlayerControls:
+        """Public access for the player controls panel."""
+        return self._player_controls
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -136,12 +145,18 @@ class MainWindow(QMainWindow):
 
     def _maybe_show_data_dir_reset_notice(self) -> None:
         """Tell the user if startup fell back from an invalid custom data path."""
+        if _skip_modal_startup_dialogs_on_ci():
+            return
         msg = consume_data_dir_reset_notice(self._settings)
         if msg:
             QMessageBox.information(self, "Data folder", msg)
 
     def _maybe_warn_no_audio_output(self) -> None:
         """Warn once at startup if PortAudio reports no output devices."""
+        # Headless CI (e.g. GitHub Actions) often has no output devices; a
+        # modal dialog would block the process until dismissed and hangs tests.
+        if _skip_modal_startup_dialogs_on_ci():
+            return
         valid = output_device_indices_with_output()
         if valid is not None and len(valid) == 0:
             QMessageBox.warning(
@@ -289,6 +304,8 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         """Open preferences; apply audio device without restart."""
+        from src.ui.preferences_dialog import PreferencesDialog  # noqa: PLC0415
+
         dlg = PreferencesDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._player.set_output_device(
@@ -365,25 +382,16 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_about(self) -> None:
-        """Show the About dialog with the main logo rendered from SVG."""
+        """Show the About dialog with an interactive animated logo."""
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
 
-        variant = _logo_variant(self._theme)
-        svg_path = os.path.join(
-            _ROOT_DIR, "assets", "icons", f"logo_main_{variant}.svg"
-        )
-
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
 
-        logo_label = QLabel()
-        pixmap = _render_svg(svg_path, 300, 240)
-        if pixmap:
-            logo_label.setPixmap(pixmap)
-        logo_label.setFixedSize(300, 240)
-        outer.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignTop)
+        logo = AnimatedLogoWidget(self._theme)
+        outer.addWidget(logo, alignment=Qt.AlignmentFlag.AlignTop)
 
         right = QVBoxLayout()
         right.setSpacing(6)
@@ -405,6 +413,7 @@ class MainWindow(QMainWindow):
         right.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
 
         outer.addLayout(right)
+        logo.play_intro(with_sound=False)
         dlg.exec()
 
     def _restore_state(self) -> None:
@@ -577,6 +586,13 @@ class MainWindow(QMainWindow):
             bool(ci_enabled), ci_beats, bool(ci_repeats)
         )
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Play the main logo intro animation on first show."""
+        super().showEvent(event)
+        if self._intro_pending:
+            self._intro_pending = False
+            QTimer.singleShot(300, self._player_controls.play_intro_animation)
+
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
         try:
@@ -712,6 +728,12 @@ class MainWindow(QMainWindow):
 
     def _open_import_dialog(self, file_path: str = "") -> None:
         """Open the import dialog, optionally pre-filled with a file path."""
+        # Deferred import: ImportDialog pulls in yt_dlp (~0.4s) and the
+        # separator chain which are not needed until the user actually
+        # imports a song.  Keeping this out of the top-level imports
+        # shaves ~0.4s off application startup.
+        from src.ui.import_dialog import ImportDialog  # noqa: PLC0415
+
         dialog = ImportDialog(
             library=self._library,
             model_manager=self._model_manager,

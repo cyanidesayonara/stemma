@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -23,4 +23,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run fast tests
-        run: pytest -k "not slow and not hardware" -v --tb=short
+        run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120

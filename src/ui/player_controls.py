@@ -5,14 +5,12 @@ Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
-import os
 import time
 
 import numpy as np
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap, QPolygonF
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,13 +24,13 @@ from PySide6.QtWidgets import (
 )
 
 from src.metronome import tap_tempo
-from src.paths import app_root
 from src.player import SPEED_PRESETS, MultiTrackPlayer
+from src.ui.animated_arpeggio import AnimatedArpeggioWidget
+from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import DARK_COLORS, RECORDING_COLOR, STEM_COLORS
 from src.ui.waveform_widget import WaveformWidget
 from src.waveform import compute_peaks
 
-_ROOT_DIR = app_root()
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
 
@@ -75,34 +73,11 @@ def _draw_record(p: QPainter, s: int) -> None:
     p.drawEllipse(QPointF(cx, cx), r, r)
 
 
-def _render_svg(svg_path: str, width: int, height: int) -> QPixmap | None:
-    """Render an SVG file to a QPixmap at the given size, or None on failure."""
-    renderer = QSvgRenderer(svg_path)
-    if not renderer.isValid():
-        return None
-    # Render at 2x for crisp display, then scale down.
-    img = QImage(width * 2, height * 2, QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(0)
-    painter = QPainter(img)
-    renderer.render(painter)
-    painter.end()
-    return QPixmap.fromImage(img).scaled(
-        width, height,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    )
-
-
 def _format_time(seconds: float) -> str:
     """Format seconds as mm:ss."""
     m = int(seconds) // 60
     s = int(seconds) % 60
     return f"{m}:{s:02d}"
-
-
-def _logo_variant(theme: str) -> str:
-    """Return 'dark' or 'light' SVG variant name for the given theme."""
-    return "dark" if theme == "dark" else "light"
 
 
 class StemRow(QWidget):
@@ -244,15 +219,7 @@ class PlayerControls(QWidget):
         empty_layout = QVBoxLayout(self._empty_widget)
         empty_layout.addStretch(1)
 
-        self._empty_logo = QLabel()
-        logo_path = os.path.join(
-            _ROOT_DIR, "assets", "icons",
-            f"logo_main_{_logo_variant(self._theme)}.svg",
-        )
-        pixmap = _render_svg(logo_path, 300, 185)
-        if pixmap:
-            self._empty_logo.setPixmap(pixmap)
-        self._empty_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._empty_logo = AnimatedLogoWidget(self._theme)
         empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._hint_label = QLabel("Drop an audio file or use File > Import")
@@ -522,15 +489,7 @@ class PlayerControls(QWidget):
 
         footer_layout.addStretch()
 
-        self._arpeggio_label = QLabel()
-        arpeggio_path = os.path.join(
-            _ROOT_DIR, "assets", "icons",
-            f"logo_arpeggio_{_logo_variant(self._theme)}.svg",
-        )
-        arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
-        if arpeggio_pixmap:
-            self._arpeggio_label.setPixmap(arpeggio_pixmap)
-        self._arpeggio_label.setStyleSheet("border: none;")
+        self._arpeggio_label = AnimatedArpeggioWidget(self._theme)
         footer_layout.addWidget(
             self._arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter
         )
@@ -565,24 +524,16 @@ class PlayerControls(QWidget):
             f"color: {colors['surface1']}; font-size: 9pt; border: none;"
         )
 
-        # SVG logos
-        variant = _logo_variant(theme)
-        logo_path = os.path.join(
-            _ROOT_DIR, "assets", "icons", f"logo_main_{variant}.svg"
-        )
-        pixmap = _render_svg(logo_path, 300, 185)
-        if pixmap:
-            self._empty_logo.setPixmap(pixmap)
-
-        arpeggio_path = os.path.join(
-            _ROOT_DIR, "assets", "icons", f"logo_arpeggio_{variant}.svg"
-        )
-        arpeggio_pixmap = _render_svg(arpeggio_path, 220, 36)
-        if arpeggio_pixmap:
-            self._arpeggio_label.setPixmap(arpeggio_pixmap)
+        # Animated logos
+        self._empty_logo.set_theme(theme)
+        self._arpeggio_label.set_theme(theme)
 
         # Waveform colors
         self._waveform.set_theme_colors(colors)
+
+    def play_intro_animation(self, with_sound: bool = False) -> None:
+        """Trigger the main logo's intro animation (notes + waves)."""
+        self._empty_logo.play_intro(with_sound=with_sound)
 
     def _connect_signals(self) -> None:
         self._player.position_changed.connect(self._on_position_changed)
