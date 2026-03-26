@@ -29,6 +29,7 @@ a = Analysis(
     ),
     datas=[
         ("assets/icons", "assets/icons"),
+        ("assets/audio", "assets/audio"),
     ]
     + ort_datas
     + sd_datas

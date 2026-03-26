@@ -58,12 +58,13 @@ stemma/
     ui/
       main_window.py
       player_controls.py
-      waveform_widget.py # Waveform display (QPainter)
+      waveform_widget.py   # Waveform display (QPainter)
       library_panel.py
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
-      styles.py        # Dark / light themes
-  tests/               # pytest test suite (~395 fast + 5 slow + 1 hardware)
+      splash_screen.py   # Animated startup splash with arpeggio logo
+      styles.py          # Dark / light themes
+  tests/               # pytest test suite (~423 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -87,6 +88,12 @@ stemma/
     test_session_persistence.py
     test_metronome.py
     test_count_in.py
+    test_splash_screen.py
+  assets/
+    icons/             # SVG logos, .ico app icon
+    audio/             # Startup arpeggio WAV
+  scripts/
+    generate_startup_audio.py  # One-time audio asset generator
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
@@ -169,7 +176,7 @@ All core functionality implemented and tested:
 ## Test Suite
 
 ```
-pytest                                    # ~395 fast tests (~10s)
+pytest                                    # ~423 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

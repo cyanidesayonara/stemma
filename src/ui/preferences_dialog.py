@@ -7,6 +7,7 @@ import os
 import sounddevice as sd
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -32,6 +33,7 @@ from src.app_settings import (
     read_default_import_6_stem,
     read_default_mp3_bitrate,
     read_latency_offset_ms,
+    read_startup_play_sound,
 )
 from src.data_paths import platform_user_data_dir
 from src.version import __version__
@@ -123,6 +125,11 @@ class PreferencesDialog(QDialog):
         eform.addRow("Default mix format:", self._export_combo)
         eform.addRow("MP3 bitrate:", self._bitrate_combo)
 
+        self._startup_sound_cb = QCheckBox("Play startup sound")
+        startup_box = QGroupBox("Startup")
+        sform = QFormLayout(startup_box)
+        sform.addRow(self._startup_sound_cb)
+
         self._load_from_settings()
 
         buttons = QDialogButtonBox(
@@ -136,6 +143,7 @@ class PreferencesDialog(QDialog):
         layout.addWidget(audio_box)
         layout.addWidget(import_box)
         layout.addWidget(export_box)
+        layout.addWidget(startup_box)
 
         ver = QLabel(f"stemma {__version__}")
         ver.setObjectName("subtle-label")
@@ -206,6 +214,10 @@ class PreferencesDialog(QDialog):
 
         self._latency_spin.setValue(
             read_latency_offset_ms(self._settings)
+        )
+
+        self._startup_sound_cb.setChecked(
+            read_startup_play_sound(self._settings)
         )
 
         self._model_combo.setCurrentIndex(
@@ -291,5 +303,10 @@ class PreferencesDialog(QDialog):
         self._settings.setValue(
             "export/mp3_bitrate",
             _combo_int_data(self._bitrate_combo, 320),
+        )
+
+        self._settings.setValue(
+            "startup/play_sound",
+            self._startup_sound_cb.isChecked(),
         )
         self.accept()

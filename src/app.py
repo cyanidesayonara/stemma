@@ -22,10 +22,48 @@ _ROOT_DIR = app_root()
 _ICON_PATH = os.path.join(_ROOT_DIR, "assets", "icons", "stemma.ico")
 
 
+def build_and_show(
+    qapp: QApplication,
+    settings: QSettings,
+    theme: str,
+    splash: "QWidget",
+) -> None:
+    """Heavy construction phase called after the splash is already visible.
+
+    Creates the library, player, model manager, and main window, then
+    transitions from the splash to the main window.
+    """
+    qapp.processEvents()
+
+    data_dir = resolve_data_dir(_ROOT_DIR, settings)
+    library = SongLibrary(data_dir=data_dir)
+    qapp.processEvents()
+
+    player = MultiTrackPlayer()
+    player.set_output_device(normalize_output_device_setting(settings))
+    qapp.processEvents()
+
+    model_manager = ModelManager(data_dir=data_dir)
+    qapp.processEvents()
+
+    window = MainWindow(library, player, model_manager)
+    colors = get_colors(theme)
+    window.apply_theme(theme, colors)
+    qapp.processEvents()
+
+    splash.finish(window)
+
+
 def run() -> int:
-    """Create and run the stemma application. Returns the exit code."""
+    """Create and run the stemma application. Returns the exit code.
+
+    Legacy entry point that skips the splash screen.  Used by the test
+    suite and by any caller that does not need deferred loading.
+    """
     if sys.platform == "win32":
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("stemma.app")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "stemma.app"
+        )
 
     app = QApplication(sys.argv)
     app.setApplicationName("stemma")

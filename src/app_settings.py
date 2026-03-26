@@ -146,3 +146,8 @@ def read_latency_offset_ms(settings: QSettings) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(-200.0, min(200.0, ms))
+
+
+def read_startup_play_sound(settings: QSettings) -> bool:
+    """Return True if the startup arpeggio sound should play (default True)."""
+    return bool(settings.value("startup/play_sound", True, type=bool))
