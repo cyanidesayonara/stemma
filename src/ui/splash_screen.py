@@ -1,8 +1,9 @@
 """Animated splash screen with arpeggio logo for stemma startup.
 
 Shows the stemma arpeggio logo (staff lines, bass clef, coloured letters)
-with each letter fading in sequentially while a Cmaj7 arpeggio plays.
-Displayed before heavy module imports so the user sees immediate feedback.
+with each letter fading in sequentially while an Am7 arpeggio plays
+(A-C-E-G-E-C).  Displayed before heavy module imports so the user sees
+immediate feedback.
 """
 
 import math
@@ -21,6 +22,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QWidget
 
+from src.ui.audio_sync import SPLASH_SOUND_SYNC_MS
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 
 try:
@@ -66,7 +68,6 @@ _FADE_MS = 200
 _MIN_DISPLAY_MS = 1800
 _ANIM_END_MS = _CLEF_DELAY_MS + 5 * _NOTE_SPACING_MS + _FADE_MS
 _FRAME_MS = 33
-
 
 def _make_base_svg(line_color: str, clef_color: str) -> str:
     lines = "\n".join(
@@ -133,23 +134,21 @@ class SplashScreen(QWidget):
         self._main_window: QWidget | None = None
         self._fade_anim: QPropertyAnimation | None = None
         self._finishing = False
+        self._sound_started = False
+        self._frame_count = 0
 
     def start(self) -> None:
-        """Show the splash and begin the animation + optional sound."""
+        """Show the splash and begin the animation + optional sound.
+
+        Sound playback is deferred to the second rendered frame so it
+        stays in sync with the letter animation even when the event loop
+        is blocked by heavy imports between ``show()`` and the next
+        paint.
+        """
         self._clock.start()
         self._timer.start(_FRAME_MS)
         self.show()
         QApplication.processEvents()
-
-        if (
-            self._play_sound
-            and self._audio_path
-            and os.path.isfile(self._audio_path)
-        ):
-            winsound.PlaySound(
-                self._audio_path,
-                winsound.SND_ASYNC | winsound.SND_FILENAME,
-            )
 
     def finish(self, main_window: QWidget) -> None:
         """Transition from splash to *main_window*.
@@ -193,8 +192,37 @@ class SplashScreen(QWidget):
 
     # -- painting -------------------------------------------------------
 
+    def _try_start_sound(self, elapsed: int) -> None:
+        """Start the arpeggio sound, restarting the clock if needed.
+
+        On the second rendered frame, if the elapsed time exceeds a
+        threshold it means the event loop was blocked by heavy imports.
+        Restarting the clock re-aligns the letter animation with the
+        sound that is about to play.
+        """
+        if self._sound_started:
+            return
+        self._frame_count += 1
+        if self._frame_count < 2:
+            return
+        self._sound_started = True
+        if (
+            self._play_sound
+            and self._audio_path
+            and os.path.isfile(self._audio_path)
+        ):
+            winsound.PlaySound(
+                self._audio_path,
+                winsound.SND_ASYNC | winsound.SND_FILENAME,
+            )
+        if elapsed > 150:
+            self._clock.restart()
+
     def paintEvent(self, event) -> None:  # noqa: N802
+        raw_elapsed = self._clock.elapsed() if self._clock.isValid() else 0
+        self._try_start_sound(raw_elapsed)
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
+        sync_elapsed = max(0, elapsed - SPLASH_SOUND_SYNC_MS)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
@@ -207,7 +235,7 @@ class SplashScreen(QWidget):
 
         p.setFont(self._font)
         for i, (char, sx, sy, dark_c, light_c) in enumerate(_LETTERS):
-            alpha = self._letter_alpha(i, elapsed)
+            alpha = self._letter_alpha(i, sync_elapsed)
             if alpha <= 0.0:
                 continue
             color = QColor(dark_c if self._is_dark else light_c)
@@ -218,8 +246,8 @@ class SplashScreen(QWidget):
             tw = p.fontMetrics().horizontalAdvance(char)
             p.drawText(QPointF(px - tw / 2.0, py), char)
 
-        if elapsed > _ANIM_END_MS:
-            pulse = 0.35 + 0.15 * math.sin(elapsed / 400.0)
+        if sync_elapsed > _ANIM_END_MS:
+            pulse = 0.35 + 0.15 * math.sin(sync_elapsed / 400.0)
             lc = QColor(self._text_color)
             lc.setAlphaF(pulse)
             p.setPen(lc)

@@ -62,9 +62,14 @@ stemma/
       library_panel.py
       import_dialog.py
       preferences_dialog.py  # Edit > Preferences
+      audio_sync.py      # Splash/logo audio-visual timing constants
+      animated_logo.py   # Animated main logo (notes + waves, click Easter egg)
+      animated_arpeggio.py # Animated footer arpeggio logo (letter glow, click Easter egg)
       splash_screen.py   # Animated startup splash with arpeggio logo
+      wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
+      _wav_playback_impl.py  # QSoundEffect + winsound fallback
       styles.py          # Dark / light themes
-  tests/               # pytest test suite (~423 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~498 fast + 5 slow + 1 hardware)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -89,6 +94,10 @@ stemma/
     test_metronome.py
     test_count_in.py
     test_splash_screen.py
+    test_animated_logo.py
+    test_animated_arpeggio.py
+    test_audio_sync.py
+    test_wav_playback.py
   assets/
     icons/             # SVG logos, .ico app icon
     audio/             # Startup arpeggio WAV
@@ -176,7 +185,7 @@ All core functionality implemented and tested:
 ## Test Suite
 
 ```
-pytest                                    # ~423 fast tests (~10s)
+pytest                                    # ~488 fast tests (~10s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

@@ -214,6 +214,43 @@ class TestStartupPlaySoundSetting:
         assert read_startup_play_sound(settings_ini) is True
 
 
+class TestSoundSync:
+    def test_sound_not_started_on_first_frame(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        assert splash._frame_count == 1
+        assert splash._sound_started is False
+        splash.close()
+
+    def test_sound_started_on_second_frame(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash.repaint()
+        assert splash._frame_count == 2
+        assert splash._sound_started is True
+        splash.close()
+
+    def test_clock_restarted_on_long_gap(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 600
+        splash.repaint()
+        splash._clock.restart.assert_called_once()
+        splash.close()
+
+    def test_clock_not_restarted_on_short_gap(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 50
+        splash.repaint()
+        splash._clock.restart.assert_not_called()
+        splash.close()
+
+
 class TestPaintEvent:
     def test_paint_does_not_crash(self, app):
         splash = SplashScreen(theme="dark", play_sound=False)
