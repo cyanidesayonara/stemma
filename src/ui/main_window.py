@@ -47,8 +47,6 @@ from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
-from src.ui.import_dialog import ImportDialog
-from src.ui.preferences_dialog import PreferencesDialog
 from src.ui.library_panel import LibraryPanel
 from src.ui.player_controls import PlayerControls, _ROOT_DIR, _logo_variant, _render_svg
 from src.ui.styles import get_colors, get_stylesheet
@@ -289,6 +287,8 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         """Open preferences; apply audio device without restart."""
+        from src.ui.preferences_dialog import PreferencesDialog  # noqa: PLC0415
+
         dlg = PreferencesDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._player.set_output_device(
@@ -712,6 +712,12 @@ class MainWindow(QMainWindow):
 
     def _open_import_dialog(self, file_path: str = "") -> None:
         """Open the import dialog, optionally pre-filled with a file path."""
+        # Deferred import: ImportDialog pulls in yt_dlp (~0.4s) and the
+        # separator chain which are not needed until the user actually
+        # imports a song.  Keeping this out of the top-level imports
+        # shaves ~0.4s off application startup.
+        from src.ui.import_dialog import ImportDialog  # noqa: PLC0415
+
         dialog = ImportDialog(
             library=self._library,
             model_manager=self._model_manager,

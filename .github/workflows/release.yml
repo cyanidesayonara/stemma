@@ -29,19 +29,25 @@ jobs:
       - name: Build executable
         run: pyinstaller stemma.spec
 
-      - name: Verify executable
+      - name: Verify build
         shell: pwsh
         run: |
-          if (!(Test-Path "dist/stemma.exe")) {
-            throw "Build failed: stemma.exe not found"
+          if (!(Test-Path "dist/stemma/stemma.exe")) {
+            throw "Build failed: stemma.exe not found in dist/stemma/"
           }
-          $size = (Get-Item "dist/stemma.exe").Length / 1MB
+          $size = (Get-Item "dist/stemma/stemma.exe").Length / 1MB
           Write-Output "stemma.exe size: $([math]::Round($size, 1)) MB"
+          $files = (Get-ChildItem "dist/stemma" -Recurse).Count
+          Write-Output "Total files in bundle: $files"
+
+      - name: Create zip archive
+        shell: pwsh
+        run: Compress-Archive -Path "dist/stemma/*" -DestinationPath "dist/stemma.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/stemma.exe
+          files: dist/stemma.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

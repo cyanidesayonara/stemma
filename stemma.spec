@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for stemma — single-file Windows executable."""
+"""PyInstaller spec for stemma -- one-folder Windows build.
+
+One-folder mode eliminates the 3-5 second extraction delay that one-file
+mode incurs on every launch.  The output folder is zipped for distribution
+and will be bundled into an MSIX package for v2.0.
+"""
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -37,14 +42,12 @@ a = Analysis(
     + ffmpeg_datas
     + svg_datas,
     hiddenimports=[
-        # Lazy or dynamic imports that PyInstaller cannot detect.
         "onnxruntime",
         "lameenc",
         "sounddevice",
         "_sounddevice_data",
         "imageio_ffmpeg",
         "PySide6.QtSvg",
-        # librosa pulls scipy/sklearn; these submodules are often missed.
         "sklearn.utils._typedefs",
         "sklearn.neighbors._typedefs",
         "sklearn.neighbors._partition_nodes",
@@ -60,7 +63,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Trim unused PySide6 modules to reduce bundle size.
         "PySide6.QtWebEngine",
         "PySide6.QtWebEngineWidgets",
         "PySide6.QtQuick",
@@ -69,7 +71,6 @@ a = Analysis(
         "PySide6.Qt3DRender",
         "PySide6.QtMultimedia",
         "PySide6.QtNetwork",
-        # Other large, unused packages.
         "tkinter",
         "matplotlib",
         "IPython",
@@ -84,14 +85,22 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="stemma",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # UPX can corrupt ONNX Runtime and DirectML DLLs.
+    upx=False,
     console=False,
     icon="assets/icons/stemma.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="stemma",
 )
