@@ -166,6 +166,9 @@ class MultiTrackPlayer(QObject):
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
 
+        # Per-stem nudge offsets (ms), for post-recording alignment.
+        self._nudge_offsets: dict[str, float] = {}
+
         # Hardware stream.
         self._stream: sd.OutputStream | sd.Stream | None = None
         self._output_device: int | None = None
@@ -388,7 +391,48 @@ class MultiTrackPlayer(QObject):
         self._muted_stems.discard(name)
         self._soloed_stems.discard(name)
         self._volumes.pop(name, None)
+        self._nudge_offsets.pop(name, None)
         self._recalculate_total_frames()
+
+    def nudge_stem(self, name: str, offset_ms: float) -> None:
+        """Shift a stem's audio by *offset_ms* milliseconds.
+
+        Positive values shift the audio later (add silence at the start);
+        negative values shift it earlier. The offset is clamped to
+        -200..+200 ms. Wrapped samples are zeroed out.
+
+        Both ``_stems`` and ``_original_stems`` are updated so the nudge
+        survives speed changes.
+        """
+        if name not in self._stems:
+            return
+        offset_ms = max(-200.0, min(200.0, float(offset_ms)))
+        old_offset = self._nudge_offsets.get(name, 0.0)
+        if offset_ms == old_offset:
+            return
+
+        delta_ms = offset_ms - old_offset
+        delta_frames = int(delta_ms / 1000.0 * self._sample_rate)
+        if delta_frames == 0:
+            self._nudge_offsets[name] = offset_ms
+            return
+
+        for store in (self._stems, self._original_stems):
+            if name not in store:
+                continue
+            data = store[name]
+            data = np.roll(data, delta_frames, axis=0)
+            if delta_frames > 0:
+                data[:delta_frames] = 0.0
+            else:
+                data[delta_frames:] = 0.0
+            store[name] = data
+
+        self._nudge_offsets[name] = offset_ms
+
+    def get_nudge_ms(self, name: str) -> float:
+        """Return the current nudge offset in ms for *name* (default 0)."""
+        return self._nudge_offsets.get(name, 0.0)
 
     def _recalculate_total_frames(self) -> None:
         """Recompute ``_total_frames`` from the current stems dict."""
@@ -417,6 +461,7 @@ class MultiTrackPlayer(QObject):
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
+        self._nudge_offsets.clear()
 
         max_frames = 0
         sample_rate = 0

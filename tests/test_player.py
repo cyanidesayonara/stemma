@@ -900,3 +900,119 @@ class TestCountInAtAnyPosition:
             player.set_output_device(None)
 
         assert player._count_in_remaining == 0
+
+
+class TestNudgeStem:
+    """Tests for post-recording track nudge."""
+
+    def test_nudge_positive_shifts_later(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        original = player._stems["vocals"].copy()
+
+        player.nudge_stem("vocals", 10.0)  # +10ms
+
+        offset_frames = int(10.0 / 1000.0 * 44100)
+        np.testing.assert_array_equal(
+            player._stems["vocals"][:offset_frames],
+            np.zeros((offset_frames, 2), dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            player._stems["vocals"][offset_frames:],
+            original[:-offset_frames],
+        )
+
+    def test_nudge_negative_shifts_earlier(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        original = player._stems["vocals"].copy()
+
+        player.nudge_stem("vocals", -10.0)  # -10ms
+
+        offset_frames = int(10.0 / 1000.0 * 44100)
+        np.testing.assert_array_equal(
+            player._stems["vocals"][:-offset_frames],
+            original[offset_frames:],
+        )
+        np.testing.assert_array_equal(
+            player._stems["vocals"][-offset_frames:],
+            np.zeros((offset_frames, 2), dtype=np.float32),
+        )
+
+    def test_nudge_zero_is_noop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        original = player._stems["vocals"].copy()
+
+        player.nudge_stem("vocals", 0.0)
+
+        np.testing.assert_array_equal(player._stems["vocals"], original)
+
+    def test_nudge_clamped_to_200ms(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.nudge_stem("vocals", 500.0)
+        assert player.get_nudge_ms("vocals") == 200.0
+
+        player.nudge_stem("vocals", -500.0)
+        assert player.get_nudge_ms("vocals") == -200.0
+
+    def test_nudge_updates_original_stems(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.nudge_stem("vocals", 10.0)
+
+        np.testing.assert_array_equal(
+            player._stems["vocals"], player._original_stems["vocals"]
+        )
+
+    def test_nudge_nonexistent_stem_is_noop(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.nudge_stem("nonexistent", 10.0)
+        assert player.get_nudge_ms("nonexistent") == 0.0
+
+    def test_get_nudge_default_zero(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        assert player.get_nudge_ms("vocals") == 0.0
+
+    def test_nudge_cleared_on_load(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.nudge_stem("vocals", 10.0)
+
+        player.load_stems(mock_stems)
+        assert player.get_nudge_ms("vocals") == 0.0
+
+    def test_nudge_incremental(self, mock_stems):
+        """Nudging from 50ms to 100ms applies only the +50ms delta."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        player.nudge_stem("vocals", 50.0)
+        after_50 = player._stems["vocals"].copy()
+
+        player.nudge_stem("vocals", 100.0)
+        after_100 = player._stems["vocals"].copy()
+
+        delta_frames = int(50.0 / 1000.0 * 44100)
+        total_zeroed = int(100.0 / 1000.0 * 44100)
+        np.testing.assert_array_equal(
+            after_100[:total_zeroed],
+            np.zeros((total_zeroed, 2), dtype=np.float32),
+        )
+        assert player.get_nudge_ms("vocals") == 100.0
+
+    def test_remove_recording_clears_nudge(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        rec = np.zeros((44100, 2), dtype=np.float32)
+        player.add_recording_stem("take1", rec)
+        player.nudge_stem("take1", 10.0)
+
+        player.remove_recording_stem("take1")
+        assert player.get_nudge_ms("take1") == 0.0

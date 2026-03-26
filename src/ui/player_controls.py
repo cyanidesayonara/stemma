@@ -164,7 +164,7 @@ class StemRow(QWidget):
 
 
 class RecordingStemRow(StemRow):
-    """A stem row for a recording take, with a delete button."""
+    """A stem row for a recording take, with delete and nudge controls."""
 
     delete_requested = Signal(str)
 
@@ -178,6 +178,29 @@ class RecordingStemRow(StemRow):
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
 
+        lay = self.layout()
+        insert_pos = lay.count() - 1  # before the final stretch
+
+        self._nudge_slider = QSlider(Qt.Orientation.Horizontal)
+        self._nudge_slider.setRange(-200, 200)
+        self._nudge_slider.setValue(0)
+        self._nudge_slider.setFixedWidth(80)
+        self._nudge_slider.setToolTip(
+            f"Nudge {display_name} alignment (-200ms to +200ms, "
+            "double-click to reset)"
+        )
+        self._nudge_slider.setAccessibleName(f"Nudge {display_name}")
+        self._nudge_slider.valueChanged.connect(self._on_nudge_changed)
+        self._nudge_slider.mouseDoubleClickEvent = (
+            lambda _: self._nudge_slider.setValue(0)
+        )
+        lay.insertWidget(insert_pos, self._nudge_slider)
+
+        self._nudge_label = QLabel("0 ms")
+        self._nudge_label.setFixedWidth(48)
+        self._nudge_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lay.insertWidget(insert_pos + 1, self._nudge_label)
+
         self._delete_btn = QPushButton("X")
         self._delete_btn.setFixedSize(28, 28)
         self._delete_btn.setStyleSheet("padding: 2px;")
@@ -186,7 +209,12 @@ class RecordingStemRow(StemRow):
         self._delete_btn.clicked.connect(
             lambda: self.delete_requested.emit(self._stem_name)
         )
-        self.layout().insertWidget(self.layout().count() - 1, self._delete_btn)
+        lay.insertWidget(insert_pos + 2, self._delete_btn)
+
+    def _on_nudge_changed(self, value: int) -> None:
+        self._player.nudge_stem(self._stem_name, float(value))
+        self._nudge_label.setText(f"{value} ms")
+        self.mix_changed.emit()
 
 
 class PlayerControls(QWidget):
