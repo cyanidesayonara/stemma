@@ -21,6 +21,8 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QWidget
 
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS
+
 try:
     import winsound
 
@@ -115,9 +117,10 @@ class SplashScreen(QWidget):
         self._play_sound = play_sound and _HAS_WINSOUND
         self._audio_path = audio_path
 
-        self._bg_color = QColor("#1e1e2e" if self._is_dark else "#eff1f5")
-        self._text_color = QColor("#cdd6f4" if self._is_dark else "#4c4f69")
-        self._border_color = QColor("#313244" if self._is_dark else "#ccd0da")
+        c = DARK_COLORS if self._is_dark else LIGHT_COLORS
+        self._bg_color = QColor(c["base"])
+        self._text_color = QColor(c["text"])
+        self._border_color = QColor(c["surface0"])
 
         self._base_pixmap = self._render_base()
         self._font = self._build_logo_font()
@@ -129,6 +132,7 @@ class SplashScreen(QWidget):
 
         self._main_window: QWidget | None = None
         self._fade_anim: QPropertyAnimation | None = None
+        self._finishing = False
 
     def start(self) -> None:
         """Show the splash and begin the animation + optional sound."""
@@ -151,9 +155,14 @@ class SplashScreen(QWidget):
         """Transition from splash to *main_window*.
 
         Waits for the minimum display time so the animation plays through,
-        then fades out the splash and shows the main window.
+        then fades out the splash and shows the main window.  Safe to call
+        more than once; subsequent calls are ignored.
         """
+        if self._finishing:
+            return
+        self._finishing = True
         self._main_window = main_window
+
         if not self.isVisible():
             main_window.show()
             return
@@ -166,6 +175,8 @@ class SplashScreen(QWidget):
             self._begin_fade_out()
 
     def _begin_fade_out(self) -> None:
+        if self._fade_anim is not None:
+            return
         self._timer.stop()
         anim = QPropertyAnimation(self, b"windowOpacity")
         anim.setDuration(250)

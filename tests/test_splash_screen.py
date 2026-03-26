@@ -1,6 +1,5 @@
 """Tests for the animated splash screen."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -149,6 +148,36 @@ class TestSplashScreenFinish:
         main_win = QWidget()
         splash.finish(main_win)
         assert splash.isVisible()
+        splash.close()
+
+    def test_double_finish_is_safe(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = _MIN_DISPLAY_MS + 100
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        splash.finish(main_win)
+        assert splash._finishing is True
+
+    def test_on_fade_done_shows_window_and_closes(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        main_win = QWidget()
+        splash._main_window = main_win
+        splash._on_fade_done()
+        assert main_win.isVisible()
+        main_win.close()
+
+    def test_begin_fade_out_ignored_if_already_fading(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._begin_fade_out()
+        first_anim = splash._fade_anim
+        splash._begin_fade_out()
+        assert splash._fade_anim is first_anim
         splash.close()
 
 

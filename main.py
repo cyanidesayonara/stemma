@@ -77,8 +77,7 @@ def main() -> int:
         0, partial(_finish_startup, qapp, settings, theme, splash)
     )
 
-    _keep = single_lock  # prevent GC; shared memory must live until exit
-    assert _keep is not None
+    _ = single_lock  # prevent GC; shared memory must live until exit
 
     return qapp.exec()
 
