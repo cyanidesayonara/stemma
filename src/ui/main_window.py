@@ -146,6 +146,10 @@ class MainWindow(QMainWindow):
 
     def _maybe_warn_no_audio_output(self) -> None:
         """Warn once at startup if PortAudio reports no output devices."""
+        # Headless CI (e.g. GitHub Actions) often has no output devices; a
+        # modal dialog would block the process until dismissed and hangs tests.
+        if os.environ.get("CI") == "true":
+            return
         valid = output_device_indices_with_output()
         if valid is not None and len(valid) == 0:
             QMessageBox.warning(
