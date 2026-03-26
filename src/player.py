@@ -21,6 +21,8 @@ import soundfile as sf
 import librosa
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
+from src.click_utils import generate_click
+
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
 
@@ -164,6 +166,9 @@ class MultiTrackPlayer(QObject):
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
 
+        # Per-stem nudge offsets (ms), for post-recording alignment.
+        self._nudge_offsets: dict[str, float] = {}
+
         # Hardware stream.
         self._stream: sd.OutputStream | sd.Stream | None = None
         self._output_device: int | None = None
@@ -202,16 +207,10 @@ class MultiTrackPlayer(QObject):
     def _generate_click(sample_rate: int) -> np.ndarray:
         """Generate a short click sound for the metronome.
 
-        Returns a stereo numpy array (shape (N, 2), dtype float32) containing
-        a 1000 Hz sine tone with an exponential decay envelope, lasting 30ms.
+        Delegates to the shared ``generate_click`` utility so the same
+        click waveform is used by both the live player and the exporter.
         """
-        duration = 0.03  # 30 ms
-        n_frames = int(sample_rate * duration)
-        t = np.arange(n_frames, dtype=np.float32) / sample_rate
-        tone = np.sin(2.0 * np.pi * 1000.0 * t)
-        envelope = np.exp(-t / 0.006).astype(np.float32)  # ~6ms decay constant
-        click_mono = (tone * envelope).astype(np.float32)
-        return np.column_stack((click_mono, click_mono))
+        return generate_click(sample_rate)
 
     @property
     def metronome_enabled(self) -> bool:
@@ -392,7 +391,48 @@ class MultiTrackPlayer(QObject):
         self._muted_stems.discard(name)
         self._soloed_stems.discard(name)
         self._volumes.pop(name, None)
+        self._nudge_offsets.pop(name, None)
         self._recalculate_total_frames()
+
+    def nudge_stem(self, name: str, offset_ms: float) -> None:
+        """Shift a stem's audio by *offset_ms* milliseconds.
+
+        Positive values shift the audio later (add silence at the start);
+        negative values shift it earlier. The offset is clamped to
+        -200..+200 ms. Wrapped samples are zeroed out.
+
+        Both ``_stems`` and ``_original_stems`` are updated so the nudge
+        survives speed changes.
+        """
+        if name not in self._stems:
+            return
+        offset_ms = max(-200.0, min(200.0, float(offset_ms)))
+        old_offset = self._nudge_offsets.get(name, 0.0)
+        if offset_ms == old_offset:
+            return
+
+        delta_ms = offset_ms - old_offset
+        delta_frames = int(delta_ms / 1000.0 * self._sample_rate)
+        if delta_frames == 0:
+            self._nudge_offsets[name] = offset_ms
+            return
+
+        for store in (self._stems, self._original_stems):
+            if name not in store:
+                continue
+            data = store[name]
+            data = np.roll(data, delta_frames, axis=0)
+            if delta_frames > 0:
+                data[:delta_frames] = 0.0
+            else:
+                data[delta_frames:] = 0.0
+            store[name] = data
+
+        self._nudge_offsets[name] = offset_ms
+
+    def get_nudge_ms(self, name: str) -> float:
+        """Return the current nudge offset in ms for *name* (default 0)."""
+        return self._nudge_offsets.get(name, 0.0)
 
     def _recalculate_total_frames(self) -> None:
         """Recompute ``_total_frames`` from the current stems dict."""
@@ -421,6 +461,7 @@ class MultiTrackPlayer(QObject):
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
+        self._nudge_offsets.clear()
 
         max_frames = 0
         sample_rate = 0

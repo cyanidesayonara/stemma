@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -164,7 +165,7 @@ class StemRow(QWidget):
 
 
 class RecordingStemRow(StemRow):
-    """A stem row for a recording take, with a delete button."""
+    """A stem row for a recording take, with delete and nudge controls."""
 
     delete_requested = Signal(str)
 
@@ -178,6 +179,21 @@ class RecordingStemRow(StemRow):
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
 
+        lay = self.layout()
+        insert_pos = lay.count() - 1  # before the final stretch
+
+        self._nudge_spin = QSpinBox()
+        self._nudge_spin.setRange(-200, 200)
+        self._nudge_spin.setValue(0)
+        self._nudge_spin.setSuffix(" ms")
+        self._nudge_spin.setFixedWidth(90)
+        self._nudge_spin.setToolTip(
+            f"Nudge {display_name} alignment (-200 to +200 ms)"
+        )
+        self._nudge_spin.setAccessibleName(f"Nudge {display_name}")
+        self._nudge_spin.valueChanged.connect(self._on_nudge_changed)
+        lay.insertWidget(insert_pos, self._nudge_spin)
+
         self._delete_btn = QPushButton("X")
         self._delete_btn.setFixedSize(28, 28)
         self._delete_btn.setStyleSheet("padding: 2px;")
@@ -186,7 +202,11 @@ class RecordingStemRow(StemRow):
         self._delete_btn.clicked.connect(
             lambda: self.delete_requested.emit(self._stem_name)
         )
-        self.layout().insertWidget(self.layout().count() - 1, self._delete_btn)
+        lay.insertWidget(insert_pos + 1, self._delete_btn)
+
+    def _on_nudge_changed(self, value: int) -> None:
+        self._player.nudge_stem(self._stem_name, float(value))
+        self.mix_changed.emit()
 
 
 class PlayerControls(QWidget):
@@ -286,9 +306,21 @@ class PlayerControls(QWidget):
         controls_layout.addLayout(transport)
 
         # -- Waveform display --
+        self._waveform_frame = QFrame()
+        self._waveform_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._waveform_frame.setStyleSheet(
+            f"QFrame {{ background-color: {colors['mantle']}; "
+            f"border: 1px solid {colors['surface0']}; "
+            f"border-radius: 6px; }}"
+        )
+        wf_layout = QVBoxLayout(self._waveform_frame)
+        wf_layout.setContentsMargins(4, 4, 4, 4)
+
         self._waveform = WaveformWidget()
         self._waveform.seek_requested.connect(self._on_waveform_seek)
-        controls_layout.addWidget(self._waveform)
+        wf_layout.addWidget(self._waveform)
+
+        controls_layout.addWidget(self._waveform_frame)
 
         # -- A-B loop controls --
         loop_bar = QHBoxLayout()
@@ -528,7 +560,12 @@ class PlayerControls(QWidget):
         self._empty_logo.set_theme(theme)
         self._arpeggio_label.set_theme(theme)
 
-        # Waveform colors
+        # Waveform frame and colors
+        self._waveform_frame.setStyleSheet(
+            f"QFrame {{ background-color: {colors['mantle']}; "
+            f"border: 1px solid {colors['surface0']}; "
+            f"border-radius: 6px; }}"
+        )
         self._waveform.set_theme_colors(colors)
 
     def play_intro_animation(self, with_sound: bool = False) -> None:
