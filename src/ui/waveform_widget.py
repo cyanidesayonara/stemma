@@ -7,13 +7,26 @@ and drag-to-seek. Respects the active theme via set_theme_colors().
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QSize, QRect
-from PySide6.QtGui import QColor, QPainter, QMouseEvent, QPaintEvent
+from PySide6.QtCore import Qt, Signal, QSize, QPointF
+from PySide6.QtGui import (
+    QColor,
+    QLinearGradient,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPaintEvent,
+    QPen,
+)
 from PySide6.QtWidgets import QWidget, QSizePolicy
 
 from src.ui.styles import DARK_COLORS
 
 _WAVEFORM_HEIGHT = 80
+_BAR_WIDTH = 2
+_BAR_GAP = 1
+_BAR_STEP = _BAR_WIDTH + _BAR_GAP
+_BAR_RADIUS = 1.0
+_CURSOR_GLOW_WIDTH = 6
 
 
 class WaveformWidget(QWidget):
@@ -31,7 +44,7 @@ class WaveformWidget(QWidget):
         self._total_seconds: float = 0.0
         self._seeking: bool = False
         self._cached_size: tuple[int, int] = (-1, -1)
-        self._cached_rects: list[QRect] = []
+        self._cached_path: QPainterPath | None = None
 
         self._apply_colors(DARK_COLORS)
 
@@ -49,12 +62,38 @@ class WaveformWidget(QWidget):
         self._loop_region_color = QColor(
             accent.red(), accent.green(), accent.blue(), 38
         )
+        self._cursor_glow_color = QColor(
+            self._cursor_color.red(),
+            self._cursor_color.green(),
+            self._cursor_color.blue(),
+            50,
+        )
+        self._build_gradients()
+
+    def _build_gradients(self) -> None:
+        """Pre-build the upper and lower waveform gradients."""
+        h = self.height() if self.height() > 0 else _WAVEFORM_HEIGHT
+        center = h / 2.0
+        accent = self._waveform_color
+
+        self._upper_gradient = QLinearGradient(0, center, 0, 0)
+        self._upper_gradient.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 220))
+        self._upper_gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 80))
+
+        self._lower_gradient = QLinearGradient(0, center, 0, h)
+        self._lower_gradient.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 220))
+        self._lower_gradient.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 80))
 
     def set_theme_colors(self, colors: dict[str, str]) -> None:
         """Update paint colors for a new theme and repaint."""
         self._apply_colors(colors)
-        self._cached_size = (0, 0)  # Force rect cache rebuild
+        self._cached_size = (0, 0)
         self.update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._build_gradients()
+        self._cached_size = (0, 0)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(200, _WAVEFORM_HEIGHT)
@@ -63,7 +102,7 @@ class WaveformWidget(QWidget):
         """Set the pre-computed peak array and trigger repaint."""
         self._peaks = peaks
         self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
-        self._cached_size = (0, 0)  # Invalidate rect cache
+        self._cached_size = (0, 0)
         self.update()
 
     def set_position(self, ratio: float) -> None:
@@ -88,7 +127,7 @@ class WaveformWidget(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w = self.width()
         h = self.height()
 
@@ -110,35 +149,44 @@ class WaveformWidget(QWidget):
             return
 
         if self._cached_size != (w, h):
-            self._cached_rects = self._build_waveform_rects(w, h)
+            self._cached_path = self._build_waveform_path(w, h)
             self._cached_size = (w, h)
 
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._waveform_color)
-        painter.drawRects(self._cached_rects)
+        if self._cached_path is None:
+            return
 
-    def _build_waveform_rects(self, w: int, h: int) -> list[QRect]:
-        """Pre-compute waveform bar rectangles for the given width."""
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        painter.setBrush(self._upper_gradient)
+        painter.drawPath(self._cached_path)
+
+    def _build_waveform_path(self, w: int, h: int) -> QPainterPath:
+        """Build a single QPainterPath of rounded bars for the waveform."""
         assert self._peaks is not None
         num_peaks = len(self._peaks)
-        center_y = h / 2
+        center_y = h / 2.0
+        max_amplitude = center_y - 2
 
-        xs = np.arange(w)
-        indices = np.minimum((xs * num_peaks // w).astype(int), num_peaks - 1)
-        amplitudes = self._peaks[indices] / self._max_peak
-        bar_heights = amplitudes * (center_y - 2)
+        num_bars = max(1, w // _BAR_STEP)
+        path = QPainterPath()
 
-        mask = bar_heights >= 0.5
-        visible_xs = xs[mask]
-        visible_heights = bar_heights[mask]
+        for i in range(num_bars):
+            x = i * _BAR_STEP
+            peak_idx = min(int(i * num_peaks / num_bars), num_peaks - 1)
+            amplitude = self._peaks[peak_idx] / self._max_peak
+            bar_h = amplitude * max_amplitude
 
-        tops = (center_y - visible_heights).astype(int)
-        heights = (visible_heights * 2).astype(int)
+            if bar_h < 0.5:
+                continue
 
-        return [
-            QRect(int(visible_xs[i]), int(tops[i]), 1, int(heights[i]))
-            for i in range(len(visible_xs))
-        ]
+            top = center_y - bar_h
+            full_h = bar_h * 2
+            path.addRoundedRect(
+                float(x), top, float(_BAR_WIDTH), full_h,
+                _BAR_RADIUS, _BAR_RADIUS,
+            )
+
+        return path
 
     def _draw_loop_region(self, painter: QPainter, w: int, h: int) -> None:
         assert self._loop_a_ratio is not None
@@ -148,20 +196,26 @@ class WaveformWidget(QWidget):
 
         painter.fillRect(x_a, 0, x_b - x_a, h, self._loop_region_color)
 
-        painter.setPen(self._loop_marker_color)
+        pen = QPen(self._loop_marker_color, 2.0)
+        painter.setPen(pen)
         painter.drawLine(x_a, 0, x_a, h)
         painter.drawLine(x_b, 0, x_b, h)
 
     def _draw_cursor(self, painter: QPainter, w: int, h: int) -> None:
         if w <= 0:
             return
-        x = int(self._position_ratio * w)
-        x = max(0, min(x, w - 1))
-        painter.setPen(self._cursor_color)
-        painter.drawLine(x, 0, x, h)
-        x2 = min(x + 1, w - 1)
-        if x2 != x:
-            painter.drawLine(x2, 0, x2, h)  # 2px wide cursor
+        x = self._position_ratio * w
+        x = max(0.0, min(x, w - 1.0))
+
+        glow_pen = QPen(self._cursor_glow_color, _CURSOR_GLOW_WIDTH)
+        glow_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(glow_pen)
+        painter.drawLine(QPointF(x, 0), QPointF(x, h))
+
+        cursor_pen = QPen(self._cursor_color, 2.0)
+        cursor_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(cursor_pen)
+        painter.drawLine(QPointF(x, 0), QPointF(x, h))
 
     # -- Mouse interaction --
 
