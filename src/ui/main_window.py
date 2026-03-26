@@ -652,6 +652,11 @@ class MainWindow(QMainWindow):
         except ValueError:
             display = stem_name
         self._add_recording_stem(stem_name, path, display)
+        self._player_controls._record_btn.blockSignals(True)
+        self._player_controls._record_btn.setChecked(
+            self._player.recording_armed
+        )
+        self._player_controls._record_btn.blockSignals(False)
         self._player_controls._do_recompute_peaks()
 
     def _add_recording_stem(
