@@ -1,7 +1,8 @@
 """Tests for the animated main logo widget."""
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QPointingDevice
 from PySide6.QtWidgets import QApplication
 
 from src.ui.animated_logo import (
@@ -19,6 +20,22 @@ from src.ui.animated_logo import (
     _load_base_svg,
     _note_alpha,
 )
+
+
+def _left_mouse_press(local_x: float, local_y: float) -> QMouseEvent:
+    """Build a non-deprecated QMouseEvent (Qt 6 single-point API)."""
+    pos = QPointF(local_x, local_y)
+    dev = QPointingDevice.primaryPointingDevice()
+    return QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        pos,
+        pos,
+        pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        dev,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -185,16 +202,6 @@ class TestAnimationConstants:
 class TestClickReplay:
     def test_click_triggers_play_intro(self, app):
         w = AnimatedLogoWidget(theme="dark", play_sound=False)
-        from PySide6.QtCore import QEvent, QPointF
-        from PySide6.QtGui import QMouseEvent
-
-        event = QMouseEvent(
-            QEvent.Type.MouseButtonPress,
-            QPointF(10, 10),
-            Qt.MouseButton.LeftButton,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        w.mousePressEvent(event)
+        w.mousePressEvent(_left_mouse_press(10, 10))
         assert w._animating is True
         w._timer.stop()

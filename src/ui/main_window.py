@@ -57,6 +57,11 @@ ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
 
 
+def _skip_modal_startup_dialogs_on_ci() -> bool:
+    """True when modal QMessageBox would block with no user (e.g. GitHub Actions)."""
+    return os.environ.get("CI") == "true"
+
+
 def _is_audio_path(path: str) -> bool:
     """Return True if *path* has an audio file extension."""
     _, ext = os.path.splitext(path)
@@ -140,6 +145,8 @@ class MainWindow(QMainWindow):
 
     def _maybe_show_data_dir_reset_notice(self) -> None:
         """Tell the user if startup fell back from an invalid custom data path."""
+        if _skip_modal_startup_dialogs_on_ci():
+            return
         msg = consume_data_dir_reset_notice(self._settings)
         if msg:
             QMessageBox.information(self, "Data folder", msg)
@@ -148,7 +155,7 @@ class MainWindow(QMainWindow):
         """Warn once at startup if PortAudio reports no output devices."""
         # Headless CI (e.g. GitHub Actions) often has no output devices; a
         # modal dialog would block the process until dismissed and hangs tests.
-        if os.environ.get("CI") == "true":
+        if _skip_modal_startup_dialogs_on_ci():
             return
         valid = output_device_indices_with_output()
         if valid is not None and len(valid) == 0:

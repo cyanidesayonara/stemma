@@ -15,7 +15,7 @@ For full technical specs, module descriptions, and the phased roadmap, see `PROJ
 
 ## Tech Stack
 
-- Python 3.14
+- Python 3.14 (local dev; GitHub Actions CI uses 3.12 per `.github/workflows/ci.yml`)
 - PySide6 (Qt 6) for GUI
 - ONNX Runtime + DirectML for GPU-accelerated inference (no PyTorch)
 - HTDemucs v4 ONNX models (4-stem and 6-stem)
