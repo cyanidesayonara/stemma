@@ -112,7 +112,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-03-26 (recording feature)
+Last updated: 2026-03-26
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -153,14 +153,16 @@ All core functionality implemented and tested:
 - [x] Metronome with BPM entry (#57, PR #86)
 - [x] Count-in before playback/loop start (#78, PR #87)
 
-### v1.2.0 Release -- In Progress
-- [x] Record audio track: full-duplex recording, multiple takes, input device, latency compensation (#79, PR pending)
+### v1.2.0 Release -- Shipped
+- [x] Record audio track: full-duplex recording, multiple takes, input device, latency compensation (#79, PR #91)
 
-### Post-1.0 Backlog
-Tickets ship as incremental 1.x releases (semver: minor for features, patch for fixes).
+### v2.0 Roadmap
+- [ ] Animated arpeggio startup logo (#76)
+- [ ] MSIX packaging for Microsoft Store (#74)
+- [ ] UI/UX redesign, per-stem waveforms, post-recording track adjustment (#92)
+
+### Post-2.0 Backlog
 - [ ] Tempo/key detection and beat-synced metronome (#42)
-- [ ] Animated startup logo (#76)
-- [ ] MSIX packaging (#74)
 - [ ] Experimental DSP (#28)
 - [ ] Real-time streaming (#13)
 
