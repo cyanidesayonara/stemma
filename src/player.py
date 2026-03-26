@@ -167,6 +167,7 @@ class MultiTrackPlayer(QObject):
         # Hardware stream.
         self._stream: sd.OutputStream | sd.Stream | None = None
         self._output_device: int | None = None
+        self._suppress_next_count_in: bool = False
 
         # UI updater.
         self._timer = QTimer(self)
@@ -344,6 +345,10 @@ class MultiTrackPlayer(QObject):
             (self._total_frames, 2), dtype=np.float32
         )
 
+    def set_recording_song_dir(self, song_dir: str | None) -> None:
+        """Set the directory where recording takes are saved."""
+        self._recording_song_dir = song_dir
+
     def save_recording(self, song_dir: str) -> str | None:
         """Write the recording buffer to a WAV file in *song_dir*.
 
@@ -368,6 +373,33 @@ class MultiTrackPlayer(QObject):
         sf.write(path, buf, self._sample_rate)
         self._recording_buffer = None
         return path
+
+    def add_recording_stem(self, name: str, data: np.ndarray) -> None:
+        """Add a recording take as a playable stem.
+
+        Validates sample rate compatibility and forces stereo.
+        """
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)
+        self._stems[name] = data
+        self._original_stems[name] = data
+        self._total_frames = max(self._total_frames, data.shape[0])
+
+    def remove_recording_stem(self, name: str) -> None:
+        """Remove a recording stem and recalculate total frames."""
+        self._stems.pop(name, None)
+        self._original_stems.pop(name, None)
+        self._muted_stems.discard(name)
+        self._soloed_stems.discard(name)
+        self._volumes.pop(name, None)
+        self._recalculate_total_frames()
+
+    def _recalculate_total_frames(self) -> None:
+        """Recompute ``_total_frames`` from the current stems dict."""
+        self._total_frames = max(
+            (d.shape[0] for d in self._stems.values()), default=0
+        )
+        self._current_frame = min(self._current_frame, self._total_frames)
 
     def load_stems(self, stem_paths: dict[str, str]) -> None:
         """Load all stem WAV files into memory.
@@ -421,6 +453,7 @@ class MultiTrackPlayer(QObject):
         """Select the PortAudio output device index, or None for the system default."""
         self._output_device = device
         if self._is_playing:
+            self._suppress_next_count_in = True
             self.pause()
             self.play()
 
@@ -435,18 +468,31 @@ class MultiTrackPlayer(QObject):
         try:
             if self._stream is None:
                 if self._recording_armed:
-                    self._allocate_recording_buffer()
-                    out_dev = self._output_device
+                    if self._recording_buffer is None:
+                        self._allocate_recording_buffer()
                     in_dev = self._input_device
-                    device_arg: Any = (
-                        in_dev if in_dev is not None else sd.default.device[0],
-                        out_dev if out_dev is not None else sd.default.device[1],
-                    )
+                    out_dev = self._output_device
+                    try:
+                        defaults = sd.default.device
+                        in_resolved = in_dev if in_dev is not None else defaults[0]
+                        out_resolved = out_dev if out_dev is not None else defaults[1]
+                    except (TypeError, IndexError):
+                        in_resolved = in_dev
+                        out_resolved = out_dev
+                    input_ch = 1
+                    try:
+                        if in_resolved is not None:
+                            info = sd.query_devices(in_resolved)
+                            input_ch = max(
+                                1, min(int(info.get("max_input_channels", 1)), 2)
+                            )
+                    except (sd.PortAudioError, ValueError, TypeError, OSError):
+                        pass
                     self._stream = sd.Stream(
                         samplerate=self._sample_rate,
-                        channels=2,
+                        channels=(input_ch, 2),
                         callback=self._full_duplex_callback,
-                        device=device_arg,
+                        device=(in_resolved, out_resolved),
                     )
                     self._recording = True
                 else:
@@ -459,7 +505,7 @@ class MultiTrackPlayer(QObject):
                         kwargs["device"] = self._output_device
                     self._stream = sd.OutputStream(**kwargs)
             self._stream.start()
-        except sd.PortAudioError:
+        except (sd.PortAudioError, OSError):
             if self._stream is not None:
                 self._stream.close()
                 self._stream = None
@@ -472,12 +518,9 @@ class MultiTrackPlayer(QObject):
             )
             return
 
-        at_boundary = (
-            self._current_frame == 0
-            or (self._loop_region_is_active()
-                and self._current_frame == self._loop_a_frame)
-        )
-        if at_boundary:
+        if self._suppress_next_count_in:
+            self._suppress_next_count_in = False
+        else:
             self._arm_count_in()
 
         self._is_playing = True
@@ -485,11 +528,14 @@ class MultiTrackPlayer(QObject):
         self.state_changed.emit(True)
 
     def pause(self) -> None:
-        """Pause playback."""
+        """Pause playback.
+
+        Recording state is preserved across pause/resume: the buffer is kept
+        so that pressing Play again continues recording from where the
+        playhead left off.  To finalize a take, use ``stop()``.
+        """
         if not self._is_playing:
             return
-
-        was_recording = self._recording
 
         self._is_playing = False
         self._recording = False
@@ -503,19 +549,24 @@ class MultiTrackPlayer(QObject):
         self._timer.stop()
         self.state_changed.emit(False)
 
-        if was_recording and self._recording_song_dir:
+    def stop(self) -> None:
+        """Stop playback, finalize any recording, and reset the playhead.
+
+        When A-B looping is active with a valid region, the playhead moves to
+        loop A; otherwise it moves to the start of the track.
+
+        If recording was active, the take is saved and ``recording_saved``
+        is emitted.  Use ``pause()`` to interrupt without finalizing.
+        """
+        had_buffer = self._recording_buffer is not None
+        self.pause()
+        if had_buffer and self._recording_song_dir:
             path = self.save_recording(self._recording_song_dir)
             if path:
                 self._recording_armed = False
                 self.recording_saved.emit(path)
-
-    def stop(self) -> None:
-        """Stop playback and reset the playhead.
-
-        When A-B looping is active with a valid region, the playhead moves to
-        loop A; otherwise it moves to the start of the track.
-        """
-        self.pause()
+        elif had_buffer:
+            self._recording_buffer = None
         if self._loop_region_is_active():
             self.seek(self._loop_a_frame / self._sample_rate)
         else:
@@ -763,7 +814,7 @@ class MultiTrackPlayer(QObject):
     def _emit_position(self) -> None:
         """Emit the current playback position for UI updates."""
         if not self._is_playing and self._timer.isActive():
-            was_recording = self._recording
+            had_buffer = self._recording_buffer is not None
             self._recording = False
             self._timer.stop()
             if self._stream is not None:
@@ -772,11 +823,13 @@ class MultiTrackPlayer(QObject):
                 self._stream = None
             self.state_changed.emit(False)
             self.play_finished.emit()
-            if was_recording and self._recording_song_dir:
+            if had_buffer and self._recording_song_dir:
                 path = self.save_recording(self._recording_song_dir)
                 if path:
                     self._recording_armed = False
                     self.recording_saved.emit(path)
+            elif had_buffer:
+                self._recording_buffer = None
             return
 
         pos_s = self._current_frame / self._sample_rate

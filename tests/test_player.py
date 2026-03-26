@@ -670,14 +670,18 @@ class TestRecordingInputDevice:
         player.load_stems(mock_stems)
         player.arm_recording(True)
 
-        with patch("src.player.sd.Stream") as mock_stream:
+        with patch("src.player.sd.Stream") as mock_stream, \
+             patch("src.player.sd.default") as mock_default, \
+             patch("src.player.sd.query_devices") as mock_qd:
+            mock_default.device = (0, 1)
+            mock_qd.return_value = {"max_input_channels": 1}
             mock_instance = mock_stream.return_value
             mock_instance.start = lambda: None
             player.play()
 
         mock_stream.assert_called_once()
         call_kwargs = mock_stream.call_args[1]
-        assert call_kwargs["channels"] == 2
+        assert call_kwargs["channels"] == (1, 2)
         assert player._recording is True
 
     def test_play_without_recording_creates_output_stream(self, mock_stems):
@@ -691,3 +695,208 @@ class TestRecordingInputDevice:
 
         mock_stream.assert_called_once()
         assert player._recording is False
+
+
+class TestMonoInputDevice:
+    """Test mono microphone channel handling in duplex mode."""
+
+    def test_mono_device_uses_1_input_channel(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        player.set_input_device(5)
+
+        with patch("src.player.sd.Stream") as mock_stream, \
+             patch("src.player.sd.default") as mock_default, \
+             patch("src.player.sd.query_devices") as mock_qd:
+            mock_default.device = (0, 1)
+            mock_qd.return_value = {"max_input_channels": 1}
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        call_kwargs = mock_stream.call_args[1]
+        assert call_kwargs["channels"] == (1, 2)
+        assert call_kwargs["device"][0] == 5
+
+    def test_stereo_device_uses_2_input_channels(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        player.set_input_device(7)
+
+        with patch("src.player.sd.Stream") as mock_stream, \
+             patch("src.player.sd.default") as mock_default, \
+             patch("src.player.sd.query_devices") as mock_qd:
+            mock_default.device = (0, 1)
+            mock_qd.return_value = {"max_input_channels": 4}
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        call_kwargs = mock_stream.call_args[1]
+        assert call_kwargs["channels"] == (2, 2)
+
+    def test_query_devices_failure_defaults_to_1_channel(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.arm_recording(True)
+        player.set_input_device(99)
+
+        with patch("src.player.sd.Stream") as mock_stream, \
+             patch("src.player.sd.default") as mock_default, \
+             patch("src.player.sd.query_devices") as mock_qd:
+            mock_default.device = (0, 1)
+            mock_qd.side_effect = sd.PortAudioError("bad device")
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        call_kwargs = mock_stream.call_args[1]
+        assert call_kwargs["channels"] == (1, 2)
+
+
+class TestStopOnlyFinalization:
+    """Test that stop saves recordings but pause does not."""
+
+    def test_pause_keeps_recording_buffer(self, mock_stems, tmp_path):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording_buffer = np.full(
+            (44100, 2), 0.5, dtype=np.float32
+        )
+        player._recording = True
+        player._is_playing = True
+        player.set_recording_song_dir(str(tmp_path))
+
+        saved = []
+        player.recording_saved.connect(lambda p: saved.append(p))
+
+        player.pause()
+
+        assert len(saved) == 0
+        assert player._recording_buffer is not None
+
+    def test_stop_saves_recording(self, mock_stems, tmp_path):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording_buffer = np.full(
+            (44100, 2), 0.5, dtype=np.float32
+        )
+        player._recording = True
+        player._is_playing = True
+        player.set_recording_song_dir(str(tmp_path))
+
+        saved = []
+        player.recording_saved.connect(lambda p: saved.append(p))
+
+        player.stop()
+
+        assert len(saved) == 1
+        assert os.path.isfile(saved[0])
+        assert player._recording_buffer is None
+
+    def test_stop_without_buffer_is_safe(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+        player.stop()
+        assert not player.is_playing
+
+
+class TestRecordingStemMethods:
+    """Test add/remove recording stem encapsulation."""
+
+    def test_add_recording_stem(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        old_total = player._total_frames
+
+        longer_data = np.ones((88200, 2), dtype=np.float32) * 0.1
+        player.add_recording_stem("recording_take1", longer_data)
+
+        assert "recording_take1" in player._stems
+        assert "recording_take1" in player._original_stems
+        assert player._total_frames == 88200
+
+    def test_add_mono_recording_stem(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        mono_data = np.ones((44100, 1), dtype=np.float32) * 0.3
+        player.add_recording_stem("recording_take1", mono_data)
+
+        assert player._stems["recording_take1"].shape == (44100, 2)
+
+    def test_remove_recording_stem_recalculates_total(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        longer_data = np.ones((88200, 2), dtype=np.float32)
+        player.add_recording_stem("recording_take1", longer_data)
+        assert player._total_frames == 88200
+
+        player.remove_recording_stem("recording_take1")
+        assert player._total_frames == 44100
+        assert "recording_take1" not in player._stems
+
+    def test_remove_clamps_current_frame(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        longer_data = np.ones((88200, 2), dtype=np.float32)
+        player.add_recording_stem("recording_take1", longer_data)
+        player._current_frame = 80000
+
+        player.remove_recording_stem("recording_take1")
+        assert player._current_frame <= player._total_frames
+
+    def test_remove_nonexistent_stem_is_safe(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.remove_recording_stem("does_not_exist")
+        assert player._total_frames == 44100
+
+
+class TestCountInAtAnyPosition:
+    """Test that count-in fires at any play position, not just boundaries."""
+
+    def test_count_in_at_mid_song_position(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_count_in_enabled(True)
+        player.set_count_in_beats(4)
+        player.set_metronome_bpm(120.0)
+
+        player.seek(0.5)
+        assert player._current_frame > 0
+
+        with patch("src.player.sd.OutputStream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.play()
+
+        assert player._count_in_remaining > 0
+
+    def test_no_count_in_on_device_switch(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_count_in_enabled(True)
+        player.set_count_in_beats(4)
+        player.set_metronome_bpm(120.0)
+
+        with patch("src.player.sd.OutputStream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            mock_instance.stop = lambda: None
+            mock_instance.close = lambda: None
+            player.play()
+
+        player._count_in_remaining = 0
+
+        with patch("src.player.sd.OutputStream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            player.set_output_device(None)
+
+        assert player._count_in_remaining == 0

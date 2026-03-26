@@ -9,7 +9,6 @@ import glob
 import json
 import os
 
-import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
@@ -622,7 +621,7 @@ class MainWindow(QMainWindow):
             self._player.load_stems(stem_paths)
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
-            self._player._recording_song_dir = song.stems_path
+            self._player.set_recording_song_dir(song.stems_path)
             self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
             self._load_existing_recordings(song.stems_path)
 
@@ -660,13 +659,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Load a recording WAV into the player and add a mixer row."""
         data, sr = sf.read(path, always_2d=True, dtype="float32")
-        if data.shape[1] == 1:
-            data = np.repeat(data, 2, axis=1)
-        self._player._stems[stem_name] = data
-        self._player._original_stems[stem_name] = data
-        self._player._total_frames = max(
-            self._player._total_frames, data.shape[0]
-        )
+        if sr != self._player.sample_rate:
+            return
+        self._player.add_recording_stem(stem_name, data)
         row = self._player_controls.add_recording_row(
             stem_name, display
         )
@@ -694,18 +689,14 @@ class MainWindow(QMainWindow):
         if os.path.isfile(path):
             os.remove(path)
 
-        self._player._stems.pop(stem_name, None)
-        self._player._original_stems.pop(stem_name, None)
-        self._player._muted_stems.discard(stem_name)
-        self._player._soloed_stems.discard(stem_name)
-        self._player._volumes.pop(stem_name, None)
+        self._player.remove_recording_stem(stem_name)
         self._player_controls.remove_recording_row(stem_name)
         self._player_controls._do_recompute_peaks()
 
     def _on_close_song(self) -> None:
         """Stop playback and return to the empty logo state."""
         self._player.stop()
-        self._player._recording_song_dir = None
+        self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
         self._current_song_id = None
         self.setWindowTitle("stemma")

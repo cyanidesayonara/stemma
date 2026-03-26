@@ -347,27 +347,16 @@ class TestCountInEdgeCases:
         loaded_player.pause()
         assert loaded_player._count_in_remaining == 0
 
-    def test_no_count_in_on_resume_after_pause(self, loaded_player):
-        """Resuming from a mid-song position should not trigger a count-in."""
+    def test_count_in_arms_at_any_position(self, loaded_player):
+        """play() should arm count-in regardless of playhead position."""
         loaded_player.set_count_in_enabled(True)
         loaded_player.set_count_in_beats(4)
         loaded_player.set_metronome_bpm(120.0)
 
         loaded_player._current_frame = 10000
-        loaded_player._is_playing = False
 
-        # Simulate what play() does: check boundary, then arm.
-        at_boundary = (
-            loaded_player._current_frame == 0
-            or (loaded_player._loop_region_is_active()
-                and loaded_player._current_frame
-                == loaded_player._loop_a_frame)
-        )
-        assert not at_boundary
-        # play() would not arm count-in here.
-        if at_boundary:
-            loaded_player._arm_count_in()
-        assert loaded_player._count_in_remaining == 0
+        loaded_player._arm_count_in()
+        assert loaded_player._count_in_remaining > 0
 
     def test_count_in_arms_at_position_zero(self, loaded_player):
         """Starting from position 0 should arm the count-in."""
@@ -397,19 +386,21 @@ class TestCountInEdgeCases:
         )
         assert at_boundary
 
-    def test_device_switch_no_spurious_count_in(self, loaded_player):
-        """Switching output device mid-song should not trigger a count-in."""
+    def test_suppress_flag_prevents_count_in(self, loaded_player):
+        """The _suppress_next_count_in flag prevents arming in play()."""
         loaded_player.set_count_in_enabled(True)
         loaded_player.set_count_in_beats(4)
         loaded_player.set_metronome_bpm(120.0)
 
-        loaded_player._current_frame = 5000
-        loaded_player._is_playing = False
-        # After a device switch, play() is called with current_frame mid-song.
-        # It should not arm count-in.
-        at_boundary = loaded_player._current_frame == 0
-        assert not at_boundary
+        loaded_player._suppress_next_count_in = True
+        from unittest.mock import patch
+        with patch("src.player.sd.OutputStream") as mock_stream:
+            mock_instance = mock_stream.return_value
+            mock_instance.start = lambda: None
+            loaded_player.play()
+
         assert loaded_player._count_in_remaining == 0
+        assert loaded_player._suppress_next_count_in is False
 
     def test_count_in_uses_metronome_volume(self, loaded_player):
         """Count-in click volume should follow the metronome volume setting."""
