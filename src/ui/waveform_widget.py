@@ -236,3 +236,78 @@ class WaveformWidget(QWidget):
         self._position_ratio = ratio
         self.update()
         self.seek_requested.emit(ratio * self._total_seconds)
+
+
+_MINI_HEIGHT = 24
+_MINI_BAR_WIDTH = 1
+_MINI_BAR_GAP = 1
+_MINI_BAR_STEP = _MINI_BAR_WIDTH + _MINI_BAR_GAP
+
+
+class MiniWaveformWidget(QWidget):
+    """Small inline waveform for a single stem, shown in mixer rows."""
+
+    def __init__(self, color: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._peaks: np.ndarray | None = None
+        self._max_peak: float = 0.0
+        self._color = QColor(color)
+        self._cached_size: tuple[int, int] = (-1, -1)
+        self._cached_path: QPainterPath | None = None
+
+        self.setFixedHeight(_MINI_HEIGHT)
+        self.setFixedWidth(100)
+
+    def set_peaks(self, peaks: np.ndarray) -> None:
+        """Set the peak array and repaint."""
+        self._peaks = peaks
+        self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
+        self._cached_size = (0, 0)
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w = self.width()
+        h = self.height()
+
+        if self._peaks is not None and self._max_peak > 0:
+            if self._cached_size != (w, h):
+                self._cached_path = self._build_path(w, h)
+                self._cached_size = (w, h)
+            if self._cached_path is not None:
+                fill = QColor(
+                    self._color.red(),
+                    self._color.green(),
+                    self._color.blue(),
+                    140,
+                )
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(fill)
+                painter.drawPath(self._cached_path)
+
+        painter.end()
+
+    def _build_path(self, w: int, h: int) -> QPainterPath:
+        assert self._peaks is not None
+        num_peaks = len(self._peaks)
+        center_y = h / 2.0
+        max_amp = center_y - 1
+
+        num_bars = max(1, w // _MINI_BAR_STEP)
+        path = QPainterPath()
+
+        for i in range(num_bars):
+            x = i * _MINI_BAR_STEP
+            idx = min(int(i * num_peaks / num_bars), num_peaks - 1)
+            amplitude = self._peaks[idx] / self._max_peak
+            bar_h = amplitude * max_amp
+            if bar_h < 0.5:
+                continue
+            top = center_y - bar_h
+            path.addRoundedRect(
+                float(x), top, float(_MINI_BAR_WIDTH), bar_h * 2,
+                0.5, 0.5,
+            )
+
+        return path

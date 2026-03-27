@@ -29,8 +29,8 @@ from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import DARK_COLORS, RECORDING_COLOR, STEM_COLORS
-from src.ui.waveform_widget import WaveformWidget
-from src.waveform import compute_peaks
+from src.ui.waveform_widget import MiniWaveformWidget, WaveformWidget
+from src.waveform import compute_peaks, compute_stem_peaks
 
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
@@ -102,6 +102,9 @@ class StemRow(QWidget):
         self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
         layout.addWidget(self._label)
 
+        self._mini_waveform = MiniWaveformWidget(color)
+        layout.addWidget(self._mini_waveform)
+
         self._mute_btn = QPushButton("M")
         self._mute_btn.setCheckable(True)
         self._mute_btn.setFixedSize(32, 28)
@@ -163,6 +166,10 @@ class StemRow(QWidget):
         """Programmatically set the volume slider (0-200)."""
         self._volume_slider.setValue(value)
 
+    def set_mini_peaks(self, peaks: "np.ndarray") -> None:
+        """Update the mini waveform with new peak data."""
+        self._mini_waveform.set_peaks(peaks)
+
 
 class RecordingStemRow(StemRow):
     """A stem row for a recording take, with delete and nudge controls."""
@@ -178,6 +185,7 @@ class RecordingStemRow(StemRow):
         self._label.setStyleSheet(
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
+        self._mini_waveform._color = QColor(RECORDING_COLOR)
 
         lay = self.layout()
         insert_pos = lay.count() - 1  # before the final stretch
@@ -711,6 +719,15 @@ class PlayerControls(QWidget):
         )
         self._waveform.set_peaks(peaks)
         self._waveform.set_total_seconds(self._player.total_seconds)
+
+        for name, row in self._stem_rows.items():
+            if name in stems:
+                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
+                row.set_mini_peaks(stem_peaks)
+        for name, row in self._recording_rows.items():
+            if name in stems:
+                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
+                row.set_mini_peaks(stem_peaks)
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""

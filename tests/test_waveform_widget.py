@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QEvent, QPointF
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from src.ui.waveform_widget import WaveformWidget
+from src.ui.waveform_widget import MiniWaveformWidget, WaveformWidget
 from src.ui.player_controls import PlayerControls, StemRow
 
 
@@ -137,3 +137,39 @@ class TestMixChangedWiring:
         with patch.object(controls, "_recompute_peaks") as mock_recompute:
             controls._stem_rows["drums"].mix_changed.emit()
             mock_recompute.assert_called_once()
+
+
+class TestMiniWaveformWidget:
+    """Tests for MiniWaveformWidget."""
+
+    def test_creates_with_color(self, app):
+        widget = MiniWaveformWidget("#ff0000")
+        assert widget._color.red() == 255
+        assert widget._peaks is None
+
+    def test_set_peaks_stores_data(self, app):
+        widget = MiniWaveformWidget("#00ff00")
+        peaks = np.array([0.2, 0.8, 0.4], dtype=np.float32)
+        widget.set_peaks(peaks)
+        np.testing.assert_array_equal(widget._peaks, peaks)
+        assert widget._max_peak == pytest.approx(0.8)
+
+    def test_paint_no_crash_without_peaks(self, app):
+        widget = MiniWaveformWidget("#0000ff")
+        widget.resize(100, 24)
+        widget.repaint()
+
+    def test_paint_no_crash_with_peaks(self, app):
+        widget = MiniWaveformWidget("#ffffff")
+        widget.resize(100, 24)
+        widget.set_peaks(np.array([0.1, 0.5, 0.3], dtype=np.float32))
+        widget.repaint()
+
+    def test_stem_row_has_mini_waveform(self, app):
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        row = StemRow("vocals", player)
+        assert hasattr(row, "_mini_waveform")
+        assert isinstance(row._mini_waveform, MiniWaveformWidget)
