@@ -28,7 +28,12 @@ from src.metronome import tap_tempo
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
-from src.ui.styles import DARK_COLORS, RECORDING_COLOR, STEM_COLORS
+from src.ui.styles import (
+    DARK_COLORS,
+    RECORDING_COLOR,
+    STEM_COLORS_DARK,
+    STEM_COLORS_LIGHT,
+)
 from src.ui.waveform_widget import MiniWaveformWidget, WaveformWidget
 from src.waveform import compute_peaks, compute_stem_peaks
 
@@ -89,22 +94,28 @@ class StemRow(QWidget):
     mix_changed = Signal()
 
     def __init__(self, stem_name: str, player: MultiTrackPlayer,
+                 theme: str = "dark",
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._stem_name = stem_name
         self._player = player
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setStyleSheet("background: transparent;")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setContentsMargins(4, 2, 4, 2)
 
-        color = STEM_COLORS.get(stem_name, "#95a5a6")
+        palette = STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
+        color = palette.get(stem_name, "#95a5a6")
 
         self._label = QLabel(stem_name.capitalize())
         self._label.setFixedWidth(70)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
         layout.addWidget(self._label)
 
-        self._mini_waveform = MiniWaveformWidget(color)
+        self._mini_waveform = MiniWaveformWidget(color, player)
+        self._mini_waveform.seek_requested.connect(self._on_mini_seek)
         layout.addWidget(self._mini_waveform, 1)
 
         self._mute_btn = QPushButton("M")
@@ -137,8 +148,13 @@ class StemRow(QWidget):
 
         self._vol_label = QLabel("100%")
         self._vol_label.setFixedWidth(45)
-        self._vol_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._vol_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         layout.addWidget(self._vol_label)
+
+    def _on_mini_seek(self, seconds: float) -> None:
+        self._player.seek(seconds)
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
@@ -170,6 +186,14 @@ class StemRow(QWidget):
         """Update the mini waveform with new peak data."""
         self._mini_waveform.set_peaks(peaks)
 
+    def apply_stem_theme(self, theme: str) -> None:
+        """Update stem label and waveform color for the given theme."""
+        palette = STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
+        color = palette.get(self._stem_name, "#95a5a6")
+        self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self._mini_waveform._color = QColor(color)
+        self._mini_waveform.update()
+
 
 class RecordingStemRow(StemRow):
     """A stem row for a recording take, with delete and nudge controls."""
@@ -178,8 +202,9 @@ class RecordingStemRow(StemRow):
 
     def __init__(self, stem_name: str, display_name: str,
                  player: MultiTrackPlayer,
+                 theme: str = "dark",
                  parent: QWidget | None = None) -> None:
-        super().__init__(stem_name, player, parent)
+        super().__init__(stem_name, player, theme, parent)
 
         self._label.setText(display_name)
         self._label.setStyleSheet(
@@ -412,7 +437,7 @@ class PlayerControls(QWidget):
         self._bpm_spin.setRange(20, 300)
         self._bpm_spin.setValue(120)
         self._bpm_spin.setSuffix(" BPM")
-        self._bpm_spin.setFixedWidth(100)
+        self._bpm_spin.setFixedWidth(110)
         self._bpm_spin.setToolTip("Metronome tempo")
         self._bpm_spin.setAccessibleName("Metronome BPM")
         self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
@@ -536,10 +561,11 @@ class PlayerControls(QWidget):
             f"border-top: 1px solid {colors['surface0']};"
         )
         footer_layout = QHBoxLayout(self._footer_widget)
-        footer_layout.setContentsMargins(0, 0, 0, 0)
-        footer_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        footer_layout.setContentsMargins(0, 5, 0, 2)
 
         self._copyright_label = QLabel("\u00A9 2026 stemma")
+        self._copyright_label.setFixedHeight(36)
+        self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._copyright_label.setStyleSheet(
             f"color: {colors['surface1']}; font-size: 9pt; border: none;"
         )
@@ -595,6 +621,11 @@ class PlayerControls(QWidget):
         self._recordings_frame.setStyleSheet(frame_style)
         self._waveform.set_theme_colors(colors)
 
+        for row in self._stem_rows.values():
+            row.apply_stem_theme(theme)
+        for row in self._recording_rows.values():
+            row.apply_stem_theme(theme)
+
     def play_intro_animation(self, with_sound: bool = False) -> None:
         """Trigger the main logo's intro animation (notes + waves)."""
         self._empty_logo.play_intro(with_sound=with_sound)
@@ -618,7 +649,7 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(has_stems)
 
         for name in stem_names:
-            row = StemRow(name, self._player)
+            row = StemRow(name, self._player, self._theme)
             row.mix_changed.connect(self._recompute_peaks)
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
@@ -966,7 +997,7 @@ class PlayerControls(QWidget):
     ) -> RecordingStemRow:
         """Add a recording take row to the recordings section."""
         row = RecordingStemRow(
-            stem_name, display_name, self._player
+            stem_name, display_name, self._player, self._theme
         )
         row.mix_changed.connect(self._recompute_peaks)
         self._recordings_container.addWidget(row)

@@ -245,18 +245,27 @@ _MINI_BAR_STEP = _MINI_BAR_WIDTH + _MINI_BAR_GAP
 
 
 class MiniWaveformWidget(QWidget):
-    """Small inline waveform for a single stem, shown in mixer rows."""
+    """Small inline waveform for a single stem, shown in mixer rows.
 
-    def __init__(self, color: str, parent: QWidget | None = None) -> None:
+    Supports click-to-seek: clicking sets the playback position
+    proportionally, mirroring the main waveform's seek behaviour.
+    """
+
+    seek_requested = Signal(float)
+
+    def __init__(self, color: str, player=None,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._peaks: np.ndarray | None = None
         self._max_peak: float = 0.0
         self._color = QColor(color)
+        self._player = player
         self._cached_size: tuple[int, int] = (-1, -1)
         self._cached_path: QPainterPath | None = None
 
         self.setFixedHeight(_MINI_HEIGHT)
         self.setMinimumWidth(80)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_peaks(self, peaks: np.ndarray) -> None:
         """Set the peak array and repaint."""
@@ -264,6 +273,13 @@ class MiniWaveformWidget(QWidget):
         self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
         self._cached_size = (0, 0)
         self.update()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._player:
+            total = self._player.total_seconds
+            if total > 0:
+                ratio = max(0.0, min(1.0, event.position().x() / self.width()))
+                self.seek_requested.emit(ratio * total)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
