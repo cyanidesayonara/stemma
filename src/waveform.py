@@ -60,3 +60,22 @@ def compute_peaks(
     # reduceat takes the max of mix[bin_starts[i]:bin_starts[i+1]] for each i
     peaks = np.maximum.reduceat(mix, bin_starts).astype(np.float32)
     return peaks
+
+
+def compute_stem_peaks(audio: np.ndarray, num_bins: int) -> np.ndarray:
+    """Compute peak amplitude per bin from a single stem's audio.
+
+    Args:
+        audio: Audio array of shape (frames, channels), float32.
+        num_bins: Number of output bins.
+
+    Returns:
+        1-D float32 array of shape (num_bins,) with peak amplitudes.
+    """
+    if audio.size == 0 or num_bins <= 0:
+        return np.zeros(max(num_bins, 1), dtype=np.float32)
+
+    mono = np.max(np.abs(audio), axis=1)
+    total_frames = mono.shape[0]
+    bin_starts = np.linspace(0, total_frames, num_bins + 1, dtype=np.int64)[:-1]
+    return np.maximum.reduceat(mono, bin_starts).astype(np.float32)

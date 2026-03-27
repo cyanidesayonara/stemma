@@ -5,16 +5,27 @@ Both themes share the brand accent teal (#4fb8b8).
 Applied globally via QApplication.setStyleSheet().
 """
 
-STEM_COLORS = {
-    "vocals": "#9b59b6",   # Purple
-    "drums": "#e67e22",    # Orange
-    "bass": "#3498db",     # Blue
-    "guitar": "#e74c3c",   # Red
-    "piano": "#2ecc71",    # Green
-    "other": "#95a5a6",    # Gray
+STEM_COLORS_DARK = {
+    "vocals": "#bfa3dc",   # Purple (brand)
+    "drums": "#e4ad6e",    # Gold (brand)
+    "bass": "#d4849a",     # Rose (brand)
+    "guitar": "#5cb85c",   # Green
+    "piano": "#5ba3cf",    # Blue
+    "other": "#4fb8b8",    # Teal (brand accent)
 }
 
-RECORDING_COLOR = "#e53935"  # Material Red 600 -- used for recording stem rows
+STEM_COLORS_LIGHT = {
+    "vocals": "#9878b8",   # Darker purple for light background
+    "drums": "#c89040",    # Darker gold for light background
+    "bass": "#c0707e",     # Darker rose for light background
+    "guitar": "#3d8b3d",   # Darker green
+    "piano": "#3d7fb0",    # Darker blue
+    "other": "#3da8a8",    # Darker teal
+}
+
+STEM_COLORS = STEM_COLORS_DARK
+
+RECORDING_COLOR = "#d4849a"  # Brand rose -- used for recording stem rows
 
 DARK_COLORS = {
     "base": "#1e1e2e",

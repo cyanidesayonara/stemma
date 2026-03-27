@@ -28,12 +28,19 @@ from src.metronome import tap_tempo
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
-from src.ui.styles import DARK_COLORS, RECORDING_COLOR, STEM_COLORS
-from src.ui.waveform_widget import WaveformWidget
-from src.waveform import compute_peaks
+from src.ui.styles import (
+    DARK_COLORS,
+    RECORDING_COLOR,
+    STEM_COLORS_DARK,
+    STEM_COLORS_LIGHT,
+)
+from src.ui.waveform_widget import MiniWaveformWidget, WaveformWidget
+from src.waveform import compute_peaks, compute_stem_peaks
 
 _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
+_MAX_RECORDING_TAKES = 2
+_MINI_WAVEFORM_WIDTH = 250
 
 
 def _make_icon(draw_fn, color: QColor) -> QIcon:
@@ -87,20 +94,29 @@ class StemRow(QWidget):
     mix_changed = Signal()
 
     def __init__(self, stem_name: str, player: MultiTrackPlayer,
+                 theme: str = "dark",
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._stem_name = stem_name
         self._player = player
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setStyleSheet("background: transparent;")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setContentsMargins(4, 2, 4, 2)
 
-        color = STEM_COLORS.get(stem_name, "#95a5a6")
+        palette = STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
+        color = palette.get(stem_name, "#95a5a6")
 
         self._label = QLabel(stem_name.capitalize())
         self._label.setFixedWidth(70)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
         layout.addWidget(self._label)
+
+        self._mini_waveform = MiniWaveformWidget(color, player)
+        self._mini_waveform.seek_requested.connect(self._on_mini_seek)
+        layout.addWidget(self._mini_waveform, 1)
 
         self._mute_btn = QPushButton("M")
         self._mute_btn.setCheckable(True)
@@ -132,10 +148,13 @@ class StemRow(QWidget):
 
         self._vol_label = QLabel("100%")
         self._vol_label.setFixedWidth(45)
-        self._vol_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._vol_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         layout.addWidget(self._vol_label)
 
-        layout.addStretch()
+    def _on_mini_seek(self, seconds: float) -> None:
+        self._player.seek(seconds)
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
@@ -163,6 +182,18 @@ class StemRow(QWidget):
         """Programmatically set the volume slider (0-200)."""
         self._volume_slider.setValue(value)
 
+    def set_mini_peaks(self, peaks: "np.ndarray") -> None:
+        """Update the mini waveform with new peak data."""
+        self._mini_waveform.set_peaks(peaks)
+
+    def apply_stem_theme(self, theme: str) -> None:
+        """Update stem label and waveform color for the given theme."""
+        palette = STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
+        color = palette.get(self._stem_name, "#95a5a6")
+        self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self._mini_waveform._color = QColor(color)
+        self._mini_waveform.update()
+
 
 class RecordingStemRow(StemRow):
     """A stem row for a recording take, with delete and nudge controls."""
@@ -171,16 +202,23 @@ class RecordingStemRow(StemRow):
 
     def __init__(self, stem_name: str, display_name: str,
                  player: MultiTrackPlayer,
+                 theme: str = "dark",
                  parent: QWidget | None = None) -> None:
-        super().__init__(stem_name, player, parent)
+        super().__init__(stem_name, player, theme, parent)
 
         self._label.setText(display_name)
         self._label.setStyleSheet(
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
+        self._mini_waveform._color = QColor(RECORDING_COLOR)
 
         lay = self.layout()
-        insert_pos = lay.count() - 1  # before the final stretch
+        insert_pos = lay.count()
+
+        self._nudge_label = QLabel("Nudge:")
+        self._nudge_label.setFixedWidth(46)
+        lay.insertWidget(insert_pos, self._nudge_label)
+        insert_pos += 1
 
         self._nudge_spin = QSpinBox()
         self._nudge_spin.setRange(-200, 200)
@@ -193,6 +231,7 @@ class RecordingStemRow(StemRow):
         self._nudge_spin.setAccessibleName(f"Nudge {display_name}")
         self._nudge_spin.valueChanged.connect(self._on_nudge_changed)
         lay.insertWidget(insert_pos, self._nudge_spin)
+        insert_pos += 1
 
         self._delete_btn = QPushButton("X")
         self._delete_btn.setFixedSize(28, 28)
@@ -202,7 +241,7 @@ class RecordingStemRow(StemRow):
         self._delete_btn.clicked.connect(
             lambda: self.delete_requested.emit(self._stem_name)
         )
-        lay.insertWidget(insert_pos + 1, self._delete_btn)
+        lay.insertWidget(insert_pos, self._delete_btn)
 
     def _on_nudge_changed(self, value: int) -> None:
         self._player.nudge_stem(self._stem_name, float(value))
@@ -322,22 +361,22 @@ class PlayerControls(QWidget):
 
         controls_layout.addWidget(self._waveform_frame)
 
-        # -- A-B loop controls --
-        loop_bar = QHBoxLayout()
+        # -- Loop + Speed bar (merged) --
+        loop_speed_bar = QHBoxLayout()
 
         self._loop_a_btn = QPushButton("Set A")
         self._loop_a_btn.setFixedWidth(60)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
         self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
-        loop_bar.addWidget(self._loop_a_btn)
+        loop_speed_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
         self._loop_b_btn.setFixedWidth(60)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
         self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
-        loop_bar.addWidget(self._loop_b_btn)
+        loop_speed_bar.addWidget(self._loop_b_btn)
 
         self._loop_toggle_btn = QPushButton("Loop")
         self._loop_toggle_btn.setCheckable(True)
@@ -345,26 +384,23 @@ class PlayerControls(QWidget):
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
-        loop_bar.addWidget(self._loop_toggle_btn)
+        loop_speed_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
         self._loop_clear_btn.setFixedWidth(60)
         self._loop_clear_btn.setToolTip("Clear loop points")
         self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
-        loop_bar.addWidget(self._loop_clear_btn)
+        loop_speed_bar.addWidget(self._loop_clear_btn)
 
         self._loop_label = QLabel("")
         self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
-        loop_bar.addWidget(self._loop_label)
+        loop_speed_bar.addWidget(self._loop_label)
 
-        loop_bar.addStretch()
-        controls_layout.addLayout(loop_bar)
+        loop_speed_bar.addStretch()
 
-        # -- Speed control --
-        speed_bar = QHBoxLayout()
-
-        speed_bar.addWidget(QLabel("Speed:"))
+        self._speed_label = QLabel("Speed:")
+        loop_speed_bar.addWidget(self._speed_label)
 
         self._speed_combo = QComboBox()
         for preset in SPEED_PRESETS:
@@ -374,37 +410,19 @@ class PlayerControls(QWidget):
         self._speed_combo.setToolTip("Playback speed ([ / ])")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
-        speed_bar.addWidget(self._speed_combo)
+        loop_speed_bar.addWidget(self._speed_combo)
 
         self._speed_status = QLabel("")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
-        speed_bar.addWidget(self._speed_status)
+        loop_speed_bar.addWidget(self._speed_status)
 
-        speed_bar.addStretch()
-        controls_layout.addLayout(speed_bar)
+        controls_layout.addLayout(loop_speed_bar)
 
-        # -- Metronome --
-        metronome_bar = QHBoxLayout()
+        # -- Metronome + Count-in bar (merged) --
+        metro_ci_bar = QHBoxLayout()
 
-        metronome_bar.addWidget(QLabel("Metronome:"))
-
-        self._bpm_spin = QSpinBox()
-        self._bpm_spin.setRange(20, 300)
-        self._bpm_spin.setValue(120)
-        self._bpm_spin.setSuffix(" BPM")
-        self._bpm_spin.setFixedWidth(100)
-        self._bpm_spin.setToolTip("Metronome tempo")
-        self._bpm_spin.setAccessibleName("Metronome BPM")
-        self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
-        metronome_bar.addWidget(self._bpm_spin)
-
-        self._tap_times: list[float] = []
-        self._tap_btn = QPushButton("Tap")
-        self._tap_btn.setFixedWidth(60)
-        self._tap_btn.setToolTip("Tap to set tempo")
-        self._tap_btn.setAccessibleName("Tap tempo")
-        self._tap_btn.clicked.connect(self._on_tap)
-        metronome_bar.addWidget(self._tap_btn)
+        self._metro_label = QLabel("Metronome:")
+        metro_ci_bar.addWidget(self._metro_label)
 
         self._metronome_toggle = QPushButton()
         self._metronome_toggle.setCheckable(True)
@@ -413,33 +431,48 @@ class PlayerControls(QWidget):
         self._metronome_toggle.setAccessibleName("Toggle metronome")
         self._metronome_toggle.setText("M")
         self._metronome_toggle.toggled.connect(self._on_metronome_toggled)
-        metronome_bar.addWidget(self._metronome_toggle)
+        metro_ci_bar.addWidget(self._metronome_toggle)
+
+        self._bpm_spin = QSpinBox()
+        self._bpm_spin.setRange(20, 300)
+        self._bpm_spin.setValue(120)
+        self._bpm_spin.setSuffix(" BPM")
+        self._bpm_spin.setFixedWidth(110)
+        self._bpm_spin.setToolTip("Metronome tempo")
+        self._bpm_spin.setAccessibleName("Metronome BPM")
+        self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
+        metro_ci_bar.addWidget(self._bpm_spin)
+
+        self._tap_times: list[float] = []
+        self._tap_btn = QPushButton("Tap")
+        self._tap_btn.setFixedWidth(60)
+        self._tap_btn.setToolTip("Tap to set tempo")
+        self._tap_btn.setAccessibleName("Tap tempo")
+        self._tap_btn.clicked.connect(self._on_tap)
+        metro_ci_bar.addWidget(self._tap_btn)
 
         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._metronome_vol_slider.setRange(0, 200)
         self._metronome_vol_slider.setValue(50)
-        self._metronome_vol_slider.setFixedWidth(80)
+        self._metronome_vol_slider.setFixedWidth(70)
         self._metronome_vol_slider.setToolTip("Metronome volume")
         self._metronome_vol_slider.setAccessibleName("Metronome volume")
         self._metronome_vol_slider.valueChanged.connect(
             self._on_metronome_vol_changed
         )
-        metronome_bar.addWidget(self._metronome_vol_slider)
+        metro_ci_bar.addWidget(self._metronome_vol_slider)
 
         self._metronome_vol_label = QLabel("50%")
         self._metronome_vol_label.setFixedWidth(36)
         self._metronome_vol_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        metronome_bar.addWidget(self._metronome_vol_label)
+        metro_ci_bar.addWidget(self._metronome_vol_label)
 
-        metronome_bar.addStretch()
-        controls_layout.addLayout(metronome_bar)
+        metro_ci_bar.addStretch()
 
-        # -- Count-in --
-        count_in_bar = QHBoxLayout()
-
-        count_in_bar.addWidget(QLabel("Count-in:"))
+        self._ci_label = QLabel("Count-in:")
+        metro_ci_bar.addWidget(self._ci_label)
 
         self._count_in_toggle = QPushButton()
         self._count_in_toggle.setCheckable(True)
@@ -448,7 +481,7 @@ class PlayerControls(QWidget):
         self._count_in_toggle.setAccessibleName("Toggle count-in")
         self._count_in_toggle.setText("CI")
         self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
-        count_in_bar.addWidget(self._count_in_toggle)
+        metro_ci_bar.addWidget(self._count_in_toggle)
 
         self._count_in_beats_spin = QSpinBox()
         self._count_in_beats_spin.setRange(1, 8)
@@ -460,9 +493,9 @@ class PlayerControls(QWidget):
         self._count_in_beats_spin.valueChanged.connect(
             self._on_count_in_beats_changed
         )
-        count_in_bar.addWidget(self._count_in_beats_spin)
+        metro_ci_bar.addWidget(self._count_in_beats_spin)
 
-        self._count_in_repeats_cb = QCheckBox("Loop repeats")
+        self._count_in_repeats_cb = QCheckBox("Repeats")
         self._count_in_repeats_cb.setToolTip(
             "Also count in before each A-B loop repeat"
         )
@@ -472,31 +505,49 @@ class PlayerControls(QWidget):
         self._count_in_repeats_cb.toggled.connect(
             self._on_count_in_repeats_toggled
         )
-        count_in_bar.addWidget(self._count_in_repeats_cb)
+        metro_ci_bar.addWidget(self._count_in_repeats_cb)
 
         self._count_in_label = QLabel("")
-        self._count_in_label.setFixedWidth(60)
+        self._count_in_label.setFixedWidth(40)
         self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        count_in_bar.addWidget(self._count_in_label)
+        metro_ci_bar.addWidget(self._count_in_label)
 
-        count_in_bar.addStretch()
-        controls_layout.addLayout(count_in_bar)
+        controls_layout.addLayout(metro_ci_bar)
 
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")
         self._mixer_label.setObjectName("title-label")
         controls_layout.addWidget(self._mixer_label)
 
-        self._stem_container = QVBoxLayout()
-        controls_layout.addLayout(self._stem_container)
+        self._stems_frame = QFrame()
+        self._stems_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._stems_frame.setStyleSheet(
+            f"QFrame {{ background-color: {colors['mantle']}; "
+            f"border: 1px solid {colors['surface0']}; "
+            f"border-radius: 6px; }}"
+        )
+        self._stem_container = QVBoxLayout(self._stems_frame)
+        self._stem_container.setContentsMargins(6, 4, 6, 4)
+        self._stem_container.setSpacing(2)
+        controls_layout.addWidget(self._stems_frame)
 
         self._recordings_label = QLabel("Recordings")
         self._recordings_label.setObjectName("title-label")
         self._recordings_label.setVisible(False)
         controls_layout.addWidget(self._recordings_label)
 
-        self._recordings_container = QVBoxLayout()
-        controls_layout.addLayout(self._recordings_container)
+        self._recordings_frame = QFrame()
+        self._recordings_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._recordings_frame.setStyleSheet(
+            f"QFrame {{ background-color: {colors['mantle']}; "
+            f"border: 1px solid {colors['surface0']}; "
+            f"border-radius: 6px; }}"
+        )
+        self._recordings_frame.setVisible(False)
+        self._recordings_container = QVBoxLayout(self._recordings_frame)
+        self._recordings_container.setContentsMargins(6, 4, 6, 4)
+        self._recordings_container.setSpacing(2)
+        controls_layout.addWidget(self._recordings_frame)
 
         controls_layout.addStretch()
 
@@ -505,26 +556,25 @@ class PlayerControls(QWidget):
 
         # -- Footer bar --
         self._footer_widget = QWidget()
+        self._footer_widget.setFixedHeight(44)
         self._footer_widget.setStyleSheet(
             f"border-top: 1px solid {colors['surface0']};"
         )
         footer_layout = QHBoxLayout(self._footer_widget)
-        footer_layout.setContentsMargins(0, 4, 0, 4)
+        footer_layout.setContentsMargins(0, 5, 0, 2)
 
         self._copyright_label = QLabel("\u00A9 2026 stemma")
+        self._copyright_label.setFixedHeight(36)
+        self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._copyright_label.setStyleSheet(
             f"color: {colors['surface1']}; font-size: 9pt; border: none;"
         )
-        footer_layout.addWidget(
-            self._copyright_label, alignment=Qt.AlignmentFlag.AlignVCenter
-        )
+        footer_layout.addWidget(self._copyright_label)
 
         footer_layout.addStretch()
 
         self._arpeggio_label = AnimatedArpeggioWidget(self._theme)
-        footer_layout.addWidget(
-            self._arpeggio_label, alignment=Qt.AlignmentFlag.AlignVCenter
-        )
+        footer_layout.addWidget(self._arpeggio_label)
 
         layout.addWidget(self._footer_widget)
 
@@ -561,12 +611,20 @@ class PlayerControls(QWidget):
         self._arpeggio_label.set_theme(theme)
 
         # Waveform frame and colors
-        self._waveform_frame.setStyleSheet(
+        frame_style = (
             f"QFrame {{ background-color: {colors['mantle']}; "
             f"border: 1px solid {colors['surface0']}; "
             f"border-radius: 6px; }}"
         )
+        self._waveform_frame.setStyleSheet(frame_style)
+        self._stems_frame.setStyleSheet(frame_style)
+        self._recordings_frame.setStyleSheet(frame_style)
         self._waveform.set_theme_colors(colors)
+
+        for row in self._stem_rows.values():
+            row.apply_stem_theme(theme)
+        for row in self._recording_rows.values():
+            row.apply_stem_theme(theme)
 
     def play_intro_animation(self, with_sound: bool = False) -> None:
         """Trigger the main logo's intro animation (notes + waves)."""
@@ -591,7 +649,7 @@ class PlayerControls(QWidget):
         self._controls_widget.setVisible(has_stems)
 
         for name in stem_names:
-            row = StemRow(name, self._player)
+            row = StemRow(name, self._player, self._theme)
             row.mix_changed.connect(self._recompute_peaks)
             self._stem_container.addWidget(row)
             self._stem_rows[name] = row
@@ -724,6 +782,15 @@ class PlayerControls(QWidget):
         )
         self._waveform.set_peaks(peaks)
         self._waveform.set_total_seconds(self._player.total_seconds)
+
+        for name, row in self._stem_rows.items():
+            if name in stems:
+                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
+                row.set_mini_peaks(stem_peaks)
+        for name, row in self._recording_rows.items():
+            if name in stems:
+                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
+                row.set_mini_peaks(stem_peaks)
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""
@@ -930,12 +997,13 @@ class PlayerControls(QWidget):
     ) -> RecordingStemRow:
         """Add a recording take row to the recordings section."""
         row = RecordingStemRow(
-            stem_name, display_name, self._player
+            stem_name, display_name, self._player, self._theme
         )
         row.mix_changed.connect(self._recompute_peaks)
         self._recordings_container.addWidget(row)
         self._recording_rows[stem_name] = row
         self._recordings_label.setVisible(True)
+        self._recordings_frame.setVisible(True)
         return row
 
     def remove_recording_row(self, stem_name: str) -> None:
@@ -946,6 +1014,7 @@ class PlayerControls(QWidget):
             row.deleteLater()
         if not self._recording_rows:
             self._recordings_label.setVisible(False)
+            self._recordings_frame.setVisible(False)
 
     def clear_recording_rows(self) -> None:
         """Remove all recording rows."""
@@ -954,6 +1023,17 @@ class PlayerControls(QWidget):
             row.deleteLater()
         self._recording_rows.clear()
         self._recordings_label.setVisible(False)
+        self._recordings_frame.setVisible(False)
+
+    @property
+    def recording_count(self) -> int:
+        """Return the number of recording take rows currently shown."""
+        return len(self._recording_rows)
+
+    @property
+    def max_recordings_reached(self) -> bool:
+        """Return True if the maximum number of recording takes is reached."""
+        return len(self._recording_rows) >= _MAX_RECORDING_TAKES
 
     def update_record_button_state(self) -> None:
         """Sync Record button enabled state with current speed."""

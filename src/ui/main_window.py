@@ -675,6 +675,7 @@ class MainWindow(QMainWindow):
         )
         self._player_controls._record_btn.blockSignals(False)
         self._player_controls._do_recompute_peaks()
+        self._update_record_button_for_take_limit()
 
     def _add_recording_stem(
         self, stem_name: str, path: str, display: str
@@ -688,6 +689,20 @@ class MainWindow(QMainWindow):
             stem_name, display
         )
         row.delete_requested.connect(self._on_delete_recording)
+
+    def _update_record_button_for_take_limit(self) -> None:
+        """Disable the record button when the max recording limit is reached."""
+        if self._player_controls.max_recordings_reached:
+            self._player.arm_recording(False)
+            self._player_controls._record_btn.blockSignals(True)
+            self._player_controls._record_btn.setChecked(False)
+            self._player_controls._record_btn.setEnabled(False)
+            self._player_controls._record_btn.setToolTip(
+                "Maximum of 2 recording takes reached"
+            )
+            self._player_controls._record_btn.blockSignals(False)
+        else:
+            self._player_controls.update_record_button_state()
 
     def _on_delete_recording(self, stem_name: str) -> None:
         """Delete a recording take from disk and player."""
@@ -714,6 +729,7 @@ class MainWindow(QMainWindow):
         self._player.remove_recording_stem(stem_name)
         self._player_controls.remove_recording_row(stem_name)
         self._player_controls._do_recompute_peaks()
+        self._update_record_button_for_take_limit()
 
     def _on_close_song(self) -> None:
         """Stop playback and return to the empty logo state."""

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.waveform import compute_peaks
+from src.waveform import compute_peaks, compute_stem_peaks
 
 
 class TestComputePeaks:
@@ -90,3 +90,32 @@ class TestComputePeaks:
                               volumes={}, num_bins=10)
         # Sum of 0.3 + 0.2 = 0.5
         np.testing.assert_allclose(peaks, 0.5, atol=1e-6)
+
+
+class TestComputeStemPeaks:
+    """Tests for the single-stem peak computation."""
+
+    def test_basic_shape(self):
+        audio = np.full((1000, 2), 0.5, dtype=np.float32)
+        peaks = compute_stem_peaks(audio, num_bins=10)
+        assert peaks.shape == (10,)
+        np.testing.assert_allclose(peaks, 0.5, atol=1e-6)
+
+    def test_spike_in_single_bin(self):
+        audio = np.zeros((100, 2), dtype=np.float32)
+        audio[50, 0] = 0.9
+        peaks = compute_stem_peaks(audio, num_bins=10)
+        assert np.max(peaks) == pytest.approx(0.9, abs=1e-6)
+
+    def test_empty_audio(self):
+        audio = np.zeros((0, 2), dtype=np.float32)
+        peaks = compute_stem_peaks(audio, num_bins=10)
+        assert peaks.shape == (10,)
+        np.testing.assert_allclose(peaks, 0.0)
+
+    def test_stereo_takes_max_channel(self):
+        audio = np.zeros((100, 2), dtype=np.float32)
+        audio[:, 0] = 0.3
+        audio[:, 1] = 0.7
+        peaks = compute_stem_peaks(audio, num_bins=5)
+        np.testing.assert_allclose(peaks, 0.7, atol=1e-6)
