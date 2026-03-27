@@ -35,6 +35,25 @@ _OUT_DIR = os.path.join(_ROOT, "assets", "store_listing")
 # Catppuccin Mocha base (matches app dark theme)
 _BG = (30, 30, 46, 255)
 
+# Vertical gap between chord and arpeggio: at least 50% of final arpeggio pixel
+# height. The arpeggio SVG is a wide strip, so ah is modest (e.g. ~102px at
+# poster width); 50% of ah can equal the old fixed ~4.8% canvas gap by accident,
+# so we also enforce a small minimum as a fraction of canvas height when that
+# yields more space (tall frames, thin strip).
+_GAP_ARPEGGIO_H_FRAC = 0.5
+_GAP_MIN_CANVAS_FRAC = 0.072
+
+# Extra vertical space (Partner Center art): poster is portrait, box is square.
+_GAP_EXTRA_POSTER_PX = 200
+_GAP_EXTRA_BOX_PX = 100
+
+
+def _vertical_gap_between_logos(ah: int, canvas_h: int, extra_px: int = 0) -> int:
+    """Space between main (chord) and arpeggio logos in pixels."""
+    half_arp = max(8, int(round(ah * _GAP_ARPEGGIO_H_FRAC)))
+    min_canvas = max(8, int(round(canvas_h * _GAP_MIN_CANVAS_FRAC)))
+    return max(half_arp, min_canvas) + max(0, extra_px)
+
 
 def _ensure_qt() -> None:
     from PySide6.QtWidgets import QApplication
@@ -94,6 +113,15 @@ def _fit_rgba(src: Image.Image, max_w: int, max_h: int) -> Image.Image:
     return src.resize((nw, nh), Image.Resampling.LANCZOS)
 
 
+def _scale_to_max_width(im: Image.Image, max_w: int) -> Image.Image:
+    """Shrink image so width is at most max_w (keeps aspect). No upscale."""
+    w, h = im.size
+    if w <= max_w:
+        return im
+    new_h = max(1, int(round(h * (max_w / w))))
+    return im.resize((max_w, new_h), Image.Resampling.LANCZOS)
+
+
 def _svg_trim_fit(svg_path: str, max_w: int, max_h: int, supersample: int = 2) -> Image.Image:
     """Rasterize SVG, trim empty margins, scale to fit max_w x max_h.
 
@@ -124,13 +152,14 @@ def main() -> None:
     main_max_h = int(poster_h * 0.50)
     arp_max_w = poster_w - 2 * pad_x
     arp_max_h = int(poster_h * 0.26)
-    gap = int(poster_h * 0.035)
 
     main_p = _svg_trim_fit(_MAIN_SVG, main_max_w, main_max_h, supersample=2)
-    arp_p = _svg_trim_fit(_ARP_SVG, arp_max_w, arp_max_h, supersample=2)
-
     mw, mh = main_p.size
+    arp_p = _svg_trim_fit(_ARP_SVG, arp_max_w, arp_max_h, supersample=2)
+    arp_p = _scale_to_max_width(arp_p, mw)
+
     aw, ah = arp_p.size
+    gap = _vertical_gap_between_logos(ah, poster_h, _GAP_EXTRA_POSTER_PX)
     total_h = mh + gap + ah
     y0 = (poster_h - total_h) // 2
 
@@ -138,7 +167,10 @@ def main() -> None:
     _paste_xy(c_poster, main_p, (poster_w - mw) // 2, y0)
     _paste_xy(c_poster, arp_p, (poster_w - aw) // 2, y0 + mh + gap)
     c_poster.save(os.path.join(_OUT_DIR, "poster_720x1080.png"), optimize=True)
-    print(f"  poster_720x1080.png ({poster_w}x{poster_h}) [main + arpeggio, centered stack]")
+    print(
+        f"  poster_720x1080.png ({poster_w}x{poster_h}) "
+        f"[gap={gap}px, arpeggio_h={ah}px]"
+    )
 
     # -- Box: same layout logic in 1080 square --
     box_s = 1080
@@ -147,13 +179,14 @@ def main() -> None:
     main_max_h_b = int(box_s * 0.48)
     arp_max_w_b = box_s - 2 * pad_x_b
     arp_max_h_b = int(box_s * 0.24)
-    gap_b = int(box_s * 0.032)
 
     main_b = _svg_trim_fit(_MAIN_SVG, main_max_w_b, main_max_h_b, supersample=2)
-    arp_b = _svg_trim_fit(_ARP_SVG, arp_max_w_b, arp_max_h_b, supersample=2)
-
     mbw, mbh = main_b.size
+    arp_b = _svg_trim_fit(_ARP_SVG, arp_max_w_b, arp_max_h_b, supersample=2)
+    arp_b = _scale_to_max_width(arp_b, mbw)
+
     abw, abh = arp_b.size
+    gap_b = _vertical_gap_between_logos(abh, box_s, _GAP_EXTRA_BOX_PX)
     total_h_b = mbh + gap_b + abh
     y0_b = (box_s - total_h_b) // 2
 
@@ -161,7 +194,7 @@ def main() -> None:
     _paste_xy(c_box, main_b, (box_s - mbw) // 2, y0_b)
     _paste_xy(c_box, arp_b, (box_s - abw) // 2, y0_b + mbh + gap_b)
     c_box.save(os.path.join(_OUT_DIR, "box_1080x1080.png"), optimize=True)
-    print(f"  box_1080x1080.png ({box_s}x{box_s}) [main + arpeggio, centered stack]")
+    print(f"  box_1080x1080.png ({box_s}x{box_s}) [gap={gap_b}px, arpeggio_h={abh}px]")
 
     # -- Tiles: larger fill, trimmed chord logo, dead center --
     for name, size, margin_pct in (

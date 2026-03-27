@@ -4,6 +4,17 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-27 -- v2.0.1 splash and Store listing
+
+### Done
+- **Splash screen:** Letter animation stays visible when the event loop is blocked during heavy imports: minimum paint-frame check resets the animation timeline in `finish()` so letters fade in over the full minimum display window. Sound defers when the second paint arrives late (blocked loop) so the arpeggio is not started twice; one playback aligns with the resynced animation. Bitmap `drawText` for letters (reliable on Windows); `finish()` measures minimum display time from animation start via `_sound_start_ms`.
+- **Store listing PNGs:** `generate_store_listing_assets.py` -- wider vertical gap between chord and arpeggio (poster/box), optional extra margin constants, arpeggio width capped to chord width. Regenerated `poster_720x1080.png` and `box_1080x1080.png`.
+
+### Metrics
+- Splash tests expanded; full `pytest` suite unchanged in scope.
+
+---
+
 ## 2026-03-26 -- Animated logos and splash sync fix (#76)
 
 ### Done

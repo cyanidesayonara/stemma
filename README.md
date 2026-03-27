@@ -87,7 +87,7 @@ Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bi
 - **CHANGELOG.md** -- Development history
 - **docs/privacy-policy.md** -- Store privacy policy (Markdown)
 - **docs/privacy-policy-plain.txt** -- Same policy as plain text (Partner Center paste)
-- **assets/store_listing/** -- Generated Store listing images (see `scripts/generate_store_listing_assets.py`)
+- **assets/store_listing/** -- Store listing PNGs (poster/box: main + arpeggio SVGs; tiny icon: `icon_256.png`); see `scripts/generate_store_listing_assets.py`
 
 ## License
 

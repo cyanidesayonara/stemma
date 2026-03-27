@@ -13,6 +13,7 @@ from src.ui.splash_screen import (
     _CLEF_DELAY_MS,
     _FADE_MS,
     _LETTERS,
+    _MIN_ANIM_FRAMES,
     _MIN_DISPLAY_MS,
     _NOTE_SPACING_MS,
     _make_base_svg,
@@ -118,9 +119,9 @@ class TestSplashScreenFinish:
     def test_finish_shows_main_window(self, app):
         splash = SplashScreen(theme="dark", play_sound=False)
         splash.start()
-        splash._clock.restart()
 
         main_win = QWidget()
+        splash._sound_start_ms = 0
         splash._clock = MagicMock()
         splash._clock.isValid.return_value = True
         splash._clock.elapsed.return_value = _MIN_DISPLAY_MS + 100
@@ -141,6 +142,7 @@ class TestSplashScreenFinish:
         splash = SplashScreen(theme="dark", play_sound=False)
         splash.start()
 
+        splash._sound_start_ms = 0
         splash._clock = MagicMock()
         splash._clock.isValid.return_value = True
         splash._clock.elapsed.return_value = 100
@@ -148,6 +150,37 @@ class TestSplashScreenFinish:
         main_win = QWidget()
         splash.finish(main_win)
         assert splash.isVisible()
+        splash.close()
+
+    def test_finish_resyncs_when_animation_never_painted(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+
+        splash._sound_start_ms = 600
+        splash._anim_paint_count = 1
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 9000
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        assert splash.isVisible()
+        assert splash._sound_start_ms == 9000
+        splash.close()
+
+    def test_finish_no_resync_when_animation_played(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+
+        splash._sound_start_ms = 600
+        splash._anim_paint_count = _MIN_ANIM_FRAMES + 1
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 9000
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        assert splash._sound_start_ms == 600
         splash.close()
 
     def test_double_finish_is_safe(self, app):
@@ -230,24 +263,54 @@ class TestSoundSync:
         assert splash._sound_started is True
         splash.close()
 
-    def test_clock_restarted_on_long_gap(self, app):
-        splash = SplashScreen(theme="dark", play_sound=False)
+    @patch("src.ui.splash_screen.os.path.isfile", return_value=True)
+    @patch("src.ui.splash_screen.winsound.PlaySound")
+    def test_sound_deferred_when_frame2_is_late(self, mock_play, _isfile, app):
+        splash = SplashScreen(
+            theme="dark", play_sound=True, audio_path="fake.wav"
+        )
         splash.start()
         splash._clock = MagicMock()
         splash._clock.isValid.return_value = True
         splash._clock.elapsed.return_value = 600
         splash.repaint()
-        splash._clock.restart.assert_called_once()
+        mock_play.assert_not_called()
+        assert splash._sound_played_on_frame2 is False
         splash.close()
 
-    def test_clock_not_restarted_on_short_gap(self, app):
-        splash = SplashScreen(theme="dark", play_sound=False)
+    @patch("src.ui.splash_screen.os.path.isfile", return_value=True)
+    @patch("src.ui.splash_screen.winsound.PlaySound")
+    def test_sound_plays_when_frame2_is_prompt(self, mock_play, _isfile, app):
+        splash = SplashScreen(
+            theme="dark", play_sound=True, audio_path="fake.wav"
+        )
         splash.start()
         splash._clock = MagicMock()
         splash._clock.isValid.return_value = True
         splash._clock.elapsed.return_value = 50
         splash.repaint()
-        splash._clock.restart.assert_not_called()
+        mock_play.assert_called_once()
+        assert splash._sound_played_on_frame2 is True
+        splash.close()
+
+    def test_sound_start_offset_recorded(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 5000
+        splash.repaint()
+        assert splash._sound_start_ms == 5000
+        splash.close()
+
+    def test_anim_paint_count_increments_after_sound(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        assert splash._anim_paint_count == 0
+        splash.repaint()
+        assert splash._anim_paint_count == 1
+        splash.repaint()
+        assert splash._anim_paint_count == 2
         splash.close()
 
 

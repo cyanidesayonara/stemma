@@ -69,6 +69,14 @@ _MIN_DISPLAY_MS = 1800
 _ANIM_END_MS = _CLEF_DELAY_MS + 5 * _NOTE_SPACING_MS + _FADE_MS
 _FRAME_MS = 33
 
+_MIN_ANIM_FRAMES = 5
+
+# If the second paint arrives this long after startup, the gap between
+# frames was dominated by a blocked event loop (heavy import).  Do not
+# start the arpeggio then -- it will play once in finish() when the
+# animation is resynced, avoiding a fragment of audio before a restart.
+_SOUND_DEFER_IF_FRAME2_AFTER_MS = 400
+
 def _make_base_svg(line_color: str, clef_color: str) -> str:
     lines = "\n".join(
         f'  <line x1="12" y1="{y}" x2="408" y2="{y}" '
@@ -136,6 +144,9 @@ class SplashScreen(QWidget):
         self._finishing = False
         self._sound_started = False
         self._frame_count = 0
+        self._sound_start_ms = 0
+        self._anim_paint_count = 0
+        self._sound_played_on_frame2 = False
 
     def start(self) -> None:
         """Show the splash and begin the animation + optional sound.
@@ -153,9 +164,10 @@ class SplashScreen(QWidget):
     def finish(self, main_window: QWidget) -> None:
         """Transition from splash to *main_window*.
 
-        Waits for the minimum display time so the animation plays through,
-        then fades out the splash and shows the main window.  Safe to call
-        more than once; subsequent calls are ignored.
+        If the event loop was blocked for the entire period between sound
+        start and now (i.e. zero animation frames actually rendered), the
+        animation origin is reset to the current moment so the full
+        letter sequence plays during the remaining wait.
         """
         if self._finishing:
             return
@@ -167,7 +179,13 @@ class SplashScreen(QWidget):
             return
 
         elapsed = self._clock.elapsed() if self._clock.isValid() else _MIN_DISPLAY_MS
-        remaining = max(0, _MIN_DISPLAY_MS - elapsed)
+
+        if self._anim_paint_count < _MIN_ANIM_FRAMES:
+            self._sound_start_ms = elapsed
+            self._replay_sound()
+
+        anim_elapsed = max(0, elapsed - self._sound_start_ms)
+        remaining = max(0, _MIN_DISPLAY_MS - anim_elapsed)
         if remaining > 0:
             QTimer.singleShot(remaining, self._begin_fade_out)
         else:
@@ -193,12 +211,15 @@ class SplashScreen(QWidget):
     # -- painting -------------------------------------------------------
 
     def _try_start_sound(self, elapsed: int) -> None:
-        """Start the arpeggio sound, restarting the clock if needed.
+        """Start the arpeggio sound on the second rendered frame (if early).
 
-        On the second rendered frame, if the elapsed time exceeds a
-        threshold it means the event loop was blocked by heavy imports.
-        Restarting the clock re-aligns the letter animation with the
-        sound that is about to play.
+        Sound is skipped when the gap before frame 2 is large (blocked event
+        loop): playback starts once in ``finish()`` when the animation is
+        resynced, avoiding a fragment of audio before that restart.
+
+        Records the clock offset so the letter animation timeline begins
+        from this moment.  The clock itself is never restarted -- that
+        would confuse ``finish()`` which also reads it.
         """
         if self._sound_started:
             return
@@ -206,23 +227,28 @@ class SplashScreen(QWidget):
         if self._frame_count < 2:
             return
         self._sound_started = True
+        self._sound_start_ms = elapsed
         if (
             self._play_sound
             and self._audio_path
             and os.path.isfile(self._audio_path)
         ):
-            winsound.PlaySound(
-                self._audio_path,
-                winsound.SND_ASYNC | winsound.SND_FILENAME,
-            )
-        if elapsed > 150:
-            self._clock.restart()
+            if elapsed <= _SOUND_DEFER_IF_FRAME2_AFTER_MS:
+                winsound.PlaySound(
+                    self._audio_path,
+                    winsound.SND_ASYNC | winsound.SND_FILENAME,
+                )
+                self._sound_played_on_frame2 = True
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        raw_elapsed = self._clock.elapsed() if self._clock.isValid() else 0
-        self._try_start_sound(raw_elapsed)
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
-        sync_elapsed = max(0, elapsed - SPLASH_SOUND_SYNC_MS)
+        self._try_start_sound(elapsed)
+        anim_elapsed = max(0, elapsed - self._sound_start_ms)
+        sync_elapsed = max(0, anim_elapsed - SPLASH_SOUND_SYNC_MS)
+
+        if self._sound_started:
+            self._anim_paint_count += 1
+
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
@@ -272,6 +298,18 @@ class SplashScreen(QWidget):
         if elapsed_ms < onset:
             return 0.0
         return min(1.0, (elapsed_ms - onset) / _FADE_MS)
+
+    def _replay_sound(self) -> None:
+        """Restart the arpeggio sound to sync with a reset animation."""
+        if (
+            self._play_sound
+            and self._audio_path
+            and os.path.isfile(self._audio_path)
+        ):
+            winsound.PlaySound(
+                self._audio_path,
+                winsound.SND_ASYNC | winsound.SND_FILENAME,
+            )
 
     # -- helpers --------------------------------------------------------
 
