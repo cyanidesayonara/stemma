@@ -164,7 +164,10 @@ class SeparatorWorker(QThread):
     def _create_session(self):
         """Create an ONNX Runtime inference session.
 
-        Attempts DirectML first for GPU acceleration, falling back to CPU.
+        Attempts DirectML first for GPU acceleration.  Some devices list
+        ``DmlExecutionProvider`` but raise ``RUNTIME_EXCEPTION`` during
+        session init (e.g. certain integrated GPUs); in that case we retry
+        with CPU only.
 
         Returns:
             An onnxruntime.InferenceSession instance.
@@ -176,12 +179,23 @@ class SeparatorWorker(QThread):
                 f"ONNX model file not found: {self.model_path}"
             )
 
-        providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
         session_options = ort.SessionOptions()
+        available = set(ort.get_available_providers())
+
+        if "DmlExecutionProvider" in available:
+            try:
+                return ort.InferenceSession(
+                    self.model_path,
+                    sess_options=session_options,
+                    providers=["DmlExecutionProvider", "CPUExecutionProvider"],
+                )
+            except Exception:
+                pass
+
         return ort.InferenceSession(
             self.model_path,
             sess_options=session_options,
-            providers=providers,
+            providers=["CPUExecutionProvider"],
         )
 
     def _run_segmented_inference(
