@@ -99,10 +99,15 @@ stemma/
     test_audio_sync.py
     test_wav_playback.py
   assets/
-    icons/             # SVG logos, .ico app icon
+    icons/             # SVG logos, .ico app icon, PNGs
     audio/             # Startup arpeggio WAV
+    msix/              # Generated MSIX visual assets (Store logos)
+  msix/
+    AppxManifest.xml   # MSIX Desktop Bridge manifest (Store identity)
   scripts/
     generate_startup_audio.py  # One-time audio asset generator
+    generate_msix_assets.py    # Generate MSIX PNGs from icon_256.png
+    build_msix.ps1             # Pack PyInstaller output into .msix
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
@@ -172,10 +177,12 @@ All core functionality implemented and tested:
 ### v1.2.0 Release -- Shipped
 - [x] Record audio track: full-duplex recording, multiple takes, input device, latency compensation (#79, PR #91)
 
-### v2.0 Roadmap
-- [ ] Animated arpeggio startup logo (#76)
-- [ ] MSIX packaging for Microsoft Store (#74)
-- [ ] UI/UX redesign, per-stem waveforms, post-recording track adjustment (#92)
+### v2.0 Release
+- [x] Animated arpeggio startup logo (#76, PR #94)
+- [x] UI/UX redesign, per-stem waveforms, post-recording track adjustment (#92, PR #101, #102)
+- [x] Export enhancements: A-B loop region, count-in (#98, #99, PR #101)
+- [x] Post-recording track nudge (#100, PR #101)
+- [x] MSIX packaging for Microsoft Store (#74)
 
 ### Post-2.0 Backlog
 - [ ] Tempo/key detection and beat-synced metronome (#42)
@@ -185,7 +192,7 @@ All core functionality implemented and tested:
 ## Test Suite
 
 ```
-pytest                                    # ~488 fast tests (~10s)
+pytest                                    # ~527 fast tests (~17s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
