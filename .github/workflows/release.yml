@@ -44,10 +44,16 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "dist/stemma/*" -DestinationPath "dist/stemma.zip"
 
+      - name: Build MSIX package
+        shell: pwsh
+        run: .\scripts\build_msix.ps1 -Output "dist/stemma.msix"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/stemma.zip
+          files: |
+            dist/stemma.zip
+            dist/stemma.msix
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
