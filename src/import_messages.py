@@ -20,6 +20,23 @@ def format_import_error(message: str, max_len: int = 400) -> str:
         return "Secure connection failed. Check your network or system date."
     if "interruptederror" in low or "cancelled" in low:
         return "The operation was cancelled."
+    if "onnxruntimeerror" in low or "runtime_exception" in low:
+        return (
+            "Stem separation failed to initialize. "
+            "Try closing other apps to free memory, then retry."
+        )
+    if (
+        "out of memory" in low
+        or "ran out of memory" in low
+        or "bad_alloc" in low
+        or "bad alloc" in low
+        or "std::bad_alloc" in low
+        or "failed to allocate" in low
+    ):
+        return (
+            "Not enough memory for stem separation. "
+            "Close other apps or try a shorter audio file."
+        )
     if "http error 404" in low or ("404" in low and "not found" in low):
         return "Download failed: file not found on the server."
     if "http error" in low:

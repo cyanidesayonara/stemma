@@ -1,6 +1,7 @@
 """Tests for the stem separation engine."""
 
 import os
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -158,6 +159,63 @@ class TestSeparatorCreateSession:
         )
         with pytest.raises(FileNotFoundError, match="ONNX model file not found"):
             worker._create_session()
+
+    @patch("onnxruntime.get_available_providers")
+    @patch("onnxruntime.InferenceSession")
+    def test_cpu_fallback_when_dml_init_fails(
+        self, mock_infer, mock_providers, tmp_dir, sample_audio_path
+    ):
+        model_path = os.path.join(tmp_dir, "model.onnx")
+        with open(model_path, "wb") as f:
+            f.write(b"x")
+
+        mock_providers.return_value = [
+            "DmlExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        cpu_session = MagicMock()
+
+        def side_effect(*_a, **kw):
+            prov = kw.get("providers", ())
+            if prov and prov[0] == "DmlExecutionProvider":
+                raise RuntimeError(
+                    "ONNXRuntimeError : 6 : RUNTIME_EXCEPTION : init failed"
+                )
+            return cpu_session
+
+        mock_infer.side_effect = side_effect
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=tmp_dir,
+            model_path=model_path,
+        )
+        sess = worker._create_session()
+        assert sess is cpu_session
+        assert mock_infer.call_count == 2
+        second_kw = mock_infer.call_args_list[1][1]
+        assert second_kw["providers"] == ["CPUExecutionProvider"]
+
+    @patch("onnxruntime.get_available_providers")
+    @patch("onnxruntime.InferenceSession")
+    def test_cpu_only_when_dml_not_available(
+        self, mock_infer, mock_providers, tmp_dir, sample_audio_path
+    ):
+        model_path = os.path.join(tmp_dir, "model.onnx")
+        with open(model_path, "wb") as f:
+            f.write(b"x")
+
+        mock_providers.return_value = ["CPUExecutionProvider"]
+        cpu_session = MagicMock()
+        mock_infer.return_value = cpu_session
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=tmp_dir,
+            model_path=model_path,
+        )
+        sess = worker._create_session()
+        assert sess is cpu_session
+        mock_infer.assert_called_once()
+        assert mock_infer.call_args[1]["providers"] == ["CPUExecutionProvider"]
 
 
 class TestSeparatorSTFT:
