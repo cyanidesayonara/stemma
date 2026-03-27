@@ -8,11 +8,11 @@ All notable development sessions are documented here in reverse chronological or
 
 ### Done
 - **ONNX CPU fallback:** `_create_session()` now tries DirectML first, but if session creation raises (e.g. `RUNTIME_EXCEPTION` on Surface Go 4 integrated GPU), retries with `CPUExecutionProvider` only. Fixes Store certification failure 10.1.2.10 ("Import & Separate unusable").
-- **ONNX error messages:** `import_messages.py` maps raw `ONNXRuntimeError` and out-of-memory exceptions to user-friendly text instead of showing the full traceback.
+- **ONNX error messages:** `import_messages.py` maps raw `ONNXRuntimeError` and out-of-memory style messages to user-friendly text. OOM matching uses specific phrases (`bad_alloc`, `failed to allocate`, etc.), not a bare ``alloc`` substring.
 - **MSIX manifest:** Version updated to 2.0.2.0.
 
 ### Metrics
-- New unit tests for DML-fail->CPU fallback and DML-not-available paths.
+- New unit tests for DML-fail->CPU fallback, DML-not-available paths, and `format_import_error` ONNX/OOM branches.
 
 ---
 

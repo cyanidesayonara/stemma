@@ -27,3 +27,25 @@ class TestFormatImportError:
 
     def test_short_passthrough(self):
         assert format_import_error("Custom failure") == "Custom failure"
+
+    def test_onnx_runtime_exception(self):
+        raw = (
+            "ONNXRuntimeError: 6 : RUNTIME_EXCEPTION : Exception during initialization"
+        )
+        out = format_import_error(raw)
+        assert "stem separation" in out.lower()
+        assert "memory" in out.lower() or "retry" in out.lower()
+
+    def test_out_of_memory_phrases(self):
+        for raw in (
+            "RuntimeError: out of memory",
+            "std::bad_alloc",
+            "failed to allocate 9000000000 bytes",
+        ):
+            out = format_import_error(raw)
+            assert "memory" in out.lower()
+
+    def test_arbitrary_alloc_substring_not_oom(self):
+        """Avoid matching unrelated text that only contains 'alloc'."""
+        out = format_import_error("reallocation of vector failed: invalid state")
+        assert out == "reallocation of vector failed: invalid state"

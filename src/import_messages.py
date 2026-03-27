@@ -25,7 +25,14 @@ def format_import_error(message: str, max_len: int = 400) -> str:
             "Stem separation failed to initialize. "
             "Try closing other apps to free memory, then retry."
         )
-    if "out of memory" in low or "alloc" in low:
+    if (
+        "out of memory" in low
+        or "ran out of memory" in low
+        or "bad_alloc" in low
+        or "bad alloc" in low
+        or "std::bad_alloc" in low
+        or "failed to allocate" in low
+    ):
         return (
             "Not enough memory for stem separation. "
             "Close other apps or try a shorter audio file."
