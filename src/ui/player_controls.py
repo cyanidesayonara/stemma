@@ -322,49 +322,46 @@ class PlayerControls(QWidget):
 
         controls_layout.addWidget(self._waveform_frame)
 
-        # -- A-B loop controls --
-        loop_bar = QHBoxLayout()
+        # -- Loop + Speed bar (merged) --
+        loop_speed_bar = QHBoxLayout()
 
         self._loop_a_btn = QPushButton("Set A")
-        self._loop_a_btn.setFixedWidth(60)
+        self._loop_a_btn.setFixedWidth(52)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
         self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
-        loop_bar.addWidget(self._loop_a_btn)
+        loop_speed_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
-        self._loop_b_btn.setFixedWidth(60)
+        self._loop_b_btn.setFixedWidth(52)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
         self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
-        loop_bar.addWidget(self._loop_b_btn)
+        loop_speed_bar.addWidget(self._loop_b_btn)
 
         self._loop_toggle_btn = QPushButton("Loop")
         self._loop_toggle_btn.setCheckable(True)
-        self._loop_toggle_btn.setFixedWidth(60)
+        self._loop_toggle_btn.setFixedWidth(52)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
-        loop_bar.addWidget(self._loop_toggle_btn)
+        loop_speed_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
-        self._loop_clear_btn.setFixedWidth(60)
+        self._loop_clear_btn.setFixedWidth(52)
         self._loop_clear_btn.setToolTip("Clear loop points")
         self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
-        loop_bar.addWidget(self._loop_clear_btn)
+        loop_speed_bar.addWidget(self._loop_clear_btn)
 
         self._loop_label = QLabel("")
         self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
-        loop_bar.addWidget(self._loop_label)
+        loop_speed_bar.addWidget(self._loop_label)
 
-        loop_bar.addStretch()
-        controls_layout.addLayout(loop_bar)
+        loop_speed_bar.addStretch()
 
-        # -- Speed control --
-        speed_bar = QHBoxLayout()
-
-        speed_bar.addWidget(QLabel("Speed:"))
+        self._speed_label = QLabel("Speed:")
+        loop_speed_bar.addWidget(self._speed_label)
 
         self._speed_combo = QComboBox()
         for preset in SPEED_PRESETS:
@@ -374,19 +371,25 @@ class PlayerControls(QWidget):
         self._speed_combo.setToolTip("Playback speed ([ / ])")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
-        speed_bar.addWidget(self._speed_combo)
+        loop_speed_bar.addWidget(self._speed_combo)
 
         self._speed_status = QLabel("")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
-        speed_bar.addWidget(self._speed_status)
+        loop_speed_bar.addWidget(self._speed_status)
 
-        speed_bar.addStretch()
-        controls_layout.addLayout(speed_bar)
+        controls_layout.addLayout(loop_speed_bar)
 
-        # -- Metronome --
-        metronome_bar = QHBoxLayout()
+        # -- Metronome + Count-in bar (merged) --
+        metro_ci_bar = QHBoxLayout()
 
-        metronome_bar.addWidget(QLabel("Metronome:"))
+        self._metronome_toggle = QPushButton()
+        self._metronome_toggle.setCheckable(True)
+        self._metronome_toggle.setFixedSize(36, 36)
+        self._metronome_toggle.setToolTip("Toggle metronome (M)")
+        self._metronome_toggle.setAccessibleName("Toggle metronome")
+        self._metronome_toggle.setText("M")
+        self._metronome_toggle.toggled.connect(self._on_metronome_toggled)
+        metro_ci_bar.addWidget(self._metronome_toggle)
 
         self._bpm_spin = QSpinBox()
         self._bpm_spin.setRange(20, 300)
@@ -396,50 +399,35 @@ class PlayerControls(QWidget):
         self._bpm_spin.setToolTip("Metronome tempo")
         self._bpm_spin.setAccessibleName("Metronome BPM")
         self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
-        metronome_bar.addWidget(self._bpm_spin)
+        metro_ci_bar.addWidget(self._bpm_spin)
 
         self._tap_times: list[float] = []
         self._tap_btn = QPushButton("Tap")
-        self._tap_btn.setFixedWidth(60)
+        self._tap_btn.setFixedWidth(48)
         self._tap_btn.setToolTip("Tap to set tempo")
         self._tap_btn.setAccessibleName("Tap tempo")
         self._tap_btn.clicked.connect(self._on_tap)
-        metronome_bar.addWidget(self._tap_btn)
-
-        self._metronome_toggle = QPushButton()
-        self._metronome_toggle.setCheckable(True)
-        self._metronome_toggle.setFixedSize(36, 36)
-        self._metronome_toggle.setToolTip("Toggle metronome (M)")
-        self._metronome_toggle.setAccessibleName("Toggle metronome")
-        self._metronome_toggle.setText("M")
-        self._metronome_toggle.toggled.connect(self._on_metronome_toggled)
-        metronome_bar.addWidget(self._metronome_toggle)
+        metro_ci_bar.addWidget(self._tap_btn)
 
         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._metronome_vol_slider.setRange(0, 200)
         self._metronome_vol_slider.setValue(50)
-        self._metronome_vol_slider.setFixedWidth(80)
+        self._metronome_vol_slider.setFixedWidth(70)
         self._metronome_vol_slider.setToolTip("Metronome volume")
         self._metronome_vol_slider.setAccessibleName("Metronome volume")
         self._metronome_vol_slider.valueChanged.connect(
             self._on_metronome_vol_changed
         )
-        metronome_bar.addWidget(self._metronome_vol_slider)
+        metro_ci_bar.addWidget(self._metronome_vol_slider)
 
         self._metronome_vol_label = QLabel("50%")
         self._metronome_vol_label.setFixedWidth(36)
         self._metronome_vol_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        metronome_bar.addWidget(self._metronome_vol_label)
+        metro_ci_bar.addWidget(self._metronome_vol_label)
 
-        metronome_bar.addStretch()
-        controls_layout.addLayout(metronome_bar)
-
-        # -- Count-in --
-        count_in_bar = QHBoxLayout()
-
-        count_in_bar.addWidget(QLabel("Count-in:"))
+        metro_ci_bar.addStretch()
 
         self._count_in_toggle = QPushButton()
         self._count_in_toggle.setCheckable(True)
@@ -448,7 +436,7 @@ class PlayerControls(QWidget):
         self._count_in_toggle.setAccessibleName("Toggle count-in")
         self._count_in_toggle.setText("CI")
         self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
-        count_in_bar.addWidget(self._count_in_toggle)
+        metro_ci_bar.addWidget(self._count_in_toggle)
 
         self._count_in_beats_spin = QSpinBox()
         self._count_in_beats_spin.setRange(1, 8)
@@ -460,9 +448,9 @@ class PlayerControls(QWidget):
         self._count_in_beats_spin.valueChanged.connect(
             self._on_count_in_beats_changed
         )
-        count_in_bar.addWidget(self._count_in_beats_spin)
+        metro_ci_bar.addWidget(self._count_in_beats_spin)
 
-        self._count_in_repeats_cb = QCheckBox("Loop repeats")
+        self._count_in_repeats_cb = QCheckBox("Repeats")
         self._count_in_repeats_cb.setToolTip(
             "Also count in before each A-B loop repeat"
         )
@@ -472,15 +460,14 @@ class PlayerControls(QWidget):
         self._count_in_repeats_cb.toggled.connect(
             self._on_count_in_repeats_toggled
         )
-        count_in_bar.addWidget(self._count_in_repeats_cb)
+        metro_ci_bar.addWidget(self._count_in_repeats_cb)
 
         self._count_in_label = QLabel("")
-        self._count_in_label.setFixedWidth(60)
+        self._count_in_label.setFixedWidth(40)
         self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        count_in_bar.addWidget(self._count_in_label)
+        metro_ci_bar.addWidget(self._count_in_label)
 
-        count_in_bar.addStretch()
-        controls_layout.addLayout(count_in_bar)
+        controls_layout.addLayout(metro_ci_bar)
 
         # -- Stem mixer --
         self._mixer_label = QLabel("Stems")

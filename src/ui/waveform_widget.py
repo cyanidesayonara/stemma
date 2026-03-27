@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QWidget, QSizePolicy
 
 from src.ui.styles import DARK_COLORS
 
-_WAVEFORM_HEIGHT = 80
+_WAVEFORM_HEIGHT = 140
 _BAR_WIDTH = 2
 _BAR_GAP = 1
 _BAR_STEP = _BAR_WIDTH + _BAR_GAP
