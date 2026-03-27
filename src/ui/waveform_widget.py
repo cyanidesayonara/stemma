@@ -256,7 +256,7 @@ class MiniWaveformWidget(QWidget):
         self._cached_path: QPainterPath | None = None
 
         self.setFixedHeight(_MINI_HEIGHT)
-        self.setFixedWidth(100)
+        self.setMinimumWidth(80)
 
     def set_peaks(self, peaks: np.ndarray) -> None:
         """Set the peak array and repaint."""
