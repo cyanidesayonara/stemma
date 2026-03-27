@@ -21,10 +21,17 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Sync version from tag
+        shell: pwsh
+        run: .\scripts\sync_release_version.ps1 -Tag "${{ github.ref_name }}"
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+
+      - name: Run fast tests
+        run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120
 
       - name: Build executable
         run: pyinstaller stemma.spec

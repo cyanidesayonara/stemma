@@ -1,0 +1,63 @@
+# Optional: submit an existing GitHub Release MSIX to Partner Center.
+# See docs/store-release-pipeline.md for prerequisites. The update/publish payload
+# must match your listing type (MSIX vs Win32); edit product-update after validating
+# with Microsoft docs or Partner Center support before using submit_and_publish.
+
+name: Partner Center submit (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing GitHub release tag (e.g. v2.0.3)"
+        required: true
+        type: string
+      mode:
+        description: "configure = test credentials only; submit_and_publish = update + publish (edit YAML payload first)"
+        type: choice
+        options:
+          - configure
+          - submit_and_publish
+        default: configure
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Store credentials
+        uses: microsoft/store-submission@v1
+        with:
+          command: configure
+          type: packaged
+          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
+          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+
+      # Template only: confirm JSON against Partner Center before choosing submit_and_publish.
+      - name: Update draft submission (MSIX URL)
+        if: ${{ inputs.mode == 'submit_and_publish' }}
+        uses: microsoft/store-submission@v1
+        with:
+          command: update
+          type: packaged
+          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
+          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+          product-update: >-
+            {"packages":[{"packageUrl":"https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/stemma.msix","languages":["en-us"],"architectures":["X64"],"isSilentInstall":true}]}
+
+      - name: Publish submission
+        if: ${{ inputs.mode == 'submit_and_publish' }}
+        uses: microsoft/store-submission@v1
+        with:
+          command: publish
+          type: packaged
+          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
+          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}

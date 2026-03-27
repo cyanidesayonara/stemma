@@ -4,6 +4,18 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-28 -- Release pipeline housekeeping
+
+### Done
+- **Tag-driven versions:** `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` from the pushed tag before PyInstaller and MSIX packaging in `release.yml`, so GitHub Releases stay aligned with app and package identity without a pre-tag version commit.
+- **Tests before release build:** `release.yml` runs the same fast pytest slice as CI before `pyinstaller`.
+- **CI on tags:** `ci.yml` also triggers on `v*` tag pushes.
+- **Qt helper:** `src/qt_signal_utils.safe_disconnect` replaces duplicated logic in `player.py` and `import_dialog.py`.
+- **Docs:** `docs/store-release-pipeline.md` describes the release and Store upload flow; optional `.github/workflows/partner-center-submit.yml` (`workflow_dispatch`, default **configure** only) for future Partner Center API automation.
+- **Roadmap:** `PROJECT.md` post-2.0 backlog synced with shipped work and open GitHub issues.
+
+---
+
 ## 2026-03-27 -- v2.0.2 ONNX DirectML fallback for Store certification
 
 ### Done

@@ -34,19 +34,12 @@ from src.downloader import (
 from src.import_messages import format_import_error
 from src.library import Song, SongLibrary
 from src.model_manager import ModelDownloader, ModelManager
+from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 from src.separator import SeparatorWorker
 
 
 # Separation loads the full source into RAM; warn above this size (bytes).
 _LARGE_SOURCE_WARN_BYTES = 100 * 1024 * 1024
-
-
-def _safe_disconnect(signal) -> None:
-    """Disconnect all slots from *signal*, ignoring RuntimeError."""
-    try:
-        signal.disconnect()
-    except RuntimeError:
-        pass
 
 
 class _MetadataWorker(QThread):
