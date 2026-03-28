@@ -38,7 +38,8 @@ stemma/
   stemma.spec              # PyInstaller one-file build spec
   requirements-dev.txt     # Dev/build dependencies (pyinstaller)
   .github/workflows/ci.yml      # CI: fast tests on push
-  .github/workflows/release.yml # Build .exe + GitHub Release on v* tags
+  .github/workflows/release.yml # On v* tags: sync version + manifest, fast tests, .exe/.msix, GitHub Release
+  .github/workflows/partner-center-submit.yml # Optional manual Partner Center API (default: credentials check only)
   src/
     app.py             # QApplication setup
     app_settings.py    # Typed QSettings reads (audio, export, import defaults)
@@ -54,6 +55,7 @@ stemma/
     exporter.py        # Export stems as WAV/MP3
     downloader.py      # YouTube audio download (yt-dlp)
     post_processing.py # Wiener filter + soft gate
+    qt_signal_utils.py # PySide6 helpers (safe signal disconnect)
     waveform.py        # Waveform peak computation (numpy)
     ui/
       main_window.py
@@ -98,6 +100,7 @@ stemma/
     test_animated_arpeggio.py
     test_audio_sync.py
     test_wav_playback.py
+    test_qt_signal_utils.py
   assets/
     icons/             # SVG logos, .ico app icon, PNGs
     audio/             # Startup arpeggio WAV
@@ -108,6 +111,7 @@ stemma/
     generate_startup_audio.py  # One-time audio asset generator
     generate_msix_assets.py    # Generate MSIX PNGs from icon_256.png
     build_msix.ps1             # Pack PyInstaller output into .msix
+    sync_release_version.ps1   # Align version.py + AppxManifest with a release tag
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song

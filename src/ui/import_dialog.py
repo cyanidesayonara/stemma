@@ -34,19 +34,12 @@ from src.downloader import (
 from src.import_messages import format_import_error
 from src.library import Song, SongLibrary
 from src.model_manager import ModelDownloader, ModelManager
+from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 from src.separator import SeparatorWorker
 
 
 # Separation loads the full source into RAM; warn above this size (bytes).
 _LARGE_SOURCE_WARN_BYTES = 100 * 1024 * 1024
-
-
-def _safe_disconnect(signal) -> None:
-    """Disconnect all slots from *signal*, ignoring RuntimeError."""
-    try:
-        signal.disconnect()
-    except RuntimeError:
-        pass
 
 
 class _MetadataWorker(QThread):
@@ -502,7 +495,10 @@ class ImportDialog(QDialog):
 
     def _on_finished(self, song_id: str) -> None:
         self._import_song_id = None
-        self._library.update_song(song_id, model_used="htdemucs")
+        model_used = (
+            "htdemucs_6s" if self._pending_separation_is_6_stem else "htdemucs"
+        )
+        self._library.update_song(song_id, model_used=model_used)
         self.accept()
 
     def _on_error(self, message: str) -> None:
