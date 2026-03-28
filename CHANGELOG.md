@@ -4,6 +4,14 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-28 -- ONNX external data download for HuggingFace models
+
+### Done
+- **Model cache:** HuggingFace `htdemucs*.onnx` files use external weights in `*.onnx.data`. `ModelDownloader` now fetches every artifact for each variant; `is_model_downloaded` requires both files. Fixes ONNX Runtime init errors when only the small `.onnx` stub was present.
+- **Library metadata:** Successful 6-stem import stores `model_used=htdemucs_6s` instead of always `htdemucs`.
+
+---
+
 ## 2026-03-28 -- Release pipeline housekeeping
 
 ### Done

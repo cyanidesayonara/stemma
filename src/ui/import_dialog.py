@@ -495,7 +495,10 @@ class ImportDialog(QDialog):
 
     def _on_finished(self, song_id: str) -> None:
         self._import_song_id = None
-        self._library.update_song(song_id, model_used="htdemucs")
+        model_used = (
+            "htdemucs_6s" if self._pending_separation_is_6_stem else "htdemucs"
+        )
+        self._library.update_song(song_id, model_used=model_used)
         self.accept()
 
     def _on_error(self, message: str) -> None:

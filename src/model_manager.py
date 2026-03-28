@@ -4,9 +4,9 @@ Manages the HTDemucs v4 ONNX model files that are required for stem
 separation. Models are downloaded from HuggingFace on first run and
 cached locally in the data/models/ directory.
 
-Supported models:
-    - htdemucs (4-stem): vocals, drums, bass, other (~80-300MB)
-    - htdemucs_6s (6-stem): adds guitar + piano (~80-300MB)
+Supported models (each is ``*.onnx`` plus ``*.onnx.data`` from HuggingFace):
+    - htdemucs (4-stem): vocals, drums, bass, other
+    - htdemucs_6s (6-stem): adds guitar + piano
 """
 
 import os
@@ -18,10 +18,10 @@ from PySide6.QtCore import QObject, QThread, Signal
 # HuggingFace repository hosting the pre-converted ONNX models.
 _REPO_URL = "https://huggingface.co/rysertio/Demucs-onnx/resolve/main"
 
-# Model filename mapping.
+# HuggingFace ships ONNX with external weights: small .onnx graph + large .onnx.data.
 _MODEL_FILES = {
-    "htdemucs": "htdemucs.onnx",
-    "htdemucs_6s": "htdemucs_6s.onnx",
+    "htdemucs": ("htdemucs.onnx", "htdemucs.onnx.data"),
+    "htdemucs_6s": ("htdemucs_6s.onnx", "htdemucs_6s.onnx.data"),
 }
 
 
@@ -55,9 +55,8 @@ class ModelDownloader(QThread):
         try:
             self._download()
         except Exception as exc:
-            # Clean up partial downloads on failure.
-            dest = os.path.join(self.models_dir, _MODEL_FILES[self.model_name])
-            if os.path.exists(dest):
+            dest = getattr(self, "_current_dest_path", None)
+            if dest and os.path.exists(dest):
                 os.remove(dest)
             self.error.emit(str(exc))
 
@@ -65,32 +64,62 @@ class ModelDownloader(QThread):
         """Core download logic."""
         os.makedirs(self.models_dir, exist_ok=True)
 
-        file_name = _MODEL_FILES[self.model_name]
-        url = f"{_REPO_URL}/{file_name}"
-        dest_path = os.path.join(self.models_dir, file_name)
+        artifacts = _MODEL_FILES[self.model_name]
+        n = len(artifacts)
+        primary_path = os.path.join(self.models_dir, artifacts[0])
 
-        if os.path.exists(dest_path):
-            self.progress.emit(100, f"{file_name} already cached.")
-            self.download_complete.emit(dest_path)
-            return
-
-        self.progress.emit(0, f"Downloading {file_name}...")
-
-        def _report_hook(block_num: int, block_size: int,
-                         total_size: int) -> None:
-            if self._is_cancelled:
-                raise InterruptedError("Download cancelled by user.")
-            if total_size > 0:
-                percent = min(100, int(block_num * block_size * 100
-                                       / total_size))
+        for i, file_name in enumerate(artifacts):
+            dest_path = os.path.join(self.models_dir, file_name)
+            if os.path.exists(dest_path):
                 self.progress.emit(
-                    percent, f"Downloading {file_name}... {percent}%"
+                    int((i + 1) / n * 100),
+                    f"{file_name} already cached.",
                 )
+                continue
 
-        urllib.request.urlretrieve(url, dest_path, reporthook=_report_hook)
+            url = f"{_REPO_URL}/{file_name}"
+            self._current_dest_path = dest_path
+            self.progress.emit(
+                int(i / n * 100),
+                f"Downloading {file_name}...",
+            )
 
+            def _make_hook(
+                idx: int,
+                name: str,
+            ):
+                def _report_hook(
+                    block_num: int, block_size: int, total_size: int
+                ) -> None:
+                    if self._is_cancelled:
+                        raise InterruptedError("Download cancelled by user.")
+                    if total_size > 0:
+                        file_pct = min(
+                            100.0,
+                            (block_num * block_size * 100.0) / total_size,
+                        )
+                        overall = int(((idx + file_pct / 100.0) / n) * 100)
+                        overall = min(99, overall)
+                        self.progress.emit(
+                            overall,
+                            f"Downloading {name}... {int(file_pct)}%",
+                        )
+                    else:
+                        self.progress.emit(
+                            int(idx / n * 100),
+                            f"Downloading {name}...",
+                        )
+
+                return _report_hook
+
+            urllib.request.urlretrieve(
+                url, dest_path, reporthook=_make_hook(i, file_name)
+            )
+            self._current_dest_path = None
+
+        self._current_dest_path = None
         self.progress.emit(100, "Download complete.")
-        self.download_complete.emit(dest_path)
+        self.download_complete.emit(primary_path)
 
 
 class ModelManager(QObject):
@@ -111,13 +140,17 @@ class ModelManager(QObject):
         self._active_downloader: ModelDownloader | None = None
 
     def model_path(self, is_6_stem: bool = False) -> str:
-        """Return the expected local file path for the given model variant."""
+        """Return the expected local path to the ONNX graph (``.onnx``) file."""
         name = "htdemucs_6s" if is_6_stem else "htdemucs"
-        return os.path.join(self.models_dir, _MODEL_FILES[name])
+        return os.path.join(self.models_dir, _MODEL_FILES[name][0])
 
     def is_model_downloaded(self, is_6_stem: bool = False) -> bool:
-        """Check whether the model file exists on disk."""
-        return os.path.isfile(self.model_path(is_6_stem))
+        """Check whether all ONNX artifacts (graph + external data) exist."""
+        name = "htdemucs_6s" if is_6_stem else "htdemucs"
+        return all(
+            os.path.isfile(os.path.join(self.models_dir, f))
+            for f in _MODEL_FILES[name]
+        )
 
     def download_model(self, is_6_stem: bool = False) -> ModelDownloader:
         """Create and return a ModelDownloader thread (not yet started).
