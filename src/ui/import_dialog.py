@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 
+import soundfile as sf
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -34,19 +35,16 @@ from src.downloader import (
 from src.import_messages import format_import_error
 from src.library import Song, SongLibrary
 from src.model_manager import ModelDownloader, ModelManager
-from src.separator import SeparatorWorker
+from src.qt_signal_utils import safe_disconnect as _safe_disconnect
+from src.separator import (
+    SeparatorWorker,
+    available_memory_bytes,
+    estimate_separation_memory,
+)
 
 
 # Separation loads the full source into RAM; warn above this size (bytes).
 _LARGE_SOURCE_WARN_BYTES = 100 * 1024 * 1024
-
-
-def _safe_disconnect(signal) -> None:
-    """Disconnect all slots from *signal*, ignoring RuntimeError."""
-    try:
-        signal.disconnect()
-    except RuntimeError:
-        pass
 
 
 class _MetadataWorker(QThread):
@@ -481,6 +479,10 @@ class ImportDialog(QDialog):
         is_6_stem: bool,
     ) -> None:
         """Run ONNX separation for a song that already has a model file."""
+        if not self._check_memory_ok(song.original_path, is_6_stem):
+            self._button_box.setEnabled(True)
+            return
+
         self._progress_bar.setVisible(True)
         self._status_label.setVisible(True)
         self._button_box.setEnabled(False)
@@ -496,13 +498,46 @@ class ImportDialog(QDialog):
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
+    def _check_memory_ok(self, audio_path: str, is_6_stem: bool) -> bool:
+        """Warn and ask the user if available RAM looks insufficient.
+
+        Returns True to proceed, False to abort.
+        """
+        try:
+            info = sf.info(audio_path)
+            duration = info.duration
+        except Exception:
+            return True
+
+        needed = estimate_separation_memory(duration, is_6_stem)
+        avail = available_memory_bytes()
+        if avail is None or avail >= needed:
+            return True
+
+        needed_gb = needed / (1024 ** 3)
+        avail_gb = avail / (1024 ** 3)
+        reply = QMessageBox.warning(
+            self,
+            "Low memory",
+            f"Stem separation needs roughly {needed_gb:.1f} GB of free memory, "
+            f"but only {avail_gb:.1f} GB is available.\n\n"
+            "Close other applications or try a shorter audio file.\n\n"
+            "Continue anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _on_progress(self, percent: int, message: str) -> None:
         self._progress_bar.setValue(percent)
         self._status_label.setText(message)
 
     def _on_finished(self, song_id: str) -> None:
         self._import_song_id = None
-        self._library.update_song(song_id, model_used="htdemucs")
+        model_used = (
+            "htdemucs_6s" if self._pending_separation_is_6_stem else "htdemucs"
+        )
+        self._library.update_song(song_id, model_used=model_used)
         self.accept()
 
     def _on_error(self, message: str) -> None:

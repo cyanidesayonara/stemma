@@ -1,9 +1,10 @@
 """Audio post-processing filters for improving stem separation quality.
 
 Applied after ONNX model inference to reduce bleed and suppress faint
-ghost artifacts. Both filters process audio in chunks to avoid
-allocating full-track STFT matrices that would consume multiple GB of
-RAM on longer tracks.
+ghost artifacts. Both filters operate **in-place** on the stems array to
+avoid allocating full-track copies (saves ~1 GB on a 4-minute 6-stem song).
+Chunked processing keeps peak per-chunk memory bounded regardless of
+track length.
 """
 
 import numpy as np
@@ -31,22 +32,25 @@ def wiener_filter(
     Processes audio in ~10-second chunks with overlap to keep peak memory
     usage bounded regardless of track length.
 
+    Operates **in-place**: the input ``stems`` array is modified and
+    returned.  The mixture is computed from the original stems before any
+    chunk is overwritten, so reads and writes never conflict.
+
     Args:
         stems: Separated stems, shape (n_stems, 2, total_samples).
+            **Modified in-place.**
         n_iterations: Number of Wiener iterations (1 is usually enough).
         exponent: Power applied to magnitudes when computing masks.
             Higher values create sharper masks (2.0 = standard Wiener).
 
     Returns:
-        Filtered stems array with same shape as input.
+        The same ``stems`` array (modified in-place).
     """
     n_stems, n_channels, total_samples = stems.shape
-    result = np.zeros_like(stems)
 
-    # Reconstruct the mixture from stem estimates.
+    # Reconstruct the mixture from stem estimates *before* overwriting.
     mixture = np.sum(stems, axis=0)  # (2, total_samples)
 
-    # Build chunk boundaries with overlap.
     chunks = _chunk_boundaries(total_samples, _CHUNK_SAMPLES, _CHUNK_OVERLAP)
 
     for chunk_start, chunk_end, out_start, out_end in chunks:
@@ -55,13 +59,11 @@ def wiener_filter(
             out_len = out_end - out_start
             trim_left = out_start - chunk_start
 
-            # STFT of the mixture chunk.
             mix_stft = librosa.stft(
                 mixture[ch, chunk_start:chunk_end],
                 n_fft=NFFT, hop_length=HOP_LENGTH, center=True,
             )
 
-            # Compute magnitude sum across stems (denominator).
             total_mag = np.zeros_like(np.abs(mix_stft))
             stem_stfts = []
             for s in range(n_stems):
@@ -74,11 +76,9 @@ def wiener_filter(
 
             total_mag = np.maximum(total_mag, 1e-10)
 
-            # Iterative Wiener: apply masks and optionally refine.
             current_stfts = list(stem_stfts)
-            for _ in range(n_iterations):
-                if _ > 0:
-                    # Recompute magnitudes from current estimates.
+            for iteration in range(n_iterations):
+                if iteration > 0:
                     total_mag = np.zeros_like(np.abs(mix_stft))
                     for s in range(n_stems):
                         total_mag += np.abs(current_stfts[s]) ** exponent
@@ -88,21 +88,20 @@ def wiener_filter(
                     mask = np.abs(current_stfts[s]) ** exponent / total_mag
                     current_stfts[s] = mask * mix_stft
 
-            # iSTFT back to time domain and write the non-overlapping portion.
             for s in range(n_stems):
                 audio_chunk = librosa.istft(
                     current_stfts[s],
                     hop_length=HOP_LENGTH, n_fft=NFFT,
                     length=chunk_len, center=True,
                 )
-                result[s, ch, out_start:out_end] = (
+                stems[s, ch, out_start:out_end] = (
                     audio_chunk[trim_left:trim_left + out_len]
                 )
 
-            # Free STFT arrays for this channel/chunk before next iteration.
             del stem_stfts, current_stfts, mix_stft, total_mag
 
-    return result
+    del mixture
+    return stems
 
 
 def soft_gate(
@@ -120,10 +119,12 @@ def soft_gate(
     silence. This removes faint echoes of other instruments that the
     model leaked through.
 
-    Processes one stem at a time to keep memory bounded.
+    Operates **in-place**: the input ``stems`` array is modified and
+    returned.
 
     Args:
         stems: Separated stems, shape (n_stems, 2, total_samples).
+            **Modified in-place.**
         threshold_db: Gate threshold in dB below peak (default -60 dB).
         frame_length: RMS analysis window size in samples.
         hop_length: RMS analysis hop size in samples.
@@ -131,28 +132,23 @@ def soft_gate(
         release_frames: Number of RMS frames for gate to close (smooth off).
 
     Returns:
-        Gated stems array with same shape as input.
+        The same ``stems`` array (modified in-place).
     """
     n_stems, n_channels, total_samples = stems.shape
-    result = np.zeros_like(stems)
 
     threshold_linear = 10.0 ** (threshold_db / 20.0)
     attack_coeff = 1.0 / max(attack_frames, 1)
     release_coeff = 1.0 / max(release_frames, 1)
 
     for s in range(n_stems):
-        # Compute RMS across channels for this stem.
-        mono = np.mean(stems[s], axis=0)  # (total_samples,)
+        mono = np.mean(stems[s], axis=0)
 
-        # Frame-based RMS — this is lightweight (returns one float per frame).
         rms = librosa.feature.rms(
             y=mono, frame_length=frame_length, hop_length=hop_length,
         )[0]
 
-        # Binary gate decision.
         gate = (rms >= threshold_linear).astype(np.float32)
 
-        # Smooth attack/release via IIR filter.
         smoothed = np.empty_like(gate)
         current = gate[0]
         for i in range(len(gate)):
@@ -162,7 +158,6 @@ def soft_gate(
                 current += release_coeff * (gate[i] - current)
             smoothed[i] = current
 
-        # Upsample envelope to sample rate via linear interpolation.
         frame_times = librosa.frames_to_samples(
             np.arange(len(smoothed)), hop_length=hop_length,
         )
@@ -170,13 +165,12 @@ def soft_gate(
             np.arange(total_samples), frame_times, smoothed,
         ).astype(np.float32)
 
-        # Apply envelope to all channels.
         for ch in range(n_channels):
-            result[s, ch] = stems[s, ch] * envelope
+            stems[s, ch] *= envelope
 
         del mono, rms, gate, smoothed, envelope
 
-    return result
+    return stems
 
 
 def _chunk_boundaries(

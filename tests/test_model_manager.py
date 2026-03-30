@@ -28,11 +28,21 @@ class TestModelManager:
         manager = ModelManager(data_dir=tmp_dir)
         models_dir = os.path.join(tmp_dir, "models")
         os.makedirs(models_dir, exist_ok=True)
-        # Create a dummy file to simulate a cached model.
-        dummy_path = os.path.join(models_dir, "htdemucs.onnx")
-        with open(dummy_path, "wb") as f:
-            f.write(b"dummy")
+        for name in ("htdemucs.onnx", "htdemucs.onnx.data"):
+            with open(os.path.join(models_dir, name), "wb") as f:
+                f.write(b"dummy")
         assert manager.is_model_downloaded(is_6_stem=False)
+
+    def test_is_model_downloaded_6_stem_requires_both_artifacts(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        models_dir = os.path.join(tmp_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
+        with open(os.path.join(models_dir, "htdemucs_6s.onnx"), "wb") as f:
+            f.write(b"stub")
+        assert not manager.is_model_downloaded(is_6_stem=True)
+        with open(os.path.join(models_dir, "htdemucs_6s.onnx.data"), "wb") as f:
+            f.write(b"weights")
+        assert manager.is_model_downloaded(is_6_stem=True)
 
     def test_download_model_returns_downloader(self, tmp_dir):
         manager = ModelManager(data_dir=tmp_dir)
@@ -58,8 +68,10 @@ class TestModelDownloader:
 class TestModelFiles:
     """Verify the model file name constants."""
 
-    def test_4_stem_filename(self):
-        assert _MODEL_FILES["htdemucs"] == "htdemucs.onnx"
+    def test_4_stem_artifacts(self):
+        assert _MODEL_FILES["htdemucs"][0] == "htdemucs.onnx"
+        assert _MODEL_FILES["htdemucs"][1] == "htdemucs.onnx.data"
 
-    def test_6_stem_filename(self):
-        assert _MODEL_FILES["htdemucs_6s"] == "htdemucs_6s.onnx"
+    def test_6_stem_artifacts(self):
+        assert _MODEL_FILES["htdemucs_6s"][0] == "htdemucs_6s.onnx"
+        assert _MODEL_FILES["htdemucs_6s"][1] == "htdemucs_6s.onnx.data"

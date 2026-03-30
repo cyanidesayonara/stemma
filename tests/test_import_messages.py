@@ -34,7 +34,16 @@ class TestFormatImportError:
         )
         out = format_import_error(raw)
         assert "stem separation" in out.lower()
-        assert "memory" in out.lower() or "retry" in out.lower()
+        assert "retry" in out.lower()
+
+    def test_onnx_runtime_exception_with_oom(self):
+        raw = (
+            "ONNXRuntimeError: 6 : RUNTIME_EXCEPTION : "
+            "failed to allocate 4294967296 bytes"
+        )
+        out = format_import_error(raw)
+        assert "memory" in out.lower()
+        assert "shorter" in out.lower() or "close" in out.lower()
 
     def test_out_of_memory_phrases(self):
         for raw in (

@@ -38,7 +38,8 @@ stemma/
   stemma.spec              # PyInstaller one-file build spec
   requirements-dev.txt     # Dev/build dependencies (pyinstaller)
   .github/workflows/ci.yml      # CI: fast tests on push
-  .github/workflows/release.yml # Build .exe + GitHub Release on v* tags
+  .github/workflows/release.yml # On v* tags: sync version + manifest, fast tests, .exe/.msix, GitHub Release
+  .github/workflows/partner-center-submit.yml # Optional manual Partner Center API (default: credentials check only)
   src/
     app.py             # QApplication setup
     app_settings.py    # Typed QSettings reads (audio, export, import defaults)
@@ -54,6 +55,7 @@ stemma/
     exporter.py        # Export stems as WAV/MP3
     downloader.py      # YouTube audio download (yt-dlp)
     post_processing.py # Wiener filter + soft gate
+    qt_signal_utils.py # PySide6 helpers (safe signal disconnect)
     waveform.py        # Waveform peak computation (numpy)
     ui/
       main_window.py
@@ -98,6 +100,7 @@ stemma/
     test_animated_arpeggio.py
     test_audio_sync.py
     test_wav_playback.py
+    test_qt_signal_utils.py
   assets/
     icons/             # SVG logos, .ico app icon, PNGs
     audio/             # Startup arpeggio WAV
@@ -108,6 +111,7 @@ stemma/
     generate_startup_audio.py  # One-time audio asset generator
     generate_msix_assets.py    # Generate MSIX PNGs from icon_256.png
     build_msix.ps1             # Pack PyInstaller output into .msix
+    sync_release_version.ps1   # Align version.py + AppxManifest with a release tag
   data/                # Legacy dev-only folder; packaged app uses OS user dir
     models/            # (when using repo data/) Cached ONNX models
     songs/{song-id}/   # Separated stems per song
@@ -129,7 +133,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
 12. **Dual-Agent Workflow:** We use a builder/reviewer model. The "Builder" agent implements the feature and opens a PR. Do not merge your own PRs. The user will pass the PR to a "Reviewer" agent to audit the code, catch bugs, suggest improvements, and approve it.
-13. **No inline imports.** All imports belong at the top of the file. Do not place `import` statements inside functions or methods.
+13. **Imports at module scope by default.** Prefer top-of-file imports. Deferred imports inside a function or method are acceptable when there is a concrete reason (for example: faster cold start, avoiding a heavy or rarely used dependency until needed, or optional/platform-specific modules). Add a short comment at the import site when the reason is not obvious.
 
 ## Current Status
 

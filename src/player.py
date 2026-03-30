@@ -22,17 +22,10 @@ import librosa
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
 from src.click_utils import generate_click
+from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
-
-
-def _safe_disconnect(signal) -> None:
-    """Disconnect all slots from *signal*, ignoring RuntimeError."""
-    try:
-        signal.disconnect()
-    except RuntimeError:
-        pass
 
 
 def next_take_number(song_dir: str) -> int:

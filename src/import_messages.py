@@ -21,6 +21,19 @@ def format_import_error(message: str, max_len: int = 400) -> str:
     if "interruptederror" in low or "cancelled" in low:
         return "The operation was cancelled."
     if "onnxruntimeerror" in low or "runtime_exception" in low:
+        oom_phrases = (
+            "out of memory",
+            "ran out of memory",
+            "bad_alloc",
+            "bad alloc",
+            "std::bad_alloc",
+            "failed to allocate",
+        )
+        if any(p in low for p in oom_phrases):
+            return (
+                "Not enough memory for stem separation. "
+                "Close other apps or try a shorter audio file."
+            )
         return (
             "Stem separation failed to initialize. "
             "Try closing other apps to free memory, then retry."

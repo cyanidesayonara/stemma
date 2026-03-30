@@ -4,6 +4,40 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-30 -- Low-RAM stem separation (Store certification fix)
+
+### Done
+- **In-place post-processing:** `wiener_filter` and `soft_gate` now write results back into the input array instead of allocating full-song copies, saving ~1 GB of peak RAM on a 4-minute 6-stem track.
+- **Early resource release:** ORT inference session and input audio are freed before post-processing begins, saving ~300-500 MB.
+- **Pre-flight memory check:** Before starting separation, the estimated peak RAM is compared against available physical memory via Windows `GlobalMemoryStatusEx`. If insufficient, a warning dialog lets the user close other apps or abort.
+- **Smarter ORT error messages:** `format_import_error` now distinguishes ORT errors containing OOM phrases (e.g. `failed to allocate`, `bad_alloc`) from generic init failures, giving a more accurate user message.
+
+### Metrics
+- Peak memory for a 4-minute 6-stem song reduced by ~1.3-1.6 GB.
+- 549 fast tests pass (7 new tests for in-place behavior, memory estimation, and ORT error split).
+
+---
+
+## 2026-03-28 -- ONNX external data download for HuggingFace models
+
+### Done
+- **Model cache:** HuggingFace `htdemucs*.onnx` files use external weights in `*.onnx.data`. `ModelDownloader` now fetches every artifact for each variant; `is_model_downloaded` requires both files. Fixes ONNX Runtime init errors when only the small `.onnx` stub was present.
+- **Library metadata:** Successful 6-stem import stores `model_used=htdemucs_6s` instead of always `htdemucs`.
+
+---
+
+## 2026-03-28 -- Release pipeline housekeeping
+
+### Done
+- **Tag-driven versions:** `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` from the pushed tag before PyInstaller and MSIX packaging in `release.yml`, so GitHub Releases stay aligned with app and package identity without a pre-tag version commit.
+- **Tests before release build:** `release.yml` runs the same fast pytest slice as CI before `pyinstaller`.
+- **CI on tags:** `ci.yml` also triggers on `v*` tag pushes.
+- **Qt helper:** `src/qt_signal_utils.safe_disconnect` replaces duplicated logic in `player.py` and `import_dialog.py`.
+- **Docs:** `docs/store-release-pipeline.md` describes the release and Store upload flow; optional `.github/workflows/partner-center-submit.yml` (`workflow_dispatch`, default **configure** only) for future Partner Center API automation.
+- **Roadmap:** `PROJECT.md` post-2.0 backlog synced with shipped work and open GitHub issues.
+
+---
+
 ## 2026-03-27 -- v2.0.2 ONNX DirectML fallback for Store certification
 
 ### Done

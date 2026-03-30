@@ -76,19 +76,17 @@ class TestWienerFilter:
         frequency. After Wiener filtering, stems should be purer.
         """
         stems = _make_stems_with_bleed(bleed=0.15)
-        filtered = wiener_filter(stems)
-
         freqs = [220, 440, 110, 660]
 
         def purity(stem_signal, target_freq):
-            """Fraction of energy within ±5 Hz of target frequency."""
+            """Fraction of energy within +/-5 Hz of target frequency."""
             fft = np.abs(np.fft.rfft(stem_signal))
             freq_bins = np.fft.rfftfreq(len(stem_signal), 1.0 / SAMPLE_RATE)
             mask = np.abs(freq_bins - target_freq) < 5.0
             return np.sum(fft[mask] ** 2) / max(np.sum(fft ** 2), 1e-10)
 
-        # Average purity improvement across stems.
         orig_purity = np.mean([purity(stems[s, 0], freqs[s]) for s in range(4)])
+        filtered = wiener_filter(stems)
         filt_purity = np.mean([purity(filtered[s, 0], freqs[s]) for s in range(4)])
 
         assert filt_purity >= orig_purity
@@ -106,10 +104,11 @@ class TestWienerFilter:
         assert 0.8 < ratio < 1.2
 
     def test_single_stem_is_identity(self):
-        """With only one stem, Wiener mask is all 1s — output ~= input."""
+        """With only one stem, Wiener mask is all 1s -- output ~= input."""
         stems = _make_stems(n_stems=1)
+        original = stems.copy()
         result = wiener_filter(stems)
-        assert np.allclose(result, stems, atol=1e-3)
+        assert np.allclose(result, original, atol=1e-3)
 
     def test_higher_exponent_sharpens_masks(self):
         """Higher exponent should produce more aggressive separation.
@@ -117,7 +116,6 @@ class TestWienerFilter:
         With a higher exponent, each stem's energy should be more
         concentrated at its target frequency.
         """
-        stems = _make_stems_with_bleed(bleed=0.15)
         freqs = [220, 440, 110, 660]
 
         def avg_purity(filtered_stems):
@@ -132,8 +130,8 @@ class TestWienerFilter:
                 purities.append(p)
             return np.mean(purities)
 
-        mild = wiener_filter(stems, exponent=1.0)
-        sharp = wiener_filter(stems, exponent=4.0)
+        mild = wiener_filter(_make_stems_with_bleed(bleed=0.15), exponent=1.0)
+        sharp = wiener_filter(_make_stems_with_bleed(bleed=0.15), exponent=4.0)
 
         assert avg_purity(sharp) >= avg_purity(mild)
 
@@ -158,61 +156,71 @@ class TestSoftGate:
     def test_loud_signal_passes_through(self):
         """A full-amplitude signal should pass the gate unchanged."""
         stems = _make_stems()
+        original = stems.copy()
         result = soft_gate(stems, threshold_db=-80.0)
 
-        # Should be very close to original.
-        for s in range(stems.shape[0]):
-            corr = np.corrcoef(stems[s, 0], result[s, 0])[0, 1]
+        for s in range(original.shape[0]):
+            corr = np.corrcoef(original[s, 0], result[s, 0])[0, 1]
             assert corr > 0.99
 
     def test_quiet_signal_is_suppressed(self):
         """A signal well below the threshold should be gated to near zero."""
         stems = _make_stems()
-        # Make stems very quiet.
         stems *= 1e-5
 
+        input_energy = np.sum(stems ** 2)
         result = soft_gate(stems, threshold_db=-40.0)
 
-        # Gated output should be much quieter than input.
-        input_energy = np.sum(stems ** 2)
         output_energy = np.sum(result ** 2)
         assert output_energy < input_energy * 0.1
 
     def test_mixed_loud_and_quiet_sections(self):
         """Gate should suppress quiet sections but preserve loud ones."""
-        total_samples = SAMPLE_RATE * 2  # 2 seconds
+        total_samples = SAMPLE_RATE * 2
         t = np.linspace(0, 2.0, total_samples, dtype=np.float32)
 
         stems = np.zeros((1, 2, total_samples), dtype=np.float32)
         signal = 0.5 * np.sin(2 * np.pi * 440 * t)
 
-        # First half loud, second half near-silent.
         signal[SAMPLE_RATE:] *= 1e-5
         stems[0, 0] = signal
         stems[0, 1] = signal
 
+        loud_energy_in = np.sum(stems[0, 0, :SAMPLE_RATE] ** 2)
         result = soft_gate(stems, threshold_db=-40.0)
 
-        # First half should be preserved.
-        loud_energy_in = np.sum(stems[0, 0, :SAMPLE_RATE] ** 2)
         loud_energy_out = np.sum(result[0, 0, :SAMPLE_RATE] ** 2)
         assert loud_energy_out > loud_energy_in * 0.9
 
-        # Second half should be suppressed.
         quiet_energy_out = np.sum(result[0, 0, SAMPLE_RATE:] ** 2)
         assert quiet_energy_out < loud_energy_out * 0.001
 
     def test_threshold_sensitivity(self):
         """Lower threshold should let more signal through."""
-        stems = _make_stems()
-        stems *= 0.01  # Quiet but not silent.
+        stems_strict = _make_stems()
+        stems_strict *= 0.01
+        stems_lenient = stems_strict.copy()
 
-        strict = soft_gate(stems, threshold_db=-20.0)
-        lenient = soft_gate(stems, threshold_db=-80.0)
+        soft_gate(stems_strict, threshold_db=-20.0)
+        soft_gate(stems_lenient, threshold_db=-80.0)
 
-        strict_energy = np.sum(strict ** 2)
-        lenient_energy = np.sum(lenient ** 2)
+        strict_energy = np.sum(stems_strict ** 2)
+        lenient_energy = np.sum(stems_lenient ** 2)
         assert lenient_energy >= strict_energy
+
+
+class TestInPlaceBehavior:
+    """Both filters should modify and return the input array (no extra copy)."""
+
+    def test_wiener_returns_same_array(self):
+        stems = _make_stems()
+        result = wiener_filter(stems)
+        assert result is stems
+
+    def test_soft_gate_returns_same_array(self):
+        stems = _make_stems()
+        result = soft_gate(stems)
+        assert result is stems
 
 
 class TestChunkedProcessing:
