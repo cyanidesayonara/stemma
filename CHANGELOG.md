@@ -4,6 +4,20 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-30 -- Low-RAM stem separation (Store certification fix)
+
+### Done
+- **In-place post-processing:** `wiener_filter` and `soft_gate` now write results back into the input array instead of allocating full-song copies, saving ~1 GB of peak RAM on a 4-minute 6-stem track.
+- **Early resource release:** ORT inference session and input audio are freed before post-processing begins, saving ~300-500 MB.
+- **Pre-flight memory check:** Before starting separation, the estimated peak RAM is compared against available physical memory via Windows `GlobalMemoryStatusEx`. If insufficient, a warning dialog lets the user close other apps or abort.
+- **Smarter ORT error messages:** `format_import_error` now distinguishes ORT errors containing OOM phrases (e.g. `failed to allocate`, `bad_alloc`) from generic init failures, giving a more accurate user message.
+
+### Metrics
+- Peak memory for a 4-minute 6-stem song reduced by ~1.3-1.6 GB.
+- 549 fast tests pass (7 new tests for in-place behavior, memory estimation, and ORT error split).
+
+---
+
 ## 2026-03-28 -- ONNX external data download for HuggingFace models
 
 ### Done

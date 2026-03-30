@@ -35,7 +35,11 @@ from src.import_messages import format_import_error
 from src.library import Song, SongLibrary
 from src.model_manager import ModelDownloader, ModelManager
 from src.qt_signal_utils import safe_disconnect as _safe_disconnect
-from src.separator import SeparatorWorker
+from src.separator import (
+    SeparatorWorker,
+    available_memory_bytes,
+    estimate_separation_memory,
+)
 
 
 # Separation loads the full source into RAM; warn above this size (bytes).
@@ -474,6 +478,10 @@ class ImportDialog(QDialog):
         is_6_stem: bool,
     ) -> None:
         """Run ONNX separation for a song that already has a model file."""
+        if not self._check_memory_ok(song.original_path, is_6_stem):
+            self._button_box.setEnabled(True)
+            return
+
         self._progress_bar.setVisible(True)
         self._status_label.setVisible(True)
         self._button_box.setEnabled(False)
@@ -488,6 +496,38 @@ class ImportDialog(QDialog):
         self._worker.finished.connect(lambda _: self._on_finished(song.id))
         self._worker.error.connect(self._on_error)
         self._worker.start()
+
+    def _check_memory_ok(self, audio_path: str, is_6_stem: bool) -> bool:
+        """Warn and ask the user if available RAM looks insufficient.
+
+        Returns True to proceed, False to abort.
+        """
+        try:
+            import soundfile as sf
+
+            info = sf.info(audio_path)
+            duration = info.duration
+        except Exception:
+            return True
+
+        needed = estimate_separation_memory(duration, is_6_stem)
+        avail = available_memory_bytes()
+        if avail is None or avail >= needed:
+            return True
+
+        needed_gb = needed / (1024 ** 3)
+        avail_gb = avail / (1024 ** 3)
+        reply = QMessageBox.warning(
+            self,
+            "Low memory",
+            f"Stem separation needs roughly {needed_gb:.1f} GB of free memory, "
+            f"but only {avail_gb:.1f} GB is available.\n\n"
+            "Close other applications or try a shorter audio file.\n\n"
+            "Continue anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _on_progress(self, percent: int, message: str) -> None:
         self._progress_bar.setValue(percent)

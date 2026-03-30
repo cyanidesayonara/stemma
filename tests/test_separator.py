@@ -15,6 +15,8 @@ from src.separator import (
     STEMS_4,
     STEMS_6,
     SeparatorWorker,
+    available_memory_bytes,
+    estimate_separation_memory,
 )
 
 
@@ -344,3 +346,26 @@ class TestSeparatorSaveStems:
         for stem_name in STEMS_6:
             assert stem_name in result
             assert os.path.isfile(result[stem_name])
+
+
+class TestMemoryEstimation:
+    """Verify peak memory estimation helpers."""
+
+    def test_6_stem_higher_than_4_stem(self):
+        est4 = estimate_separation_memory(240.0, is_6_stem=False)
+        est6 = estimate_separation_memory(240.0, is_6_stem=True)
+        assert est6 > est4
+
+    def test_longer_song_needs_more_memory(self):
+        short = estimate_separation_memory(60.0, is_6_stem=False)
+        long = estimate_separation_memory(600.0, is_6_stem=False)
+        assert long > short
+
+    def test_returns_positive_int(self):
+        est = estimate_separation_memory(120.0, is_6_stem=False)
+        assert isinstance(est, int)
+        assert est > 0
+
+    def test_available_memory_bytes_returns_int_or_none(self):
+        result = available_memory_bytes()
+        assert result is None or (isinstance(result, int) and result > 0)

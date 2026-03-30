@@ -16,7 +16,9 @@ And returns two outputs:
 Runs inference on a background QThread to avoid freezing the GUI.
 """
 
+import ctypes
 import os
+import sys
 
 import librosa
 import numpy as np
@@ -40,6 +42,61 @@ HOP_LENGTH = 1024
 # Derived from inspecting the model: input shape [1, 2, 343980].
 SEGMENT_SAMPLES = 343980
 SEGMENT_SECONDS = SEGMENT_SAMPLES / SAMPLE_RATE  # ~7.8 seconds
+
+
+_ORT_OVERHEAD_BYTES = 400 * 1024 * 1024  # ~400 MB for ORT session + runtime
+_BASELINE_BYTES = 300 * 1024 * 1024      # ~300 MB Python/Qt/libs baseline
+
+
+def estimate_separation_memory(
+    duration_seconds: float,
+    is_6_stem: bool,
+) -> int:
+    """Return estimated peak RAM in bytes for separating a track.
+
+    The dominant allocations are:
+    * Input audio (stereo float32)
+    * The overlap-add accumulator (n_stems * 2 * total_samples * float32)
+    * A mixture copy inside wiener_filter (2 * total_samples * float32)
+    * Per-segment ONNX temporaries (~100 MB, bounded by segment size)
+    * ORT session / model weights
+    """
+    n_stems = 6 if is_6_stem else 4
+    total_samples = int(SAMPLE_RATE * duration_seconds)
+    bps = 4  # float32
+
+    audio = 2 * total_samples * bps
+    accumulator = n_stems * 2 * total_samples * bps
+    mixture_copy = 2 * total_samples * bps
+    segment_temps = 100 * 1024 * 1024
+
+    return audio + accumulator + mixture_copy + segment_temps + _ORT_OVERHEAD_BYTES
+
+
+def available_memory_bytes() -> int | None:
+    """Return available physical RAM in bytes, or None if unknown."""
+    if sys.platform == "win32":
+        try:
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = _MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(stat)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            return stat.ullAvailPhys
+        except Exception:
+            return None
+    return None
 
 
 class SeparatorWorker(QThread):
@@ -106,6 +163,8 @@ class SeparatorWorker(QThread):
 
         self.progress.emit(15, "Separating stems...")
         separated = self._run_segmented_inference(audio, session)
+
+        del session, audio
 
         if self._is_cancelled:
             self.error.emit("Separation cancelled by user.")
