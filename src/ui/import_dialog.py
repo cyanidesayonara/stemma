@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 
+import soundfile as sf
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -503,8 +504,6 @@ class ImportDialog(QDialog):
         Returns True to proceed, False to abort.
         """
         try:
-            import soundfile as sf
-
             info = sf.info(audio_path)
             duration = info.duration
         except Exception:

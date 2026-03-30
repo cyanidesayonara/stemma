@@ -45,7 +45,6 @@ SEGMENT_SECONDS = SEGMENT_SAMPLES / SAMPLE_RATE  # ~7.8 seconds
 
 
 _ORT_OVERHEAD_BYTES = 400 * 1024 * 1024  # ~400 MB for ORT session + runtime
-_BASELINE_BYTES = 300 * 1024 * 1024      # ~300 MB Python/Qt/libs baseline
 
 
 def estimate_separation_memory(

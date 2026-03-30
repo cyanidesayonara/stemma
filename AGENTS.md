@@ -133,7 +133,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
 12. **Dual-Agent Workflow:** We use a builder/reviewer model. The "Builder" agent implements the feature and opens a PR. Do not merge your own PRs. The user will pass the PR to a "Reviewer" agent to audit the code, catch bugs, suggest improvements, and approve it.
-13. **No inline imports.** All imports belong at the top of the file. Do not place `import` statements inside functions or methods.
+13. **Imports at module scope by default.** Prefer top-of-file imports. Deferred imports inside a function or method are acceptable when there is a concrete reason (for example: faster cold start, avoiding a heavy or rarely used dependency until needed, or optional/platform-specific modules). Add a short comment at the import site when the reason is not obvious.
 
 ## Current Status
 
