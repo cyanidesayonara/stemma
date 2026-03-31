@@ -41,10 +41,10 @@ $manifestRaw = Get-Content -Path $manifestFile -Raw
 # Word boundary so MinVersion="..." is not matched (it contains the substring Version=").
 $pattern = '\bVersion="\d+\.\d+\.\d+\.\d+"'
 $replacement = "Version=`"$msixFourPart`""
-$updatedManifest = $manifestRaw -replace $pattern, $replacement
-if ($updatedManifest -eq $manifestRaw) {
+if ($manifestRaw -notmatch $pattern) {
     throw "AppxManifest.xml: could not find Identity Version attribute to update"
 }
+$updatedManifest = $manifestRaw -replace $pattern, $replacement
 Set-Content -Path $manifestFile -Value $updatedManifest.TrimEnd() -Encoding utf8NoBOM
 
 Write-Output "Synced release version: app $semver, MSIX $msixFourPart (from tag $trimmed)"
