@@ -35,7 +35,9 @@ def library(tmp_path):
 
 @pytest.fixture
 def controls(qapp, player):
-    return PlayerControls(player)
+    ctrl = PlayerControls(player)
+    yield ctrl
+    ctrl._cleanup_peak_thread()
 
 
 @pytest.fixture

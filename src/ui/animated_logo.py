@@ -95,19 +95,19 @@ class AnimatedLogoWidget(QWidget):
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self.update)
         self._animating = False
-        self._static_t = -1
+        self._static_t = _ANIM_END_MS
 
     # -- public API ----------------------------------------------------------
 
     def play_intro(self, with_sound: bool = True) -> None:
         """Start (or restart) the note/wave animation."""
-        if with_sound and self._play_sound:
-            self._do_play_sound()
         self._static_t = _ANIM_END_MS
         self._clock.restart()
         self._animating = True
         self._timer.start(_FRAME_MS)
         self.update()
+        if with_sound and self._play_sound:
+            self._do_play_sound()
 
     def set_theme(self, theme: str) -> None:
         """Rebuild the base pixmap and note colors for *theme*."""
@@ -164,7 +164,10 @@ class AnimatedLogoWidget(QWidget):
     def _do_play_sound(self) -> None:
         if not os.path.isfile(_AUDIO_PATH):
             return
-        play_wav_async(_AUDIO_PATH)
+        try:
+            play_wav_async(_AUDIO_PATH)
+        except Exception:
+            pass
 
     @staticmethod
     def _render_base(theme: str) -> QPixmap:

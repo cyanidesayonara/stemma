@@ -71,7 +71,7 @@ class TestLoadBaseSvg:
 
     def test_stemma_text_preserved(self):
         svg = _load_base_svg("dark")
-        assert "translate(76.7,28)" in svg
+        assert "translate(76.7,23)" in svg
 
 
 class TestNoteAlpha:
@@ -122,9 +122,9 @@ class TestAnimatedLogoConstruction:
         w = AnimatedLogoWidget(theme="dark", play_sound=False)
         assert w.cursor().shape() == Qt.CursorShape.PointingHandCursor
 
-    def test_initial_static_t_hides_notes(self, app):
+    def test_initial_static_t_shows_final_frame(self, app):
         w = AnimatedLogoWidget(theme="dark", play_sound=False)
-        assert w._static_t < 0
+        assert w._static_t > 0
 
 
 class TestPlayIntro:
@@ -138,7 +138,7 @@ class TestPlayIntro:
 
     def test_sets_static_t(self, app):
         w = AnimatedLogoWidget(theme="dark", play_sound=False)
-        assert w._static_t < 0
+        assert w._static_t == _ANIM_END_MS
         w.play_intro(with_sound=False)
         assert w._static_t == _ANIM_END_MS
         w._timer.stop()

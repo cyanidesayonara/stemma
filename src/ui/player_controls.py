@@ -5,14 +5,16 @@ Per-stem row: label, Mute button, Solo button, volume slider.
 Color-coded stems. Full implementation in ticket #9.
 """
 
+import math
 import time
 
 import numpy as np
 
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
+from concurrent.futures import Future, ThreadPoolExecutor
+
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -30,6 +32,7 @@ from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import (
     DARK_COLORS,
+    LIGHT_COLORS,
     RECORDING_COLOR,
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
@@ -41,6 +44,25 @@ _PEAK_DEBOUNCE_MS = 80
 _ICON_SIZE = 24
 _MAX_RECORDING_TAKES = 2
 _MINI_WAVEFORM_WIDTH = 250
+
+
+def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
+                      mini_bins=200):
+    """Compute peaks on a background thread. Returns (main_peaks, stem_peaks)."""
+    main_peaks = compute_peaks(
+        stems=stems,
+        muted=muted,
+        soloed=soloed,
+        volumes=volumes,
+        num_bins=num_bins,
+    )
+    stem_peaks = {}
+    for name, data in stems.items():
+        stem_peaks[name] = compute_stem_peaks(data, num_bins=mini_bins)
+    return main_peaks, stem_peaks
+
+
+_peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
 
 
 def _make_icon(draw_fn, color: QColor) -> QIcon:
@@ -81,6 +103,129 @@ def _draw_record(p: QPainter, s: int) -> None:
     p.drawEllipse(QPointF(cx, cx), r, r)
 
 
+def _draw_mute(p: QPainter, s: int) -> None:
+    """Speaker with X — mute icon."""
+    m = s * 0.18
+    # Speaker body (small rectangle)
+    bw = s * 0.16
+    bh = s * 0.28
+    bx = m
+    by = s / 2.0 - bh / 2.0
+    p.drawRect(QRectF(bx, by, bw, bh))
+    # Speaker cone (triangle)
+    cx = bx + bw
+    cw = s * 0.20
+    p.drawPolygon(QPolygonF([
+        QPointF(cx, by), QPointF(cx + cw, m),
+        QPointF(cx + cw, s - m), QPointF(cx, by + bh),
+    ]))
+    # X slash
+    pen = QPen(p.brush().color(), s * 0.09)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    x0 = s * 0.58
+    p.drawLine(QPointF(x0, m * 1.3), QPointF(s - m, s - m * 1.3))
+    p.drawLine(QPointF(x0, s - m * 1.3), QPointF(s - m, m * 1.3))
+    p.setPen(Qt.PenStyle.NoPen)
+
+
+def _draw_solo(p: QPainter, s: int) -> None:
+    """Headphones icon — solo."""
+    cx = s / 2.0
+    m = s * 0.15
+    # Arc for headband
+    pen = QPen(p.brush().color(), s * 0.09)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    arc_rect = QRectF(m, m, s - 2 * m, s - 2 * m)
+    p.drawArc(arc_rect, 30 * 16, 120 * 16)
+    p.setPen(Qt.PenStyle.NoPen)
+    # Ear cups (two small rounded rects)
+    cw = s * 0.18
+    ch = s * 0.30
+    cy = s * 0.52
+    p.drawRoundedRect(QRectF(m, cy, cw, ch), 2, 2)
+    p.drawRoundedRect(QRectF(s - m - cw, cy, cw, ch), 2, 2)
+
+
+def _draw_power(p: QPainter, s: int) -> None:
+    """Universal power/on-off icon — circle with line at top."""
+    cx = s / 2.0
+    cy = s / 2.0 + s * 0.08  # push ring down to make room for line above
+    r = s * 0.28
+    stroke = max(1.5, s * 0.09)
+    pen = QPen(p.brush().color(), stroke)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    arc_rect = QRectF(cx - r, cy - r, 2 * r, 2 * r)
+    # Gap centered at 90° (12 o'clock in Qt). Arc from 125° CCW 290° to 55°.
+    p.drawArc(arc_rect, 125 * 16, 290 * 16)
+    # Vertical line through the top gap
+    line_top = max(stroke * 0.5, cy - r - s * 0.06)
+    line_bot = cy - s * 0.04
+    p.drawLine(QPointF(cx, line_top), QPointF(cx, line_bot))
+    p.setPen(Qt.PenStyle.NoPen)
+
+
+def _draw_repeat(p: QPainter, s: int) -> None:
+    """Cycle/repeat arrows icon."""
+    cx = s / 2.0
+    m = s * 0.20
+    r = (s - 2 * m) / 2.0
+    pen = QPen(p.brush().color(), s * 0.09)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    # Draw two arcs (top-right and bottom-left)
+    arc_rect = QRectF(m, m, s - 2 * m, s - 2 * m)
+    p.drawArc(arc_rect, 20 * 16, 140 * 16)   # top arc
+    p.drawArc(arc_rect, 200 * 16, 140 * 16)  # bottom arc
+    p.setPen(Qt.PenStyle.NoPen)
+    # Arrowhead on top arc (right end)
+    a1 = math.radians(20)
+    ax1 = cx + r * math.cos(a1)
+    ay1 = cx - r * math.sin(a1)
+    ah = s * 0.12
+    p.drawPolygon(QPolygonF([
+        QPointF(ax1 + ah, ay1 - ah * 0.6),
+        QPointF(ax1 - ah * 0.3, ay1 - ah * 0.8),
+        QPointF(ax1, ay1 + ah * 0.5),
+    ]))
+    # Arrowhead on bottom arc (left end)
+    a2 = math.radians(200)
+    ax2 = cx + r * math.cos(a2)
+    ay2 = cx - r * math.sin(a2)
+    p.drawPolygon(QPolygonF([
+        QPointF(ax2 - ah, ay2 + ah * 0.6),
+        QPointF(ax2 + ah * 0.3, ay2 + ah * 0.8),
+        QPointF(ax2, ay2 - ah * 0.5),
+    ]))
+
+
+_STEM_ICON_SIZE = 18
+
+_CHECKED_ICON_COLOR = QColor("#ffffff")
+
+
+def _make_toggle_icon(draw_fn, normal_color: QColor,
+                      size: int = _ICON_SIZE) -> QIcon:
+    """Create an icon with distinct normal (theme text) and checked (white) pixmaps."""
+    icon = QIcon()
+    for color, state in [
+        (normal_color, QIcon.State.Off),
+        (_CHECKED_ICON_COLOR, QIcon.State.On),
+    ]:
+        pixmap = QPixmap(QSize(size, size))
+        pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        draw_fn(p, size)
+        p.end()
+        icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
+    return icon
+
+
 def _format_time(seconds: float) -> str:
     """Format seconds as mm:ss."""
     m = int(seconds) // 60
@@ -118,21 +263,31 @@ class StemRow(QWidget):
         self._mini_waveform.seek_requested.connect(self._on_mini_seek)
         layout.addWidget(self._mini_waveform, 1)
 
-        self._mute_btn = QPushButton("M")
+        colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
+        text_c = QColor(colors["text"])
+        display = stem_name.capitalize()
+
+        self._mute_btn = QPushButton()
+        self._mute_btn.setObjectName("icon-btn")
         self._mute_btn.setCheckable(True)
-        self._mute_btn.setFixedSize(32, 28)
-        self._mute_btn.setStyleSheet("padding: 2px;")
-        self._mute_btn.setToolTip(f"Mute {stem_name}")
-        self._mute_btn.setAccessibleName(f"Mute {stem_name}")
+        self._mute_btn.setFixedSize(28, 28)
+        self._mute_btn.setIcon(
+            _make_toggle_icon(_draw_mute, text_c, _STEM_ICON_SIZE))
+        self._mute_btn.setIconSize(QSize(_STEM_ICON_SIZE, _STEM_ICON_SIZE))
+        self._mute_btn.setToolTip(f"Mute {display}")
+        self._mute_btn.setAccessibleName(f"Mute {display}")
         self._mute_btn.toggled.connect(self._on_mute)
         layout.addWidget(self._mute_btn)
 
-        self._solo_btn = QPushButton("S")
+        self._solo_btn = QPushButton()
+        self._solo_btn.setObjectName("icon-btn")
         self._solo_btn.setCheckable(True)
-        self._solo_btn.setFixedSize(32, 28)
-        self._solo_btn.setStyleSheet("padding: 2px;")
-        self._solo_btn.setToolTip(f"Solo {stem_name}")
-        self._solo_btn.setAccessibleName(f"Solo {stem_name}")
+        self._solo_btn.setFixedSize(28, 28)
+        self._solo_btn.setIcon(
+            _make_toggle_icon(_draw_solo, text_c, _STEM_ICON_SIZE))
+        self._solo_btn.setIconSize(QSize(_STEM_ICON_SIZE, _STEM_ICON_SIZE))
+        self._solo_btn.setToolTip(f"Solo {display}")
+        self._solo_btn.setAccessibleName(f"Solo {display}")
         self._solo_btn.toggled.connect(self._on_solo)
         layout.addWidget(self._solo_btn)
 
@@ -140,35 +295,54 @@ class StemRow(QWidget):
         self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
         self._volume_slider.setFixedWidth(120)
-        self._volume_slider.setToolTip(f"{stem_name} volume (0-200%, double-click to reset)")
-        self._volume_slider.setAccessibleName(f"{stem_name} volume")
+        self._volume_slider.setToolTip(f"{display} volume (0-200%, double-click to reset)")
+        self._volume_slider.setAccessibleName(f"{display} volume")
         self._volume_slider.valueChanged.connect(self._on_volume)
         self._volume_slider.mouseDoubleClickEvent = lambda _: self._volume_slider.setValue(100)
         layout.addWidget(self._volume_slider)
 
-        self._vol_label = QLabel("100%")
-        self._vol_label.setFixedWidth(45)
-        self._vol_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        layout.addWidget(self._vol_label)
+        self._vol_combo = QComboBox()
+        _VOLUME_PRESETS = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]
+        for v in _VOLUME_PRESETS:
+            self._vol_combo.addItem(f"{v}%", v)
+        self._vol_combo.setCurrentText("100%")
+        self._vol_combo.setFixedWidth(68)
+        self._vol_combo.setToolTip(f"{display} volume")
+        self._vol_combo.setAccessibleName(f"{display} volume preset")
+        self._vol_combo.currentIndexChanged.connect(self._on_vol_combo)
+        layout.addWidget(self._vol_combo)
 
     def _on_mini_seek(self, seconds: float) -> None:
         self._player.seek(seconds)
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
+        self._mute_btn.clearFocus()
         self.mix_changed.emit()
 
     def _on_solo(self, checked: bool) -> None:
         self._player.set_solo(self._stem_name, checked)
+        self._solo_btn.clearFocus()
         self.mix_changed.emit()
 
     def _on_volume(self, value: int) -> None:
         gain = value / 100.0
         self._player.set_volume(self._stem_name, gain)
-        self._vol_label.setText(f"{value}%")
+        # Sync combo without re-firing
+        text = f"{value}%"
+        idx = self._vol_combo.findText(text)
+        self._vol_combo.blockSignals(True)
+        if idx >= 0:
+            self._vol_combo.setCurrentIndex(idx)
+        else:
+            self._vol_combo.setEditText(text)
+        self._vol_combo.blockSignals(False)
         self.mix_changed.emit()
+
+    def _on_vol_combo(self, index: int) -> None:
+        value = self._vol_combo.itemData(index)
+        if value is not None:
+            self._volume_slider.setValue(value)
 
     def set_muted(self, muted: bool) -> None:
         """Programmatically set the mute button state (e.g. from keyboard shortcut)."""
@@ -181,6 +355,10 @@ class StemRow(QWidget):
     def set_volume_slider(self, value: int) -> None:
         """Programmatically set the volume slider (0-200)."""
         self._volume_slider.setValue(value)
+        text = f"{value}%"
+        idx = self._vol_combo.findText(text)
+        if idx >= 0:
+            self._vol_combo.setCurrentIndex(idx)
 
     def set_mini_peaks(self, peaks: "np.ndarray") -> None:
         """Update the mini waveform with new peak data."""
@@ -191,8 +369,14 @@ class StemRow(QWidget):
         palette = STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
         color = palette.get(self._stem_name, "#95a5a6")
         self._label.setStyleSheet(f"color: {color}; font-weight: bold;")
-        self._mini_waveform._color = QColor(color)
+        self._mini_waveform.set_color(QColor(color))
         self._mini_waveform.update()
+        tc = DARK_COLORS if theme == "dark" else LIGHT_COLORS
+        text_c = QColor(tc["text"])
+        self._mute_btn.setIcon(
+            _make_toggle_icon(_draw_mute, text_c, _STEM_ICON_SIZE))
+        self._solo_btn.setIcon(
+            _make_toggle_icon(_draw_solo, text_c, _STEM_ICON_SIZE))
 
 
 class RecordingStemRow(StemRow):
@@ -210,7 +394,7 @@ class RecordingStemRow(StemRow):
         self._label.setStyleSheet(
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
-        self._mini_waveform._color = QColor(RECORDING_COLOR)
+        self._mini_waveform.set_color(QColor(RECORDING_COLOR))
 
         lay = self.layout()
         insert_pos = lay.count()
@@ -235,7 +419,6 @@ class RecordingStemRow(StemRow):
 
         self._delete_btn = QPushButton("X")
         self._delete_btn.setFixedSize(28, 28)
-        self._delete_btn.setStyleSheet("padding: 2px;")
         self._delete_btn.setToolTip(f"Delete {display_name}")
         self._delete_btn.setAccessibleName(f"Delete {display_name}")
         self._delete_btn.clicked.connect(
@@ -264,8 +447,21 @@ class PlayerControls(QWidget):
         self._peaks_timer.setInterval(_PEAK_DEBOUNCE_MS)
         self._peaks_timer.timeout.connect(self._do_recompute_peaks)
 
+        self._peak_future: Future | None = None
+        self._peak_poll_timer = QTimer(self)
+        self._peak_poll_timer.setInterval(16)  # ~60fps poll
+        self._peak_poll_timer.timeout.connect(self._poll_peak_future)
+
         self._setup_ui()
         self._connect_signals()
+
+    def _cleanup_peak_thread(self) -> None:
+        """Wait for any pending peak computation before destruction."""
+        self._peaks_timer.stop()
+        self._peak_poll_timer.stop()
+        if self._peak_future is not None and not self._peak_future.done():
+            self._peak_future.result(timeout=2)
+        self._peak_future = None
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -425,11 +621,14 @@ class PlayerControls(QWidget):
         metro_ci_bar.addWidget(self._metro_label)
 
         self._metronome_toggle = QPushButton()
+        self._metronome_toggle.setObjectName("icon-btn")
         self._metronome_toggle.setCheckable(True)
         self._metronome_toggle.setFixedSize(36, 36)
+        self._metronome_toggle.setIcon(
+            _make_toggle_icon(_draw_power, icon_color))
+        self._metronome_toggle.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._metronome_toggle.setToolTip("Toggle metronome (M)")
         self._metronome_toggle.setAccessibleName("Toggle metronome")
-        self._metronome_toggle.setText("M")
         self._metronome_toggle.toggled.connect(self._on_metronome_toggled)
         metro_ci_bar.addWidget(self._metronome_toggle)
 
@@ -453,7 +652,7 @@ class PlayerControls(QWidget):
 
         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._metronome_vol_slider.setRange(0, 200)
-        self._metronome_vol_slider.setValue(50)
+        self._metronome_vol_slider.setValue(100)
         self._metronome_vol_slider.setFixedWidth(70)
         self._metronome_vol_slider.setToolTip("Metronome volume")
         self._metronome_vol_slider.setAccessibleName("Metronome volume")
@@ -462,12 +661,18 @@ class PlayerControls(QWidget):
         )
         metro_ci_bar.addWidget(self._metronome_vol_slider)
 
-        self._metronome_vol_label = QLabel("50%")
-        self._metronome_vol_label.setFixedWidth(36)
-        self._metronome_vol_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        self._metronome_vol_combo = QComboBox()
+        _MET_VOL_PRESETS = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]
+        for v in _MET_VOL_PRESETS:
+            self._metronome_vol_combo.addItem(f"{v}%", v)
+        self._metronome_vol_combo.setCurrentText("100%")
+        self._metronome_vol_combo.setFixedWidth(68)
+        self._metronome_vol_combo.setToolTip("Metronome volume")
+        self._metronome_vol_combo.setAccessibleName("Metronome volume preset")
+        self._metronome_vol_combo.currentIndexChanged.connect(
+            self._on_metronome_vol_combo
         )
-        metro_ci_bar.addWidget(self._metronome_vol_label)
+        metro_ci_bar.addWidget(self._metronome_vol_combo)
 
         metro_ci_bar.addStretch()
 
@@ -475,11 +680,14 @@ class PlayerControls(QWidget):
         metro_ci_bar.addWidget(self._ci_label)
 
         self._count_in_toggle = QPushButton()
+        self._count_in_toggle.setObjectName("icon-btn")
         self._count_in_toggle.setCheckable(True)
         self._count_in_toggle.setFixedSize(36, 36)
+        self._count_in_toggle.setIcon(
+            _make_toggle_icon(_draw_power, icon_color))
+        self._count_in_toggle.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._count_in_toggle.setToolTip("Toggle count-in before playback (C)")
         self._count_in_toggle.setAccessibleName("Toggle count-in")
-        self._count_in_toggle.setText("CI")
         self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
         metro_ci_bar.addWidget(self._count_in_toggle)
 
@@ -495,7 +703,13 @@ class PlayerControls(QWidget):
         )
         metro_ci_bar.addWidget(self._count_in_beats_spin)
 
-        self._count_in_repeats_cb = QCheckBox("Repeats")
+        self._count_in_repeats_cb = QPushButton()
+        self._count_in_repeats_cb.setObjectName("icon-btn")
+        self._count_in_repeats_cb.setCheckable(True)
+        self._count_in_repeats_cb.setFixedSize(36, 36)
+        self._count_in_repeats_cb.setIcon(
+            _make_toggle_icon(_draw_repeat, icon_color))
+        self._count_in_repeats_cb.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._count_in_repeats_cb.setToolTip(
             "Also count in before each A-B loop repeat"
         )
@@ -582,6 +796,7 @@ class PlayerControls(QWidget):
         """Switch all theme-dependent visuals to *theme*."""
         self._theme = theme
         icon_color = QColor(colors["text"])
+        base_c = QColor(colors["base"])
 
         self._play_icon = _make_icon(_draw_play, icon_color)
         self._pause_icon = _make_icon(_draw_pause, icon_color)
@@ -592,6 +807,14 @@ class PlayerControls(QWidget):
         else:
             self._play_btn.setIcon(self._play_icon)
         self._stop_btn.setIcon(self._stop_icon)
+
+        # Toggle button icons
+        self._metronome_toggle.setIcon(
+            _make_toggle_icon(_draw_power, icon_color))
+        self._count_in_toggle.setIcon(
+            _make_toggle_icon(_draw_power, icon_color))
+        self._count_in_repeats_cb.setIcon(
+            _make_toggle_icon(_draw_repeat, icon_color))
 
         # Inline-styled labels
         self._hint_label.setStyleSheet(
@@ -638,6 +861,10 @@ class PlayerControls(QWidget):
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
+        # Preserve mute/solo state from previous song
+        saved_muted = set(self._player.muted_stems)
+        saved_soloed = set(self._player.soloed_stems)
+
         for row in self._stem_rows.values():
             row.setParent(None)
             row.deleteLater()
@@ -665,11 +892,19 @@ class PlayerControls(QWidget):
         self.update_record_button_state()
 
         if stem_names:
+            self._waveform.set_loading(True)
+            # Restore mute/solo from previous song if stems match
+            for name, row in self._stem_rows.items():
+                if name in saved_muted:
+                    row.set_muted(True)
+                if name in saved_soloed:
+                    row.set_soloed(True)
             self._do_recompute_peaks()
 
     def clear_song(self) -> None:
         """Return to the empty logo state."""
         self.set_stem_names([])
+        self._waveform.set_loading(False)
         self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
         self._waveform.set_position(0.0)
         self._time_label.setText("0:00 / 0:00")
@@ -767,30 +1002,59 @@ class PlayerControls(QWidget):
         self._peaks_timer.start()
 
     def _do_recompute_peaks(self) -> None:
-        """Perform the actual waveform peak recomputation."""
+        """Dispatch waveform peak computation to a background thread."""
         self._peaks_timer.stop()
         stems = self._player.stems
         if not stems:
             self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
             return
-        peaks = compute_peaks(
+
+        # If a previous computation is still running, let the debounce
+        # timer re-fire after the current one finishes.
+        if self._peak_future is not None and not self._peak_future.done():
+            self._peaks_timer.start()
+            return
+
+        self._peak_future = _peak_pool.submit(
+            _compute_peaks_bg,
             stems=stems,
             muted=self._player.muted_stems,
             soloed=self._player.soloed_stems,
             volumes=self._player.volumes,
-            num_bins=2000,
         )
-        self._waveform.set_peaks(peaks)
+        self._peak_poll_timer.start()
+
+    def _poll_peak_future(self) -> None:
+        """Check if the background peak computation has finished."""
+        if self._peak_future is None or not self._peak_future.done():
+            return
+        self._peak_poll_timer.stop()
+        future = self._peak_future
+        self._peak_future = None
+        if future.cancelled() or future.exception():
+            return
+        try:
+            main_peaks, stem_peaks = future.result()
+        except Exception:
+            return
+        self._on_peaks_computed(main_peaks, stem_peaks)
+
+    def _on_peaks_computed(self, main_peaks: np.ndarray,
+                           stem_peaks: dict) -> None:
+        """Apply peak results from the background thread."""
+        try:
+            _ = self._waveform
+        except RuntimeError:
+            return  # Widget was destroyed
+        self._waveform.set_peaks(main_peaks)
         self._waveform.set_total_seconds(self._player.total_seconds)
 
         for name, row in self._stem_rows.items():
-            if name in stems:
-                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
-                row.set_mini_peaks(stem_peaks)
+            if name in stem_peaks:
+                row.set_mini_peaks(stem_peaks[name])
         for name, row in self._recording_rows.items():
-            if name in stems:
-                stem_peaks = compute_stem_peaks(stems[name], num_bins=200)
-                row.set_mini_peaks(stem_peaks)
+            if name in stem_peaks:
+                row.set_mini_peaks(stem_peaks[name])
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""
@@ -901,8 +1165,19 @@ class PlayerControls(QWidget):
 
     def _on_metronome_vol_changed(self, value: int) -> None:
         """User moved the metronome volume slider."""
-        self._metronome_vol_label.setText(f"{value}%")
         self._player.set_metronome_volume(value / 100.0)
+        text = f"{value}%"
+        idx = self._metronome_vol_combo.findText(text)
+        self._metronome_vol_combo.blockSignals(True)
+        if idx >= 0:
+            self._metronome_vol_combo.setCurrentIndex(idx)
+        self._metronome_vol_combo.blockSignals(False)
+
+    def _on_metronome_vol_combo(self, index: int) -> None:
+        """User selected a metronome volume preset."""
+        value = self._metronome_vol_combo.itemData(index)
+        if value is not None:
+            self._metronome_vol_slider.setValue(value)
 
     def toggle_metronome(self) -> None:
         """Toggle metronome on/off (for keyboard shortcut)."""
@@ -922,7 +1197,13 @@ class PlayerControls(QWidget):
         self._metronome_vol_slider.blockSignals(True)
         self._metronome_vol_slider.setValue(round(volume * 100))
         self._metronome_vol_slider.blockSignals(False)
-        self._metronome_vol_label.setText(f"{round(volume * 100)}%")
+        val_pct = round(volume * 100)
+        text = f"{val_pct}%"
+        idx = self._metronome_vol_combo.findText(text)
+        if idx >= 0:
+            self._metronome_vol_combo.blockSignals(True)
+            self._metronome_vol_combo.setCurrentIndex(idx)
+            self._metronome_vol_combo.blockSignals(False)
         self._player.set_metronome_volume(volume)
 
         self._metronome_toggle.blockSignals(True)

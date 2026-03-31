@@ -124,6 +124,8 @@ class MultiTrackPlayer(QObject):
         self._muted_stems: set[str] = set()
         self._soloed_stems: set[str] = set()
         self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
+        self._applied_gains: dict[str, float] = {}  # Last gain per stem (for ramping)
+        self._active_stems_cache: list[str] | None = None
 
         # A-B loop state.
         self._loop_a_frame: int | None = None
@@ -447,6 +449,8 @@ class MultiTrackPlayer(QObject):
         self._muted_stems.clear()
         self._soloed_stems.clear()
         self._volumes.clear()
+        self._applied_gains.clear()
+        self._active_stems_cache = None
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
@@ -637,6 +641,7 @@ class MultiTrackPlayer(QObject):
             self._muted_stems.add(stem_name)
         else:
             self._muted_stems.discard(stem_name)
+        self._active_stems_cache = None
 
     @property
     def muted_stems(self) -> set[str]:
@@ -682,6 +687,7 @@ class MultiTrackPlayer(QObject):
             self._soloed_stems.add(stem_name)
         else:
             self._soloed_stems.discard(stem_name)
+        self._active_stems_cache = None
 
     # ------------------------------------------------------------------
     # A-B Loop
@@ -1001,15 +1007,20 @@ class MultiTrackPlayer(QObject):
         # Clear the output buffer.
         outdata.fill(0.0)
 
-        # Determine which stems should be audible.
-        if self._soloed_stems:
-            active_stems = [
-                name for name in self._stems if name in self._soloed_stems
-            ]
-        else:
-            active_stems = [
-                name for name in self._stems if name not in self._muted_stems
-            ]
+        # Determine which stems should be audible (cached between changes).
+        active_stems = self._active_stems_cache
+        if active_stems is None:
+            if self._soloed_stems:
+                active_stems = [
+                    name for name in self._stems
+                    if name in self._soloed_stems
+                ]
+            else:
+                active_stems = [
+                    name for name in self._stems
+                    if name not in self._muted_stems
+                ]
+            self._active_stems_cache = active_stems
 
         # Fill the output buffer, handling loop wraps as needed.
         buf_offset = 0
@@ -1028,14 +1039,37 @@ class MultiTrackPlayer(QObject):
                 start = self._current_frame
                 end = start + frames_to_read
 
-                for name in active_stems:
-                    stem_data = self._stems[name]
+                active_set = set(active_stems)
+                for name, stem_data in self._stems.items():
+                    target = (self._volumes.get(name, 1.0)
+                              if name in active_set else 0.0)
+                    prev = self._applied_gains.get(name, target)
+                    if target == 0.0 and prev == 0.0:
+                        continue
                     stem_end = min(end, stem_data.shape[0])
                     read_len = stem_end - start
-                    if read_len > 0:
-                        gain = self._volumes.get(name, 1.0)
+                    if read_len <= 0:
+                        continue
+                    chunk = stem_data[start:stem_end]
+                    if prev != target:
+                        ramp_len = min(read_len, max(
+                            int(0.005 * self._sample_rate), 1))
+                        ramp = np.linspace(
+                            prev, target, ramp_len,
+                            dtype=np.float32,
+                        )[:, np.newaxis]
+                        outdata[buf_offset:buf_offset + ramp_len] += (
+                            chunk[:ramp_len] * ramp
+                        )
+                        if read_len > ramp_len:
+                            outdata[
+                                buf_offset + ramp_len
+                                :buf_offset + read_len
+                            ] += chunk[ramp_len:] * target
+                        self._applied_gains[name] = target
+                    else:
                         outdata[buf_offset:buf_offset + read_len] += (
-                            stem_data[start:stem_end] * gain
+                            chunk * target
                         )
 
                 if (self._recording
