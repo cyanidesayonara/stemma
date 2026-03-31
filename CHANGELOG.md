@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-03-31 -- v2.0.4 UI Polish and Store Alignment
+
+### Done
+- **UI button polish:** Standardized stem mute/solo buttons with explicit object name (`#icon-btn`) and QSS matching toolbar buttons.
+- **Icons:** Replaced complex metronome and count-in icons with universal power (on/off) icons for clarity at small sizes. Fixed visibility of active-state icons on the accent background.
+- **Metronome volume:** Replaced the plain percentage label with a drop-down preset combo box (0% to 200% in 20% steps), synced bidirectionally with the slider.
+- **State persistence:** The player now preserves the solo and mute state of stem tracks when switching to a different song.
+- **Logo alignment:** Fine-tuned the vertical baselines of letters in both the animated splash screen and the static SVG logos so text sits perfectly centered within the staff lines.
+- **Tooltips:** Capitalized stem names in the mixer tooltips.
+- **Store Assets:** Regenerated and preserved Store listing assets.
+
+### Metrics
+- 549 fast tests pass, 5 skipped (slow ONNX/hardware).
+
+---
+
 ## 2026-03-30 -- Low-RAM stem separation (Store certification fix)
 
 ### Done

@@ -6,8 +6,10 @@ and drag-to-seek. Respects the active theme via set_theme_colors().
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QSize, QPointF
+from PySide6.QtCore import Qt, Signal, QSize, QPointF, QTimer, QRectF
 from PySide6.QtGui import (
     QColor,
     QLinearGradient,
@@ -45,6 +47,12 @@ class WaveformWidget(QWidget):
         self._seeking: bool = False
         self._cached_size: tuple[int, int] = (-1, -1)
         self._cached_path: QPainterPath | None = None
+        self._loading: bool = False
+        self._shimmer_phase: float = 0.0
+
+        self._shimmer_timer = QTimer(self)
+        self._shimmer_timer.setInterval(30)  # ~33fps
+        self._shimmer_timer.timeout.connect(self._tick_shimmer)
 
         self._apply_colors(DARK_COLORS)
 
@@ -99,12 +107,36 @@ class WaveformWidget(QWidget):
         self._peaks = peaks
         self._max_peak = float(np.max(peaks)) if len(peaks) > 0 else 0.0
         self._cached_size = (0, 0)
+        if self._loading:
+            self.set_loading(False)
+        self.update()
+
+    def set_loading(self, loading: bool) -> None:
+        """Show or hide a shimmer animation while peaks are being computed."""
+        if loading == self._loading:
+            return
+        self._loading = loading
+        if loading:
+            self._shimmer_phase = 0.0
+            self._shimmer_timer.start()
+        else:
+            self._shimmer_timer.stop()
+        self.update()
+
+    def _tick_shimmer(self) -> None:
+        """Advance the shimmer phase and repaint."""
+        self._shimmer_phase = (self._shimmer_phase + 0.015) % 1.0
         self.update()
 
     def set_position(self, ratio: float) -> None:
         """Update the playback cursor position (0.0 to 1.0)."""
-        self._position_ratio = max(0.0, min(1.0, ratio))
-        if not self._seeking:
+        new_ratio = max(0.0, min(1.0, ratio))
+        if new_ratio == self._position_ratio:
+            return
+        old_px = int(self._position_ratio * self.width())
+        new_px = int(new_ratio * self.width())
+        self._position_ratio = new_ratio
+        if not self._seeking and old_px != new_px:
             self.update()
 
     def set_loop_markers(
@@ -129,6 +161,11 @@ class WaveformWidget(QWidget):
 
         painter.fillRect(0, 0, w, h, self._bg_color)
 
+        if self._loading:
+            self._draw_shimmer(painter, w, h)
+            painter.end()
+            return
+
         if self._peaks is not None and len(self._peaks) > 0:
             self._draw_waveform(painter, w, h)
 
@@ -138,6 +175,35 @@ class WaveformWidget(QWidget):
         self._draw_cursor(painter, w, h)
 
         painter.end()
+
+    def _draw_shimmer(self, painter: QPainter, w: int, h: int) -> None:
+        """Draw a subtle animated shimmer bar sweeping left to right."""
+        # Smooth sinusoidal easing for the shimmer position
+        t = self._shimmer_phase
+        # Use sin for smooth back-and-forth feel
+        pos = 0.5 + 0.5 * math.sin(t * 2 * math.pi - math.pi / 2)
+
+        bar_w = w * 0.25  # shimmer highlight width
+        bar_x = pos * (w + bar_w) - bar_w  # sweep from left to right
+
+        # Build a horizontal gradient for the shimmer highlight
+        accent = self._waveform_color
+        grad = QLinearGradient(bar_x, 0, bar_x + bar_w, 0)
+        grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+        grad.setColorAt(0.4, QColor(accent.red(), accent.green(), accent.blue(), 50))
+        grad.setColorAt(0.5, QColor(accent.red(), accent.green(), accent.blue(), 70))
+        grad.setColorAt(0.6, QColor(accent.red(), accent.green(), accent.blue(), 50))
+        grad.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(grad)
+        painter.drawRect(QRectF(bar_x, 0, bar_w, h))
+
+        # Draw a thin baseline to give the area some structure
+        center = h / 2.0
+        line_color = QColor(accent.red(), accent.green(), accent.blue(), 40)
+        painter.setPen(QPen(line_color, 1.0))
+        painter.drawLine(QPointF(0, center), QPointF(w, center))
 
     def _draw_waveform(self, painter: QPainter, w: int, h: int) -> None:
         assert self._peaks is not None
@@ -259,6 +325,9 @@ class MiniWaveformWidget(QWidget):
         self._peaks: np.ndarray | None = None
         self._max_peak: float = 0.0
         self._color = QColor(color)
+        self._fill_color = QColor(
+            self._color.red(), self._color.green(), self._color.blue(), 140
+        )
         self._player = player
         self._cached_size: tuple[int, int] = (-1, -1)
         self._cached_path: QPainterPath | None = None
@@ -266,6 +335,13 @@ class MiniWaveformWidget(QWidget):
         self.setFixedHeight(_MINI_HEIGHT)
         self.setMinimumWidth(80)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_color(self, color: QColor) -> None:
+        """Update the waveform fill color."""
+        self._color = color
+        self._fill_color = QColor(
+            color.red(), color.green(), color.blue(), 140
+        )
 
     def set_peaks(self, peaks: np.ndarray) -> None:
         """Set the peak array and repaint."""
@@ -292,14 +368,8 @@ class MiniWaveformWidget(QWidget):
                 self._cached_path = self._build_path(w, h)
                 self._cached_size = (w, h)
             if self._cached_path is not None:
-                fill = QColor(
-                    self._color.red(),
-                    self._color.green(),
-                    self._color.blue(),
-                    140,
-                )
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(fill)
+                painter.setBrush(self._fill_color)
                 painter.drawPath(self._cached_path)
 
         painter.end()

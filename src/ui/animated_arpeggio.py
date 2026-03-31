@@ -97,12 +97,12 @@ class AnimatedArpeggioWidget(QWidget):
 
     def play_intro(self, with_sound: bool = True) -> None:
         """Start (or restart) the letter glow animation."""
-        if with_sound and self._play_sound:
-            self._do_play_sound()
         self._clock.restart()
         self._animating = True
         self._timer.start(_FRAME_MS)
         self.update()
+        if with_sound and self._play_sound:
+            self._do_play_sound()
 
     def set_theme(self, theme: str) -> None:
         """Rebuild base pixmap for *theme*."""
@@ -179,7 +179,10 @@ class AnimatedArpeggioWidget(QWidget):
     def _do_play_sound(self) -> None:
         if not os.path.isfile(_AUDIO_PATH):
             return
-        play_wav_async(_AUDIO_PATH)
+        try:
+            play_wav_async(_AUDIO_PATH)
+        except Exception:
+            pass
 
     @staticmethod
     def _render_base(theme: str) -> QPixmap:

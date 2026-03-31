@@ -138,14 +138,39 @@ QPushButton:pressed {{
 }}
 
 QPushButton:checked {{
-    background-color: {c["surface2"]};
+    background-color: {c["accent"]};
+    color: {c["base"]};
     border: 1px solid {c["accent"]};
+}}
+
+QPushButton:checked:hover {{
+    background-color: {c["accent"]};
+    color: {c["base"]};
+    border: 1px solid {c["text"]};
 }}
 
 QPushButton:disabled {{
     background-color: {c["base"]};
     color: {c["surface2"]};
     border-color: {c["surface0"]};
+}}
+
+QPushButton#icon-btn {{
+    background-color: {c["surface0"]};
+    border: 1px solid {c["surface1"]};
+    border-radius: 4px;
+    padding: 2px;
+    min-height: 0;
+    min-width: 0;
+}}
+
+QPushButton#icon-btn:checked {{
+    background-color: {c["accent"]};
+    border: 1px solid {c["accent"]};
+}}
+
+QPushButton#icon-btn:checked:hover {{
+    border: 1px solid {c["text"]};
 }}
 
 QSlider::groove:horizontal {{
@@ -255,7 +280,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
 }}
 
 QPushButton:focus {{
-    border: 1px solid {c["accent"]};
+    border: 1px solid {c["surface2"]};
 }}
 
 QSlider:focus {{
@@ -316,6 +341,15 @@ QComboBox QAbstractItemView {{
     color: {c["text"]};
     border: 1px solid {c["surface0"]};
     selection-background-color: {c["surface0"]};
+}}
+
+QToolTip {{
+    background-color: {c["surface0"]};
+    color: {c["text"]};
+    border: 1px solid {c["surface1"]};
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 9pt;
 }}
 """
 
