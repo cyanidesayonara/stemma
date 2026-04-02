@@ -851,10 +851,19 @@ class PlayerControls(QWidget):
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
         if not self._key_label.text():
             self._key_label.setStyleSheet(f"color: {colors['surface2']};")
+        else:
+            c = self._conf_color(self._key_conf)
+            if c:
+                self._key_label.setStyleSheet(f"color: {c};")
+
         if not self._detected_bpm_label.text():
             self._detected_bpm_label.setStyleSheet(
                 f"color: {colors['surface2']};"
             )
+        else:
+            c = self._conf_color(self._bpm_conf)
+            if c:
+                self._detected_bpm_label.setStyleSheet(f"color: {c};")
         self._footer_widget.setStyleSheet(
             f"border-top: 1px solid {colors['surface0']};"
         )
