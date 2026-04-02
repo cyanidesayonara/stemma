@@ -189,8 +189,7 @@ All core functionality implemented and tested:
 - [x] MSIX packaging for Microsoft Store (#74)
 
 ### Post-2.0 Backlog
-- [x] Tempo/key detection (suggestion-only display) (#42)
-- [ ] Beat-synced metronome (#42)
+- [x] Tempo/key detection & beat-synced metronome (#42)
 - [ ] Experimental DSP (#28)
 - [ ] Real-time streaming (#13)
 
