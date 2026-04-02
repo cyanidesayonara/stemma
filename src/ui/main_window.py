@@ -463,6 +463,10 @@ class MainWindow(QMainWindow):
             "session/metronome_volume", self._player.metronome_volume
         )
         self._settings.setValue(
+            "session/beat_sync_enabled",
+            self._player_controls.beat_sync_enabled,
+        )
+        self._settings.setValue(
             "session/count_in_enabled", self._player.count_in_enabled
         )
         self._settings.setValue(
@@ -585,6 +589,15 @@ class MainWindow(QMainWindow):
         self._player_controls.restore_metronome_state(
             met_bpm, bool(met_enabled), met_vol
         )
+
+        # Beat-sync state
+        beat_sync = self._settings.value(
+            "session/beat_sync_enabled", False
+        )
+        if isinstance(beat_sync, str):
+            beat_sync = beat_sync.lower() == "true"
+        if beat_sync:
+            self._player_controls.set_beat_sync(True)
 
         # Count-in state
         ci_enabled = self._settings.value(

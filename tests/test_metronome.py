@@ -319,3 +319,182 @@ class TestTapTempo:
         # Intervals: 0.4, 0.6 -> avg 0.5 -> 120 BPM
         bpm = tap_tempo([0.0, 0.4, 1.0])
         assert abs(bpm - 120.0) < 0.1
+
+
+# -----------------------------------------------------------------------
+# Beat-synced metronome
+# -----------------------------------------------------------------------
+
+class TestBeatSyncAPI:
+    """Test the beat-synced metronome public API."""
+
+    def test_default_disabled(self, player):
+        assert player.beat_sync_enabled is False
+
+    def test_set_beat_sync(self, player):
+        player.set_beat_sync_enabled(True)
+        assert player.beat_sync_enabled is True
+        player.set_beat_sync_enabled(False)
+        assert player.beat_sync_enabled is False
+
+    def test_beat_frames_computed_from_beat_times(self, player):
+        """set_beat_times should compute _beat_frames at the correct positions."""
+        player._sample_rate = 44100
+        player._playback_speed = 1.0
+        player.set_beat_times([0.0, 0.5, 1.0], [])
+        expected = np.array([0, 22050, 44100], dtype=np.int64)
+        np.testing.assert_array_equal(player._beat_frames, expected)
+
+    def test_beat_frames_scaled_by_speed(self, player):
+        """At half speed, beat frames should be doubled (audio is stretched)."""
+        player._sample_rate = 44100
+        player._playback_speed = 0.5
+        player.set_beat_times([0.0, 0.5, 1.0], [])
+        expected = np.array([0, 44100, 88200], dtype=np.int64)
+        np.testing.assert_array_equal(player._beat_frames, expected)
+
+    def test_beat_frames_empty_when_no_beats(self, player):
+        player._sample_rate = 44100
+        player.set_beat_times([], [])
+        assert len(player._beat_frames) == 0
+
+    def test_instantaneous_bpm_mid_track(self, player):
+        """BPM between two beats spaced 0.5s apart should be ~120."""
+        player._sample_rate = 44100
+        player._playback_speed = 1.0
+        player.set_beat_times([0.0, 0.5, 1.0, 1.5], [])
+        bpm = player.instantaneous_bpm_at(11025)  # 0.25s
+        assert abs(bpm - 120.0) < 0.1
+
+    def test_instantaneous_bpm_too_few_beats(self, player):
+        player._sample_rate = 44100
+        player.set_beat_times([0.5], [])
+        assert player.instantaneous_bpm_at(0) == 0.0
+
+    def test_instantaneous_bpm_at_end(self, player):
+        """Past the last beat, should use the last interval."""
+        player._sample_rate = 44100
+        player._playback_speed = 1.0
+        player.set_beat_times([0.0, 0.5, 1.0], [])
+        bpm = player.instantaneous_bpm_at(55000)  # past 1.0s
+        assert abs(bpm - 120.0) < 0.1
+
+
+class TestBeatSyncCallback:
+    """Test synced metronome clicks in the audio callback."""
+
+    @pytest.fixture
+    def loaded_player(self, player, tmp_path):
+        """A player with a 2-second silent stem loaded."""
+        import soundfile as sf
+        data = np.zeros((88200, 2), dtype=np.float32)
+        path = tmp_path / "stem.wav"
+        sf.write(str(path), data, 44100)
+        player.load_stems({"vocals": str(path)})
+        return player
+
+    def test_synced_click_at_beat_zero(self, loaded_player):
+        """Beat at frame 0 should produce a click at the start of the buffer."""
+        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
+        loaded_player.set_beat_sync_enabled(True)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        outdata = np.zeros((512, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+        assert np.max(np.abs(outdata[:100])) > 0.01
+
+    def test_synced_no_click_between_beats(self, loaded_player):
+        """Between beats, the synced metronome should be silent."""
+        loaded_player.set_beat_times([0.0, 1.0], [])
+        loaded_player.set_beat_sync_enabled(True)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        # Advance past the first beat's click tail.
+        click_len = len(loaded_player._click_buf)
+        loaded_player._current_frame = click_len + 100
+
+        outdata = np.zeros((512, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+        assert np.max(np.abs(outdata)) == 0.0
+
+    def test_synced_click_mid_buffer(self, loaded_player):
+        """A beat that falls in the middle of a buffer should produce a click there."""
+        # Beat at 0.5s = frame 22050.
+        loaded_player.set_beat_times([0.5], [])
+        loaded_player.set_beat_sync_enabled(True)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        # Start just before the beat so it falls in our buffer.
+        loaded_player._current_frame = 22000
+        buf_size = 512
+        outdata = np.zeros((buf_size, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, buf_size, {}, sd.CallbackFlags())
+
+        # Click should appear at offset 50 (22050 - 22000).
+        offset = 50
+        assert np.max(np.abs(outdata[offset:offset + 50])) > 0.01
+        # Samples before the beat should be silent (from stems, which are zeros).
+        assert np.max(np.abs(outdata[:offset])) == 0.0
+
+    def test_synced_fallback_to_grid_when_no_beats(self, loaded_player):
+        """With sync enabled but no beats, grid metronome should be used."""
+        loaded_player.set_beat_times([], [])
+        loaded_player.set_beat_sync_enabled(True)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_bpm(120.0)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        outdata = np.zeros((512, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+        # Grid metronome starts with a click at phase 0.
+        assert np.max(np.abs(outdata[:100])) > 0.01
+
+    def test_synced_disabled_uses_grid(self, loaded_player):
+        """With sync disabled, grid metronome should be used even with beats."""
+        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
+        loaded_player.set_beat_sync_enabled(False)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_bpm(120.0)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        outdata = np.zeros((512, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+        # Grid metronome should produce a click.
+        assert np.max(np.abs(outdata[:100])) > 0.01
+        # Phase should advance (grid mode behaviour).
+        assert loaded_player._metronome_phase == 512
+
+    def test_synced_seek_then_click(self, loaded_player):
+        """After seeking to just before a beat, the click should land correctly."""
+        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
+        loaded_player.set_beat_sync_enabled(True)
+        loaded_player.set_metronome_enabled(True)
+        loaded_player.set_metronome_volume(1.0)
+        loaded_player._is_playing = True
+
+        # Seek to 10 frames before beat at 0.5s (frame 22050).
+        loaded_player.seek(22040.0 / 44100.0)
+        outdata = np.zeros((512, 2), dtype=np.float32)
+        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+
+        # Click at offset ~10.
+        assert np.max(np.abs(outdata[10:60])) > 0.01
+
+    def test_beat_sync_cleared_on_load(self, loaded_player, tmp_path):
+        """Loading new stems should disable beat sync."""
+        import soundfile as sf
+        loaded_player.set_beat_sync_enabled(True)
+        data = np.zeros((44100, 2), dtype=np.float32)
+        path = tmp_path / "new_stem.wav"
+        sf.write(str(path), data, 44100)
+        loaded_player.load_stems({"vocals": str(path)})
+        assert loaded_player.beat_sync_enabled is False
+        assert len(loaded_player._beat_frames) == 0

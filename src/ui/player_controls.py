@@ -667,6 +667,17 @@ class PlayerControls(QWidget):
         self._tap_btn.clicked.connect(self._on_tap)
         metro_ci_bar.addWidget(self._tap_btn)
 
+        self._beat_sync_btn = QPushButton("Sync")
+        self._beat_sync_btn.setCheckable(True)
+        self._beat_sync_btn.setFixedWidth(50)
+        self._beat_sync_btn.setToolTip(
+            "Sync metronome to detected beats (click on actual beat positions)"
+        )
+        self._beat_sync_btn.setAccessibleName("Sync to track")
+        self._beat_sync_btn.setEnabled(False)
+        self._beat_sync_btn.toggled.connect(self._on_beat_sync_toggled)
+        metro_ci_bar.addWidget(self._beat_sync_btn)
+
         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._metronome_vol_slider.setRange(0, 200)
         self._metronome_vol_slider.setValue(100)
@@ -964,6 +975,10 @@ class PlayerControls(QWidget):
         self._detected_bpm_label.setToolTip(
             "Detected tempo — suggestion only (double-click to re-detect)"
         )
+        self._beat_sync_btn.blockSignals(True)
+        self._beat_sync_btn.setChecked(False)
+        self._beat_sync_btn.setEnabled(False)
+        self._beat_sync_btn.blockSignals(False)
 
     def restore_stem_state(
         self,
@@ -1027,6 +1042,15 @@ class PlayerControls(QWidget):
         if total > 0:
             self._waveform.set_position(pos_s / total)
         self.update_count_in_display()
+
+        # Update BPM spinbox with instantaneous BPM when beat-synced.
+        if self._beat_sync_btn.isChecked():
+            frame = int(pos_s * self._player.sample_rate)
+            ibpm = self._player.instantaneous_bpm_at(frame)
+            if ibpm > 0:
+                self._bpm_spin.blockSignals(True)
+                self._bpm_spin.setValue(max(20, min(300, round(ibpm))))
+                self._bpm_spin.blockSignals(False)
 
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
@@ -1300,6 +1324,12 @@ class PlayerControls(QWidget):
         # Store beat grid on the player.
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
 
+        # Enable/disable sync button based on whether beats were found.
+        has_beats = len(result.beat_times) >= 2
+        self._beat_sync_btn.setEnabled(has_beats)
+        if not has_beats and self._beat_sync_btn.isChecked():
+            self._beat_sync_btn.setChecked(False)
+
         # Update detected BPM label (suggestion only — does NOT set spinbox).
         if result.bpm > 0:
             bpm_rounded = round(result.bpm)
@@ -1483,6 +1513,34 @@ class PlayerControls(QWidget):
     def _on_metronome_toggled(self, checked: bool) -> None:
         """User toggled the metronome on/off."""
         self._player.set_metronome_enabled(checked)
+
+    def _on_beat_sync_toggled(self, checked: bool) -> None:
+        """User toggled beat-sync mode for the metronome."""
+        self._player.set_beat_sync_enabled(checked)
+        if checked:
+            # Make BPM spinbox read-only and show instantaneous BPM.
+            self._bpm_spin.setReadOnly(True)
+            self._bpm_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+            self._bpm_spin.setToolTip(
+                "Metronome synced to detected beats (showing live BPM)"
+            )
+            self._tap_btn.setEnabled(False)
+        else:
+            self._bpm_spin.setReadOnly(False)
+            self._bpm_spin.setButtonSymbols(
+                QSpinBox.ButtonSymbols.UpDownArrows
+            )
+            self._bpm_spin.setToolTip("Metronome tempo")
+            self._tap_btn.setEnabled(True)
+
+    @property
+    def beat_sync_enabled(self) -> bool:
+        """Return whether beat-sync mode is active."""
+        return self._beat_sync_btn.isChecked()
+
+    def set_beat_sync(self, enabled: bool) -> None:
+        """Restore beat-sync state from a saved session."""
+        self._beat_sync_btn.setChecked(enabled)
 
     def _on_metronome_vol_changed(self, value: int) -> None:
         """User moved the metronome volume slider."""
