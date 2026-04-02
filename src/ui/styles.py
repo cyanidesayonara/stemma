@@ -88,6 +88,11 @@ QMenu {{
     background-color: {c["base"]};
     color: {c["text"]};
     border: 1px solid {c["surface0"]};
+    padding: 4px 0px;
+}}
+
+QMenu::item {{
+    padding: 6px 24px 6px 24px;
 }}
 
 QMenu::item:selected {{

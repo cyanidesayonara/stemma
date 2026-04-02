@@ -82,9 +82,14 @@ def play_impl(path: Path) -> None:
     if not path.is_file():
         return
 
+    # Prefer winsound on Windows — it works reliably in MSIX / MS Store
+    # builds where QSoundEffect sometimes silently fails to produce audio.
+    if _HAS_WINSOUND:
+        _play_winsound_fallback(path)
+        return
+
     app = QApplication.instance()
     if app is None:
-        _play_winsound_fallback(path)
         return
 
     key = str(path)

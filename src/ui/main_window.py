@@ -177,6 +177,8 @@ class MainWindow(QMainWindow):
         """Build the main window layout."""
         self._library_panel = LibraryPanel(self._library)
         self._player_controls = PlayerControls(self._player)
+        beat_model = os.path.join(self._model_manager.models_dir, "beat_this.onnx")
+        self._player_controls.set_beat_model_path(beat_model)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._library_panel)
@@ -469,6 +471,24 @@ class MainWindow(QMainWindow):
         self._settings.setValue(
             "session/count_in_on_repeats", self._player.count_in_on_repeats
         )
+        # Per-song detected key & BPM (keyed by song_id).
+        if self._current_song_id:
+            prefix = f"detection/{self._current_song_id}"
+            self._settings.setValue(
+                f"{prefix}/key", self._player_controls.detected_key
+            )
+            self._settings.setValue(
+                f"{prefix}/key_conf",
+                self._player_controls.key_confidence,
+            )
+            self._settings.setValue(
+                f"{prefix}/bpm_text",
+                self._player_controls.detected_bpm_text,
+            )
+            self._settings.setValue(
+                f"{prefix}/bpm_conf",
+                self._player_controls.bpm_confidence,
+            )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -587,6 +607,26 @@ class MainWindow(QMainWindow):
             bool(ci_enabled), ci_beats, bool(ci_repeats)
         )
 
+        # Per-song detected key & BPM.
+        if self._current_song_id:
+            prefix = f"detection/{self._current_song_id}"
+            detected_key = self._settings.value(f"{prefix}/key", "")
+            key_conf = str(
+                self._settings.value(f"{prefix}/key_conf", "") or ""
+            )
+            if detected_key:
+                self._player_controls.set_detected_key(
+                    str(detected_key), key_conf,
+                )
+            detected_bpm = self._settings.value(f"{prefix}/bpm_text", "")
+            bpm_conf = str(
+                self._settings.value(f"{prefix}/bpm_conf", "") or ""
+            )
+            if detected_bpm:
+                self._player_controls.set_detected_bpm_text(
+                    str(detected_bpm), bpm_conf,
+                )
+
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
         super().showEvent(event)
@@ -634,10 +674,52 @@ class MainWindow(QMainWindow):
                 stem_paths[name] = path
 
         if stem_paths:
+            # Save detection results for the outgoing song.
+            if self._current_song_id:
+                prefix = f"detection/{self._current_song_id}"
+                self._settings.setValue(
+                    f"{prefix}/key",
+                    self._player_controls.detected_key,
+                )
+                self._settings.setValue(
+                    f"{prefix}/key_conf",
+                    self._player_controls.key_confidence,
+                )
+                self._settings.setValue(
+                    f"{prefix}/bpm_text",
+                    self._player_controls.detected_bpm_text,
+                )
+                self._settings.setValue(
+                    f"{prefix}/bpm_conf",
+                    self._player_controls.bpm_confidence,
+                )
+
             self._player.stop()
             self._player.load_stems(stem_paths)
-            self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._current_song_id = song_id
+
+            # Restore previously detected values for this song (if any).
+            prefix = f"detection/{song_id}"
+            saved_key = str(
+                self._settings.value(f"{prefix}/key", "") or ""
+            )
+            saved_key_conf = str(
+                self._settings.value(f"{prefix}/key_conf", "") or ""
+            )
+            saved_bpm = str(
+                self._settings.value(f"{prefix}/bpm_text", "") or ""
+            )
+            saved_bpm_conf = str(
+                self._settings.value(f"{prefix}/bpm_conf", "") or ""
+            )
+            self._player_controls.set_detected_key(
+                saved_key, saved_key_conf,
+            )
+            self._player_controls.set_detected_bpm_text(
+                saved_bpm, saved_bpm_conf,
+            )
+
+            self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._player.set_recording_song_dir(song.stems_path)
             self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
             self._load_existing_recordings(song.stems_path)

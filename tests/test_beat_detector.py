@@ -1,0 +1,299 @@
+"""Tests for src/beat_detector.py — BPM/key detection and confidence scoring."""
+
+import numpy as np
+import pytest
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
+
+from src.beat_detector import (
+    DetectionResult,
+    DetectionWorker,
+    _bpm_confidence,
+    _detect_beats_librosa,
+    _detect_key,
+    _key_confidence,
+    _peak_pick,
+    _sigmoid,
+    detect_bpm_and_key,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _click_track(bpm: float, duration: float, sr: int = 44100) -> np.ndarray:
+    """Synthesise a mono click track at the given BPM."""
+    n_samples = int(duration * sr)
+    audio = np.zeros(n_samples, dtype=np.float32)
+    interval = int(60.0 / bpm * sr)
+    click_len = min(200, interval)
+    t = np.arange(click_len, dtype=np.float32) / sr
+    click = (np.sin(2 * np.pi * 1000 * t) * np.exp(-t * 40)).astype(np.float32)
+    pos = 0
+    while pos + click_len <= n_samples:
+        audio[pos:pos + click_len] += click
+        pos += interval
+    return audio
+
+
+def _chord(freqs: list[float], duration: float, sr: int = 44100) -> np.ndarray:
+    """Synthesise a chord from a list of frequencies."""
+    t = np.arange(int(duration * sr), dtype=np.float32) / sr
+    audio = np.zeros_like(t)
+    for f in freqs:
+        audio += np.sin(2 * np.pi * f * t)
+    audio /= len(freqs)
+    return audio
+
+
+# ---------------------------------------------------------------------------
+# DetectionResult
+# ---------------------------------------------------------------------------
+
+class TestDetectionResult:
+    def test_defaults(self):
+        r = DetectionResult()
+        assert r.bpm == 0.0
+        assert r.key == ""
+        assert r.beat_times == []
+
+    def test_fields(self):
+        r = DetectionResult(bpm=120.0, key="C major", bpm_confidence="high")
+        assert r.bpm == 120.0
+        assert r.key == "C major"
+        assert r.bpm_confidence == "high"
+
+
+# ---------------------------------------------------------------------------
+# Sigmoid
+# ---------------------------------------------------------------------------
+
+class TestSigmoid:
+    def test_zero(self):
+        assert abs(_sigmoid(np.array([0.0]))[0] - 0.5) < 1e-6
+
+    def test_large_positive(self):
+        assert _sigmoid(np.array([100.0]))[0] > 0.99
+
+    def test_large_negative(self):
+        assert _sigmoid(np.array([-100.0]))[0] < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Peak picker
+# ---------------------------------------------------------------------------
+
+class TestPeakPick:
+    def test_simple_peaks(self):
+        logits = np.array([0.0, 0.1, 0.8, 0.1, 0.0, 0.1, 0.9, 0.1, 0.0])
+        peaks = _peak_pick(logits, threshold=0.5, min_distance=2)
+        assert peaks == [2, 6]
+
+    def test_min_distance(self):
+        logits = np.array([0.0, 0.8, 0.1, 0.9, 0.0])
+        peaks = _peak_pick(logits, threshold=0.5, min_distance=4)
+        assert len(peaks) == 1
+
+    def test_below_threshold(self):
+        logits = np.array([0.0, 0.2, 0.3, 0.2, 0.0])
+        peaks = _peak_pick(logits, threshold=0.5, min_distance=1)
+        assert peaks == []
+
+    def test_empty(self):
+        peaks = _peak_pick(np.array([]), threshold=0.5, min_distance=1)
+        assert peaks == []
+
+
+# ---------------------------------------------------------------------------
+# BPM confidence
+# ---------------------------------------------------------------------------
+
+class TestBpmConfidence:
+    def test_high_confidence(self):
+        # Perfectly regular beats at 120 BPM.
+        times = [i * 0.5 for i in range(20)]
+        assert _bpm_confidence(times) == "high"
+
+    def test_medium_confidence(self):
+        # Slightly irregular beats (CV ~0.1).
+        rng = np.random.RandomState(42)
+        base = np.arange(20) * 0.5
+        jitter = rng.normal(0, 0.05, size=20)
+        times = (base + jitter).tolist()
+        assert _bpm_confidence(times) == "medium"
+
+    def test_low_confidence_few_beats(self):
+        assert _bpm_confidence([0.0, 0.5]) == "low"
+
+    def test_low_confidence_irregular(self):
+        # Highly irregular intervals.
+        times = [0.0, 0.5, 1.5, 1.8, 3.5, 4.0]
+        assert _bpm_confidence(times) == "low"
+
+
+# ---------------------------------------------------------------------------
+# Key confidence
+# ---------------------------------------------------------------------------
+
+class TestKeyConfidence:
+    def test_high(self):
+        assert _key_confidence(0.90) == "high"
+
+    def test_medium(self):
+        assert _key_confidence(0.78) == "medium"
+
+    def test_low(self):
+        assert _key_confidence(0.50) == "low"
+
+    def test_boundary(self):
+        assert _key_confidence(0.85) == "medium"
+        assert _key_confidence(0.70) == "low"
+
+
+# ---------------------------------------------------------------------------
+# Key detection
+# ---------------------------------------------------------------------------
+
+class TestDetectKey:
+    def test_c_major_chord(self):
+        # C4 + E4 + G4 — should detect C major.
+        audio = _chord([261.63, 329.63, 392.00], duration=5.0)
+        key, corr = _detect_key(audio, sr=44100)
+        assert "C" in key
+        assert corr > 0.5
+
+    def test_a_minor_chord(self):
+        # A3 + C4 + E4 — should detect A minor.
+        audio = _chord([220.00, 261.63, 329.63], duration=5.0)
+        key, corr = _detect_key(audio, sr=44100)
+        assert "A" in key or "minor" in key
+        assert corr > 0.3
+
+    def test_silence(self):
+        audio = np.zeros(44100 * 3, dtype=np.float32)
+        key, corr = _detect_key(audio, sr=44100)
+        assert key == ""
+        assert corr == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Librosa beat detection
+# ---------------------------------------------------------------------------
+
+class TestDetectBeatsLibrosa:
+    def test_120bpm_click(self):
+        audio = _click_track(120.0, duration=10.0)
+        beats, downbeats, bpm = _detect_beats_librosa(audio, sr=44100)
+        # Allow ±15% tolerance for librosa.
+        assert 100 < bpm < 140, f"Expected ~120 BPM, got {bpm}"
+        assert len(beats) > 5
+
+    def test_returns_no_downbeats(self):
+        audio = _click_track(100.0, duration=8.0)
+        _, downbeats, _ = _detect_beats_librosa(audio, sr=44100)
+        assert downbeats == []
+
+
+# ---------------------------------------------------------------------------
+# High-level detect_bpm_and_key
+# ---------------------------------------------------------------------------
+
+class TestDetectBpmAndKey:
+    def test_empty_stems(self):
+        result = detect_bpm_and_key({}, 44100)
+        assert result.bpm == 0.0
+
+    def test_short_audio(self):
+        # 1 second — below _MIN_DURATION.
+        short = np.zeros((44100, 2), dtype=np.float32)
+        result = detect_bpm_and_key({"stem": short}, 44100)
+        assert result.bpm == 0.0
+
+    def test_click_track_stereo(self):
+        mono = _click_track(120.0, duration=10.0)
+        stereo = np.column_stack([mono, mono])
+        result = detect_bpm_and_key({"drums": stereo}, 44100)
+        assert 80 < result.bpm < 160
+        assert result.bpm_confidence in ("high", "medium", "low")
+
+    def test_no_model_uses_librosa(self):
+        mono = _click_track(100.0, duration=8.0)
+        stereo = np.column_stack([mono, mono])
+        result = detect_bpm_and_key(
+            {"drums": stereo}, 44100, model_path="/nonexistent.onnx",
+        )
+        # Should still work via librosa fallback.
+        assert result.bpm > 0
+
+    def test_key_populated(self):
+        chord = _chord([261.63, 329.63, 392.00], duration=8.0)
+        stereo = np.column_stack([chord, chord])
+        result = detect_bpm_and_key({"pad": stereo}, 44100)
+        assert result.key != ""
+        assert result.key_confidence in ("high", "medium", "low")
+
+    def test_ab_region_slicing(self):
+        """Detection with start_sec/end_sec should only analyse that region."""
+        mono = _click_track(120.0, duration=15.0)
+        stereo = np.column_stack([mono, mono])
+        result = detect_bpm_and_key(
+            {"drums": stereo}, 44100, start_sec=2.0, end_sec=12.0,
+        )
+        assert 80 < result.bpm < 160
+
+    def test_ab_region_too_short(self):
+        """A-B region shorter than _MIN_DURATION returns empty result."""
+        mono = _click_track(120.0, duration=10.0)
+        stereo = np.column_stack([mono, mono])
+        result = detect_bpm_and_key(
+            {"drums": stereo}, 44100, start_sec=0.0, end_sec=1.0,
+        )
+        assert result.bpm == 0.0
+
+
+# ---------------------------------------------------------------------------
+# DetectionWorker
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def app():
+    instance = QApplication.instance()
+    if instance is None:
+        instance = QApplication([])
+    return instance
+
+
+class TestDetectionWorker:
+    @pytest.fixture(autouse=True)
+    def _app(self, app):
+        """Ensure a QApplication exists for QThread."""
+
+    def test_worker_completes(self):
+        mono = _click_track(120.0, duration=8.0)
+        stereo = np.column_stack([mono, mono])
+        stems = {"drums": stereo}
+
+        results = []
+        worker = DetectionWorker(stems, 44100)
+        worker.completed.connect(results.append)
+        worker.start()
+        worker.wait(30_000)
+        QCoreApplication.processEvents()
+
+        assert len(results) == 1
+        assert results[0].bpm > 0
+
+    def test_worker_error_on_empty(self):
+        errors = []
+        results = []
+        worker = DetectionWorker({}, 44100)
+        worker.completed.connect(results.append)
+        worker.error.connect(errors.append)
+        worker.start()
+        worker.wait(10_000)
+        QCoreApplication.processEvents()
+
+        # Empty stems should return an empty result, not an error.
+        assert len(results) == 1
+        assert results[0].bpm == 0.0

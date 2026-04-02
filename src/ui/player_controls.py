@@ -12,7 +12,7 @@ import numpy as np
 
 from concurrent.futures import Future, ThreadPoolExecutor
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.beat_detector import DetectionResult, DetectionWorker
 from src.metronome import tap_tempo
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
@@ -452,6 +453,11 @@ class PlayerControls(QWidget):
         self._peak_poll_timer.setInterval(16)  # ~60fps poll
         self._peak_poll_timer.timeout.connect(self._poll_peak_future)
 
+        self._detection_worker: DetectionWorker | None = None
+        self._beat_model_path: str | None = None
+        self._key_conf: str = ""
+        self._bpm_conf: str = ""
+
         self._setup_ui()
         self._connect_signals()
 
@@ -462,6 +468,9 @@ class PlayerControls(QWidget):
         if self._peak_future is not None and not self._peak_future.done():
             self._peak_future.result(timeout=2)
         self._peak_future = None
+        if self._detection_worker is not None:
+            self._detection_worker.wait(2000)
+            self._detection_worker = None
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -593,6 +602,14 @@ class PlayerControls(QWidget):
         self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
         loop_speed_bar.addWidget(self._loop_label)
 
+        self._key_label = QLabel("")
+        self._key_label.setToolTip("Detected musical key (double-click to re-detect)")
+        self._key_label.setAccessibleName("Detected key")
+        self._key_label.setStyleSheet(f"color: {colors['surface2']};")
+        self._key_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._key_label.installEventFilter(self)
+        loop_speed_bar.addWidget(self._key_label)
+
         loop_speed_bar.addStretch()
 
         self._speed_label = QLabel("Speed:")
@@ -673,6 +690,16 @@ class PlayerControls(QWidget):
             self._on_metronome_vol_combo
         )
         metro_ci_bar.addWidget(self._metronome_vol_combo)
+
+        self._detected_bpm_label = QLabel("")
+        self._detected_bpm_label.setToolTip(
+            "Detected tempo — suggestion only (double-click to re-detect)"
+        )
+        self._detected_bpm_label.setAccessibleName("Detected BPM")
+        self._detected_bpm_label.setStyleSheet(f"color: {colors['surface2']};")
+        self._detected_bpm_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._detected_bpm_label.installEventFilter(self)
+        metro_ci_bar.addWidget(self._detected_bpm_label)
 
         metro_ci_bar.addStretch()
 
@@ -822,6 +849,21 @@ class PlayerControls(QWidget):
         )
         self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
+        if not self._key_label.text():
+            self._key_label.setStyleSheet(f"color: {colors['surface2']};")
+        else:
+            c = self._conf_color(self._key_conf)
+            if c:
+                self._key_label.setStyleSheet(f"color: {c};")
+
+        if not self._detected_bpm_label.text():
+            self._detected_bpm_label.setStyleSheet(
+                f"color: {colors['surface2']};"
+            )
+        else:
+            c = self._conf_color(self._bpm_conf)
+            if c:
+                self._detected_bpm_label.setStyleSheet(f"color: {c};")
         self._footer_widget.setStyleSheet(
             f"border-top: 1px solid {colors['surface0']};"
         )
@@ -891,6 +933,10 @@ class PlayerControls(QWidget):
         self._record_btn.blockSignals(False)
         self.update_record_button_state()
 
+        # Auto-detect only if no cached results are already displayed.
+        if has_stems and not self._detected_bpm_label.text():
+            self.start_detection()
+
         if stem_names:
             self._waveform.set_loading(True)
             # Restore mute/solo from previous song if stems match
@@ -908,6 +954,16 @@ class PlayerControls(QWidget):
         self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
         self._waveform.set_position(0.0)
         self._time_label.setText("0:00 / 0:00")
+        self._key_label.setText("")
+        self._key_conf = ""
+        self._key_label.setToolTip(
+            "Detected musical key (double-click to re-detect)"
+        )
+        self._detected_bpm_label.setText("")
+        self._bpm_conf = ""
+        self._detected_bpm_label.setToolTip(
+            "Detected tempo — suggestion only (double-click to re-detect)"
+        )
 
     def restore_stem_state(
         self,
@@ -1076,12 +1132,21 @@ class PlayerControls(QWidget):
         self._player.set_loop_a(self._player.current_seconds)
         self._update_loop_label()
         self._update_waveform_loop_markers()
+        self._maybe_redetect_for_loop()
 
     def set_loop_b(self) -> None:
         """Set loop B to the current playback position."""
         self._player.set_loop_b(self._player.current_seconds)
         self._update_loop_label()
         self._update_waveform_loop_markers()
+        self._maybe_redetect_for_loop()
+
+    def _maybe_redetect_for_loop(self) -> None:
+        """Re-run detection for the A-B region when both points are set."""
+        a = self._player.loop_a
+        b = self._player.loop_b
+        if a is not None and b is not None and b > a:
+            self.start_detection(start_sec=a, end_sec=b)
 
     def _on_loop_toggled(self, checked: bool) -> None:
         """Enable or disable A-B looping."""
@@ -1093,6 +1158,9 @@ class PlayerControls(QWidget):
         self._loop_toggle_btn.setChecked(False)
         self._update_loop_label()
         self._update_waveform_loop_markers()
+        # Re-detect for the full song after clearing A-B region.
+        if self._player.stems:
+            self.start_detection()
 
     def toggle_looping(self) -> None:
         """Toggle the loop button state (e.g. from keyboard shortcut)."""
@@ -1158,6 +1226,259 @@ class PlayerControls(QWidget):
         if bpm > 0:
             clamped = max(20, min(300, round(bpm)))
             self._bpm_spin.setValue(clamped)
+
+    # -- Detection handlers --------------------------------------------------
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle double-click on detection labels to re-detect."""
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj is self._key_label and self._player.stems:
+                self._redetect_key_only()
+                return True
+            if obj is self._detected_bpm_label and self._player.stems:
+                self._redetect_bpm_only()
+                return True
+        return super().eventFilter(obj, event)
+
+    def set_beat_model_path(self, path: str) -> None:
+        """Set the path to the beat_this ONNX model file."""
+        self._beat_model_path = path
+
+    def start_detection(
+        self,
+        start_sec: float | None = None,
+        end_sec: float | None = None,
+    ) -> None:
+        """Start background BPM/key detection.
+
+        Called automatically when stems load and when A-B loop points
+        change.  Results are shown as suggestions only — the metronome
+        BPM spinbox is *not* modified.
+        """
+        if not self._player.stems:
+            return
+        if self._detection_worker is not None:
+            self._detection_worker.wait(2000)
+            self._detection_worker = None
+
+        dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
+        self._detected_bpm_label.setStyleSheet(
+            f"color: {dim['surface2']};"
+        )
+        self._detected_bpm_label.setText("detecting...")
+        self._key_label.setStyleSheet(f"color: {dim['surface2']};")
+        self._key_label.setText("detecting...")
+
+        worker = DetectionWorker(
+            stems=dict(self._player.stems),
+            sample_rate=self._player.sample_rate,
+            model_path=self._beat_model_path,
+            start_sec=start_sec,
+            end_sec=end_sec,
+        )
+        worker.completed.connect(self._on_detect_completed)
+        worker.error.connect(self._on_detect_error)
+        worker.finished.connect(self._on_detect_finished)
+        self._detection_worker = worker
+        worker.start()
+
+    # Confidence label colours — Catppuccin Mocha semantic palette.
+    _CONF_COLORS_DARK = {
+        "high": "#a6e3a1", "medium": "#f9e2af", "low": "#f38ba8",
+    }
+    _CONF_COLORS_LIGHT = {
+        "high": "#40a02b", "medium": "#df8e1d", "low": "#d20f39",
+    }
+
+    def _conf_color(self, level: str) -> str:
+        """Return the themed colour string for a confidence level."""
+        if self._theme == "light":
+            return self._CONF_COLORS_LIGHT.get(level, "")
+        return self._CONF_COLORS_DARK.get(level, "")
+
+    def _on_detect_completed(self, result: DetectionResult) -> None:
+        # Store beat grid on the player.
+        self._player.set_beat_times(result.beat_times, result.downbeat_times)
+
+        # Update detected BPM label (suggestion only — does NOT set spinbox).
+        if result.bpm > 0:
+            bpm_rounded = round(result.bpm)
+            self._bpm_conf = result.bpm_confidence
+            bpm_c = self._conf_color(result.bpm_confidence)
+            if bpm_c:
+                self._detected_bpm_label.setStyleSheet(f"color: {bpm_c};")
+            self._detected_bpm_label.setText(f"~{bpm_rounded} BPM")
+            self._detected_bpm_label.setToolTip(
+                f"Detected tempo: {result.bpm:.1f} BPM\n"
+                f"Confidence: {result.bpm_confidence}\n"
+                f"Double-click to re-detect"
+            )
+        else:
+            self._detected_bpm_label.setText("")
+            self._bpm_conf = ""
+
+        # Update key label.
+        if result.key:
+            self._key_conf = result.key_confidence
+            key_c = self._conf_color(result.key_confidence)
+            if key_c:
+                self._key_label.setStyleSheet(f"color: {key_c};")
+            self._key_label.setText(f"Detected key: {result.key}")
+            self._key_label.setToolTip(
+                f"Detected key: {result.key}\n"
+                f"Confidence: {result.key_confidence}\n"
+                f"Double-click to re-detect"
+            )
+        else:
+            self._key_label.setText("")
+            self._key_conf = ""
+
+    def _on_detect_error(self, msg: str) -> None:
+        self._key_label.setText("")
+        self._detected_bpm_label.setText("")
+
+    def _on_detect_finished(self) -> None:
+        self._detection_worker = None
+
+    def _redetect_key_only(self) -> None:
+        """Re-run detection but only update the key label."""
+        if self._detection_worker is not None:
+            return  # Already running.
+        dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
+        self._key_label.setStyleSheet(f"color: {dim['surface2']};")
+        self._key_label.setText("detecting...")
+
+        worker = DetectionWorker(
+            stems=dict(self._player.stems),
+            sample_rate=self._player.sample_rate,
+            model_path=self._beat_model_path,
+        )
+        worker.completed.connect(self._on_key_only_completed)
+        worker.finished.connect(self._on_detect_finished)
+        self._detection_worker = worker
+        worker.start()
+
+    def _on_key_only_completed(self, result: DetectionResult) -> None:
+        """Update only the key label from a re-detection."""
+        if result.key:
+            self._key_conf = result.key_confidence
+            key_c = self._conf_color(result.key_confidence)
+            if key_c:
+                self._key_label.setStyleSheet(f"color: {key_c};")
+            self._key_label.setText(f"Detected key: {result.key}")
+            self._key_label.setToolTip(
+                f"Detected key: {result.key}\n"
+                f"Confidence: {result.key_confidence}\n"
+                f"Double-click to re-detect"
+            )
+        else:
+            self._key_label.setText("")
+            self._key_conf = ""
+
+    def _redetect_bpm_only(self) -> None:
+        """Re-run detection but only update the BPM label."""
+        if self._detection_worker is not None:
+            return  # Already running.
+        dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
+        self._detected_bpm_label.setStyleSheet(
+            f"color: {dim['surface2']};"
+        )
+        self._detected_bpm_label.setText("detecting...")
+
+        worker = DetectionWorker(
+            stems=dict(self._player.stems),
+            sample_rate=self._player.sample_rate,
+            model_path=self._beat_model_path,
+        )
+        worker.completed.connect(self._on_bpm_only_completed)
+        worker.finished.connect(self._on_detect_finished)
+        self._detection_worker = worker
+        worker.start()
+
+    def _on_bpm_only_completed(self, result: DetectionResult) -> None:
+        """Update only the BPM label from a re-detection."""
+        self._player.set_beat_times(result.beat_times, result.downbeat_times)
+        if result.bpm > 0:
+            bpm_rounded = round(result.bpm)
+            self._bpm_conf = result.bpm_confidence
+            bpm_c = self._conf_color(result.bpm_confidence)
+            if bpm_c:
+                self._detected_bpm_label.setStyleSheet(f"color: {bpm_c};")
+            self._detected_bpm_label.setText(f"~{bpm_rounded} BPM")
+            self._detected_bpm_label.setToolTip(
+                f"Detected tempo: {result.bpm:.1f} BPM\n"
+                f"Confidence: {result.bpm_confidence}\n"
+                f"Double-click to re-detect"
+            )
+        else:
+            self._detected_bpm_label.setText("")
+            self._bpm_conf = ""
+
+    @property
+    def detected_key(self) -> str:
+        """Return the raw detected key (e.g. "A minor"), or empty string."""
+        text = self._key_label.text()
+        prefix = "Detected key: "
+        if text.startswith(prefix):
+            return text[len(prefix):]
+        return ""
+
+    @property
+    def detected_bpm_text(self) -> str:
+        """Return the currently displayed detected BPM text, or empty."""
+        return self._detected_bpm_label.text()
+
+    @property
+    def key_confidence(self) -> str:
+        """Return the last key confidence level, or empty string."""
+        return self._key_conf
+
+    @property
+    def bpm_confidence(self) -> str:
+        """Return the last BPM confidence level, or empty string."""
+        return self._bpm_conf
+
+    def set_detected_key(self, key: str, confidence: str = "") -> None:
+        """Restore a previously detected key label with colour and tooltip."""
+        if key:
+            self._key_label.setText(f"Detected key: {key}")
+            self._key_conf = confidence
+            c = self._conf_color(confidence) if confidence else ""
+            if c:
+                self._key_label.setStyleSheet(f"color: {c};")
+            parts = [f"Detected key: {key}"]
+            if confidence:
+                parts.append(f"Confidence: {confidence}")
+            parts.append("Double-click to re-detect")
+            self._key_label.setToolTip("\n".join(parts))
+        else:
+            self._key_label.setText("")
+            self._key_conf = ""
+            self._key_label.setToolTip(
+                "Detected musical key (double-click to re-detect)"
+            )
+
+    def set_detected_bpm_text(
+        self, text: str, confidence: str = "",
+    ) -> None:
+        """Restore a previously detected BPM suggestion label with colour and tooltip."""
+        if text:
+            self._detected_bpm_label.setText(text)
+            self._bpm_conf = confidence
+            c = self._conf_color(confidence) if confidence else ""
+            if c:
+                self._detected_bpm_label.setStyleSheet(f"color: {c};")
+            parts = [f"Detected tempo: {text}"]
+            if confidence:
+                parts.append(f"Confidence: {confidence}")
+            parts.append("Double-click to re-detect")
+            self._detected_bpm_label.setToolTip("\n".join(parts))
+        else:
+            self._detected_bpm_label.setText("")
+            self._bpm_conf = ""
+            self._detected_bpm_label.setToolTip(
+                "Detected tempo — suggestion only (double-click to re-detect)"
+            )
 
     def _on_metronome_toggled(self, checked: bool) -> None:
         """User toggled the metronome on/off."""
