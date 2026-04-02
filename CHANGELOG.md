@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-02 -- BPM and Key Detection
+
+### Done
+- **Detection engine:** Added background audio analysis (`src/beat_detector.py`) that detects tempo and musical key after a song loads.
+- **ONNX + Librosa:** Uses the `beat_this` ONNX model for high-accuracy beat tracking, falling back to librosa if the model is absent. Key detection uses Krumhansl-Schmuckler chroma analysis.
+- **UI:** Detected key and BPM are shown as non-intrusive suggestions in the Loop and Metronome bars. Colored confidences (green/yellow/red) follow Catppuccin palette logic.
+- **Memory persistence:** Detected values are persisted in QSettings per-song to avoid re-analysis on every load. Re-detection is supported via double-click on the labels, and dynamically recalculates within A-B loop regions.
+- **Fix:** Used `winsound` as a fallback for logo click audio on Windows to fix silent clicks in MSIX/Store builds.
+- **Polish:** Added 6px vertical padding to QMenu items.
+
+### Metrics
+- 580 tests pass.
+- 31 new tests added for beat and key detection logic.
+
+---
+
 ## 2026-03-31 -- v2.0.4 UI Polish and Store Alignment
 
 ### Done
