@@ -144,6 +144,10 @@ class MultiTrackPlayer(QObject):
         self._metronome_phase: int = 0
         self._click_buf: np.ndarray = self._generate_click(self._sample_rate)
 
+        # Beat detection results (populated externally by DetectionWorker).
+        self._beat_times: list[float] = []
+        self._downbeat_times: list[float] = []
+
         # Count-in state.
         self._count_in_enabled: bool = False
         self._count_in_beats: int = 4
@@ -241,6 +245,25 @@ class MultiTrackPlayer(QObject):
     def set_metronome_volume(self, volume: float) -> None:
         """Set the metronome volume. Clamped to 0.0-2.0."""
         self._metronome_volume = max(0.0, min(2.0, float(volume)))
+
+    # -- Beat grid ----------------------------------------------------------
+
+    @property
+    def beat_times(self) -> list[float]:
+        """Beat timestamps in seconds (populated by detection)."""
+        return self._beat_times
+
+    @property
+    def downbeat_times(self) -> list[float]:
+        """Downbeat (bar-1) timestamps in seconds."""
+        return self._downbeat_times
+
+    def set_beat_times(
+        self, beats: list[float], downbeats: list[float],
+    ) -> None:
+        """Store detected beat/downbeat timestamps."""
+        self._beat_times = list(beats)
+        self._downbeat_times = list(downbeats)
 
     # -- Count-in API -------------------------------------------------------
 
@@ -451,6 +474,8 @@ class MultiTrackPlayer(QObject):
         self._volumes.clear()
         self._applied_gains.clear()
         self._active_stems_cache = None
+        self._beat_times.clear()
+        self._downbeat_times.clear()
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
