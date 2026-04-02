@@ -4,19 +4,19 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
-## 2026-04-02 -- BPM and Key Detection
+## 2026-04-02 -- v2.0.5 Automatic BPM & Key Detection
 
 ### Done
-- **Detection engine:** Added background audio analysis (`src/beat_detector.py`) that detects tempo and musical key after a song loads.
-- **ONNX + Librosa:** Uses the `beat_this` ONNX model for high-accuracy beat tracking, falling back to librosa if the model is absent. Key detection uses Krumhansl-Schmuckler chroma analysis.
-- **UI:** Detected key and BPM are shown as non-intrusive suggestions in the Loop and Metronome bars. Colored confidences (green/yellow/red) follow Catppuccin palette logic.
-- **Memory persistence:** Detected values are persisted in QSettings per-song to avoid re-analysis on every load. Re-detection is supported via double-click on the labels, and dynamically recalculates within A-B loop regions.
-- **Fix:** Used `winsound` as a fallback for logo click audio on Windows to fix silent clicks in MSIX/Store builds.
-- **Polish:** Added 6px vertical padding to QMenu items.
+- **BPM/key detection:** New background analysis engine detects tempo and musical key for every song automatically after it loads. Uses the beat_this ONNX model (MIT, ISMIR 2024, 89–97% F1) for beat tracking with a librosa fallback, and the Krumhansl-Schmuckler algorithm on chroma features for key detection.
+- **Suggestion-only display:** Detected values are shown as read-only labels — "Detected key: A minor" on the loop row and "~98 BPM" on the metronome row — colour-coded by confidence (green/yellow/red). The metronome BPM spinbox is never modified.
+- **Per-song caching:** Results (including confidence level) are stored per-song in settings. Switching back to a previously analysed song restores the cached values instantly without re-running analysis.
+- **A-B region detection:** Setting loop points A and B re-triggers detection within that region only, letting you identify the key/tempo of a specific section. Clearing the loop reverts to full-song analysis.
+- **Double-click to re-detect:** Double-clicking either the key or BPM label forces a fresh analysis for that value individually — useful after the first run or when A-B points change.
+- **Logo sound fix (MS Store):** Logo click sound now uses `winsound` on Windows, matching the proven splash-screen path and fixing silent clicks in MSIX builds.
+- **Menu padding:** QMenu dropdown items now have proper vertical padding for a less cramped look.
 
 ### Metrics
-- 580 tests pass.
-- 31 new tests added for beat and key detection logic.
+- 31 new tests (test_beat_detector.py); 580 total pass, 5 skipped.
 
 ---
 
