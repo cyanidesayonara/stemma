@@ -7,6 +7,7 @@ All notable development sessions are documented here in reverse chronological or
 ## 2026-04-02 -- v2.0.5 Automatic BPM & Key Detection
 
 ### Done
+- **Beat-synced metronome:** Added a "Sync" toggle to lock metronome clicks to the detected beat positions instead of a fixed BPM grid. Handles time-stretching correctly via scaled beat frames. Fixed an auditory glitch by properly carrying over click tails that fall across audio chunk playback boundaries.
 - **BPM/key detection:** New background analysis engine detects tempo and musical key for every song automatically after it loads. Uses the beat_this ONNX model (MIT, ISMIR 2024, 89–97% F1) for beat tracking with a librosa fallback, and the Krumhansl-Schmuckler algorithm on chroma features for key detection.
 - **Suggestion-only display:** Detected values are shown as read-only labels — "Detected key: A minor" on the loop row and "~98 BPM" on the metronome row — colour-coded by confidence (green/yellow/red). The metronome BPM spinbox is never modified.
 - **Per-song caching:** Results (including confidence level) are stored per-song in settings. Switching back to a previously analysed song restores the cached values instantly without re-running analysis.

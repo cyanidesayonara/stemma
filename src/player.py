@@ -147,6 +147,8 @@ class MultiTrackPlayer(QObject):
         # Beat detection results (populated externally by DetectionWorker).
         self._beat_times: list[float] = []
         self._downbeat_times: list[float] = []
+        self._beat_sync_enabled: bool = False
+        self._beat_frames: np.ndarray = np.array([], dtype=np.int64)
 
         # Count-in state.
         self._count_in_enabled: bool = False
@@ -264,6 +266,53 @@ class MultiTrackPlayer(QObject):
         """Store detected beat/downbeat timestamps."""
         self._beat_times = list(beats)
         self._downbeat_times = list(downbeats)
+        self._recompute_beat_frames()
+
+    # -- Beat-synced metronome API ------------------------------------------
+
+    @property
+    def beat_sync_enabled(self) -> bool:
+        """Return True if the metronome is synced to detected beats."""
+        return self._beat_sync_enabled
+
+    def set_beat_sync_enabled(self, enabled: bool) -> None:
+        """Enable or disable beat-synced metronome mode."""
+        self._beat_sync_enabled = enabled
+        if enabled:
+            self._recompute_beat_frames()
+
+    def _recompute_beat_frames(self) -> None:
+        """Convert beat_times (seconds) to frame indices for the current speed.
+
+        When speed != 1.0, the audio is time-stretched, so a beat at time
+        *t* in the original sits at frame ``t / speed * sample_rate`` in
+        the stretched audio.
+        """
+        if not self._beat_times or self._sample_rate == 0:
+            self._beat_frames = np.array([], dtype=np.int64)
+            return
+        speed = self._playback_speed if self._playback_speed > 0 else 1.0
+        sr = self._sample_rate
+        self._beat_frames = np.array(
+            [int(t / speed * sr) for t in self._beat_times],
+            dtype=np.int64,
+        )
+
+    def instantaneous_bpm_at(self, frame: int) -> float:
+        """Return the local BPM at *frame* based on neighbouring beat positions.
+
+        Returns 0.0 when fewer than 2 beats are available.
+        """
+        bf = self._beat_frames
+        if len(bf) < 2:
+            return 0.0
+        idx = int(np.searchsorted(bf, frame, side="right"))
+        # Clamp so we always have two adjacent beats.
+        idx = max(1, min(idx, len(bf) - 1))
+        interval_frames = int(bf[idx] - bf[idx - 1])
+        if interval_frames <= 0:
+            return 0.0
+        return 60.0 * self._sample_rate / interval_frames
 
     # -- Count-in API -------------------------------------------------------
 
@@ -476,6 +525,8 @@ class MultiTrackPlayer(QObject):
         self._active_stems_cache = None
         self._beat_times.clear()
         self._downbeat_times.clear()
+        self._beat_sync_enabled = False
+        self._beat_frames = np.array([], dtype=np.int64)
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
@@ -819,6 +870,7 @@ class MultiTrackPlayer(QObject):
 
         if speed == 1.0:
             self._apply_stretched_stems(dict(self._original_stems))
+            self._recompute_beat_frames()
             self.speed_changed.emit(speed)
             return
 
@@ -847,6 +899,7 @@ class MultiTrackPlayer(QObject):
     def _on_speed_ready(self, stretched: dict) -> None:
         """Swap in stretched stems and adjust frame indices."""
         self._apply_stretched_stems(stretched)
+        self._recompute_beat_frames()
         self.speed_changed.emit(self._playback_speed)
 
     def _on_speed_error(self, message: str) -> None:
@@ -927,6 +980,38 @@ class MultiTrackPlayer(QObject):
 
         # Update phase for the next callback.
         self._metronome_phase = (phase + frames_written) % beat_interval
+
+    def _mix_metronome_synced(
+        self, outdata: np.ndarray, frame_start: int, frame_count: int,
+        buf_offset: int = 0,
+    ) -> None:
+        """Overlay metronome clicks at detected beat positions.
+
+        Unlike the grid-based ``_mix_metronome``, this method places clicks
+        at the exact frame positions stored in ``_beat_frames``.
+
+        *frame_start*/*frame_count* describe the range of stem frames that
+        were mixed into ``outdata[buf_offset:buf_offset+frame_count]``.
+        Multiple calls per callback handle mid-buffer loop wraps.
+        """
+        bf = self._beat_frames
+        if len(bf) == 0:
+            return
+
+        gain = self._metronome_volume
+        click_len = len(self._click_buf)
+        frame_end = frame_start + frame_count
+
+        # Find the first beat >= frame_start.
+        idx = int(np.searchsorted(bf, frame_start, side="left"))
+
+        while idx < len(bf) and bf[idx] < frame_end:
+            offset_in_segment = int(bf[idx]) - frame_start
+            buf_pos = buf_offset + offset_in_segment
+            n = min(click_len, buf_offset + frame_count - buf_pos)
+            if n > 0:
+                outdata[buf_pos:buf_pos + n] += self._click_buf[:n] * gain
+            idx += 1
 
     def _mix_count_in(self, outdata: np.ndarray, ci_frames: int,
                       beat_interval: int, click_len: int) -> None:
@@ -1115,6 +1200,13 @@ class MultiTrackPlayer(QObject):
                             start:start + actual
                         ] = chunk[:actual, :2]
 
+                # Mix synced metronome for this segment before advancing.
+                if (self._metronome_enabled and self._beat_sync_enabled
+                        and len(self._beat_frames) > 0):
+                    self._mix_metronome_synced(
+                        outdata, start, frames_to_read, buf_offset,
+                    )
+
                 self._current_frame += frames_to_read
                 buf_offset += frames_to_read
                 remaining -= frames_to_read
@@ -1130,11 +1222,13 @@ class MultiTrackPlayer(QObject):
                 else:
                     break
 
-        # Mix in metronome click track.  Use *frames* (the full PortAudio
-        # block size) rather than buf_offset so the beat phase stays in sync
-        # with wall-clock time even when stems don't fill the entire buffer
-        # (e.g. at EOF without looping).
-        if self._metronome_enabled and self._metronome_bpm > 0:
+        # Mix in grid-based metronome click track (only when not beat-synced).
+        # Uses *frames* (the full PortAudio block size) so the beat phase
+        # stays in sync with wall-clock time even when stems don't fill the
+        # entire buffer (e.g. at EOF without looping).
+        if (self._metronome_enabled and self._metronome_bpm > 0
+                and not (self._beat_sync_enabled
+                         and len(self._beat_frames) > 0)):
             beat_interval = int(60.0 / self._metronome_bpm * self._sample_rate)
             if beat_interval > 0:
                 click_len = len(self._click_buf)
