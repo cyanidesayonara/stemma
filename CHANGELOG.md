@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-03 -- v2.1.0 Metronome Nudge, UI Polish, Library Improvements, Session Persistence
+
+### Done
+- **Metronome beat-sync nudge:** New ±500ms spinbox on the metronome row shifts all click sources (continuous metronome, count-in, beat-synced mode) relative to detected beat positions. Useful for aligning the click to songs with a consistent offset. Offset resets on Stop.
+- **Count-in controls in transport bar:** Beat counter and count-in controls (label, spinbox, repeat checkbox) moved from the metronome row into the transport bar, reducing crowding and keeping the metronome row focused.
+- **Live volume combos:** Stem and metronome volume combo boxes are now editable and update in real time as the slider moves (e.g. "137%"). The combo opens on a click anywhere in the widget, not just the dropdown arrow.
+- **Icon button fix:** On/off and repeat buttons in the metronome/count-in area now render at their correct 36x36 size instead of collapsing to slivers.
+- **Speed combo alignment:** Playback speed combo box is now flush with the right edge of the transport bar.
+- **Library two-row display:** Songs in the library panel now show artist name (bold) on the top line and song title (subdued, smaller) below, with a separator line between items. Selection uses the teal accent colour to match the app theme.
+- **Recording session persistence:** Per-song QSettings now save and restore each recording take's nudge offset, mute, solo, and volume. Values are re-applied after the takes finish loading so they survive song switches and restarts.
+
+### Metrics
+- 600 fast tests pass, 5 skipped (slow ONNX/hardware).
+
+---
+
 ## 2026-04-02 -- v2.0.5 Automatic BPM & Key Detection
 
 ### Done
