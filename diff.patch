@@ -1,0 +1,479 @@
+diff --git a/src/player.py b/src/player.py
+index 0386aa0..061a4dc 100644
+--- a/src/player.py
++++ b/src/player.py
+@@ -147,6 +147,8 @@ class MultiTrackPlayer(QObject):
+         # Beat detection results (populated externally by DetectionWorker).
+         self._beat_times: list[float] = []
+         self._downbeat_times: list[float] = []
++        self._beat_sync_enabled: bool = False
++        self._beat_frames: np.ndarray = np.array([], dtype=np.int64)
+ 
+         # Count-in state.
+         self._count_in_enabled: bool = False
+@@ -264,6 +266,53 @@ class MultiTrackPlayer(QObject):
+         """Store detected beat/downbeat timestamps."""
+         self._beat_times = list(beats)
+         self._downbeat_times = list(downbeats)
++        self._recompute_beat_frames()
++
++    # -- Beat-synced metronome API ------------------------------------------
++
++    @property
++    def beat_sync_enabled(self) -> bool:
++        """Return True if the metronome is synced to detected beats."""
++        return self._beat_sync_enabled
++
++    def set_beat_sync_enabled(self, enabled: bool) -> None:
++        """Enable or disable beat-synced metronome mode."""
++        self._beat_sync_enabled = enabled
++        if enabled:
++            self._recompute_beat_frames()
++
++    def _recompute_beat_frames(self) -> None:
++        """Convert beat_times (seconds) to frame indices for the current speed.
++
++        When speed != 1.0, the audio is time-stretched, so a beat at time
++        *t* in the original sits at frame ``t / speed * sample_rate`` in
++        the stretched audio.
++        """
++        if not self._beat_times or self._sample_rate == 0:
++            self._beat_frames = np.array([], dtype=np.int64)
++            return
++        speed = self._playback_speed if self._playback_speed > 0 else 1.0
++        sr = self._sample_rate
++        self._beat_frames = np.array(
++            [int(t / speed * sr) for t in self._beat_times],
++            dtype=np.int64,
++        )
++
++    def instantaneous_bpm_at(self, frame: int) -> float:
++        """Return the local BPM at *frame* based on neighbouring beat positions.
++
++        Returns 0.0 when fewer than 2 beats are available.
++        """
++        bf = self._beat_frames
++        if len(bf) < 2:
++            return 0.0
++        idx = int(np.searchsorted(bf, frame, side="right"))
++        # Clamp so we always have two adjacent beats.
++        idx = max(1, min(idx, len(bf) - 1))
++        interval_frames = int(bf[idx] - bf[idx - 1])
++        if interval_frames <= 0:
++            return 0.0
++        return 60.0 * self._sample_rate / interval_frames
+ 
+     # -- Count-in API -------------------------------------------------------
+ 
+@@ -476,6 +525,8 @@ class MultiTrackPlayer(QObject):
+         self._active_stems_cache = None
+         self._beat_times.clear()
+         self._downbeat_times.clear()
++        self._beat_sync_enabled = False
++        self._beat_frames = np.array([], dtype=np.int64)
+         self._loop_a_frame = None
+         self._loop_b_frame = None
+         self._looping = False
+@@ -819,6 +870,7 @@ class MultiTrackPlayer(QObject):
+ 
+         if speed == 1.0:
+             self._apply_stretched_stems(dict(self._original_stems))
++            self._recompute_beat_frames()
+             self.speed_changed.emit(speed)
+             return
+ 
+@@ -847,6 +899,7 @@ class MultiTrackPlayer(QObject):
+     def _on_speed_ready(self, stretched: dict) -> None:
+         """Swap in stretched stems and adjust frame indices."""
+         self._apply_stretched_stems(stretched)
++        self._recompute_beat_frames()
+         self.speed_changed.emit(self._playback_speed)
+ 
+     def _on_speed_error(self, message: str) -> None:
+@@ -928,6 +981,38 @@ class MultiTrackPlayer(QObject):
+         # Update phase for the next callback.
+         self._metronome_phase = (phase + frames_written) % beat_interval
+ 
++    def _mix_metronome_synced(
++        self, outdata: np.ndarray, frame_start: int, frame_count: int,
++        buf_offset: int = 0,
++    ) -> None:
++        """Overlay metronome clicks at detected beat positions.
++
++        Unlike the grid-based ``_mix_metronome``, this method places clicks
++        at the exact frame positions stored in ``_beat_frames``.
++
++        *frame_start*/*frame_count* describe the range of stem frames that
++        were mixed into ``outdata[buf_offset:buf_offset+frame_count]``.
++        Multiple calls per callback handle mid-buffer loop wraps.
++        """
++        bf = self._beat_frames
++        if len(bf) == 0:
++            return
++
++        gain = self._metronome_volume
++        click_len = len(self._click_buf)
++        frame_end = frame_start + frame_count
++
++        # Find the first beat >= frame_start.
++        idx = int(np.searchsorted(bf, frame_start, side="left"))
++
++        while idx < len(bf) and bf[idx] < frame_end:
++            offset_in_segment = int(bf[idx]) - frame_start
++            buf_pos = buf_offset + offset_in_segment
++            n = min(click_len, buf_offset + frame_count - buf_pos)
++            if n > 0:
++                outdata[buf_pos:buf_pos + n] += self._click_buf[:n] * gain
++            idx += 1
++
+     def _mix_count_in(self, outdata: np.ndarray, ci_frames: int,
+                       beat_interval: int, click_len: int) -> None:
+         """Overlay count-in clicks onto the output buffer.
+@@ -1115,6 +1200,13 @@ class MultiTrackPlayer(QObject):
+                             start:start + actual
+                         ] = chunk[:actual, :2]
+ 
++                # Mix synced metronome for this segment before advancing.
++                if (self._metronome_enabled and self._beat_sync_enabled
++                        and len(self._beat_frames) > 0):
++                    self._mix_metronome_synced(
++                        outdata, start, frames_to_read, buf_offset,
++                    )
++
+                 self._current_frame += frames_to_read
+                 buf_offset += frames_to_read
+                 remaining -= frames_to_read
+@@ -1130,11 +1222,13 @@ class MultiTrackPlayer(QObject):
+                 else:
+                     break
+ 
+-        # Mix in metronome click track.  Use *frames* (the full PortAudio
+-        # block size) rather than buf_offset so the beat phase stays in sync
+-        # with wall-clock time even when stems don't fill the entire buffer
+-        # (e.g. at EOF without looping).
+-        if self._metronome_enabled and self._metronome_bpm > 0:
++        # Mix in grid-based metronome click track (only when not beat-synced).
++        # Uses *frames* (the full PortAudio block size) so the beat phase
++        # stays in sync with wall-clock time even when stems don't fill the
++        # entire buffer (e.g. at EOF without looping).
++        if (self._metronome_enabled and self._metronome_bpm > 0
++                and not (self._beat_sync_enabled
++                         and len(self._beat_frames) > 0)):
+             beat_interval = int(60.0 / self._metronome_bpm * self._sample_rate)
+             if beat_interval > 0:
+                 click_len = len(self._click_buf)
+diff --git a/src/ui/main_window.py b/src/ui/main_window.py
+index cf5efbf..6aadff0 100644
+--- a/src/ui/main_window.py
++++ b/src/ui/main_window.py
+@@ -462,6 +462,10 @@ class MainWindow(QMainWindow):
+         self._settings.setValue(
+             "session/metronome_volume", self._player.metronome_volume
+         )
++        self._settings.setValue(
++            "session/beat_sync_enabled",
++            self._player_controls.beat_sync_enabled,
++        )
+         self._settings.setValue(
+             "session/count_in_enabled", self._player.count_in_enabled
+         )
+@@ -586,6 +590,15 @@ class MainWindow(QMainWindow):
+             met_bpm, bool(met_enabled), met_vol
+         )
+ 
++        # Beat-sync state
++        beat_sync = self._settings.value(
++            "session/beat_sync_enabled", False
++        )
++        if isinstance(beat_sync, str):
++            beat_sync = beat_sync.lower() == "true"
++        if beat_sync:
++            self._player_controls.set_beat_sync(True)
++
+         # Count-in state
+         ci_enabled = self._settings.value(
+             "session/count_in_enabled", False
+diff --git a/src/ui/player_controls.py b/src/ui/player_controls.py
+index b1b79d3..5bda376 100644
+--- a/src/ui/player_controls.py
++++ b/src/ui/player_controls.py
+@@ -667,6 +667,17 @@ class PlayerControls(QWidget):
+         self._tap_btn.clicked.connect(self._on_tap)
+         metro_ci_bar.addWidget(self._tap_btn)
+ 
++        self._beat_sync_btn = QPushButton("Sync")
++        self._beat_sync_btn.setCheckable(True)
++        self._beat_sync_btn.setFixedWidth(50)
++        self._beat_sync_btn.setToolTip(
++            "Sync metronome to detected beats (click on actual beat positions)"
++        )
++        self._beat_sync_btn.setAccessibleName("Sync to track")
++        self._beat_sync_btn.setEnabled(False)
++        self._beat_sync_btn.toggled.connect(self._on_beat_sync_toggled)
++        metro_ci_bar.addWidget(self._beat_sync_btn)
++
+         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
+         self._metronome_vol_slider.setRange(0, 200)
+         self._metronome_vol_slider.setValue(100)
+@@ -964,6 +975,10 @@ class PlayerControls(QWidget):
+         self._detected_bpm_label.setToolTip(
+             "Detected tempo — suggestion only (double-click to re-detect)"
+         )
++        self._beat_sync_btn.blockSignals(True)
++        self._beat_sync_btn.setChecked(False)
++        self._beat_sync_btn.setEnabled(False)
++        self._beat_sync_btn.blockSignals(False)
+ 
+     def restore_stem_state(
+         self,
+@@ -1028,6 +1043,15 @@ class PlayerControls(QWidget):
+             self._waveform.set_position(pos_s / total)
+         self.update_count_in_display()
+ 
++        # Update BPM spinbox with instantaneous BPM when beat-synced.
++        if self._beat_sync_btn.isChecked():
++            frame = int(pos_s * self._player.sample_rate)
++            ibpm = self._player.instantaneous_bpm_at(frame)
++            if ibpm > 0:
++                self._bpm_spin.blockSignals(True)
++                self._bpm_spin.setValue(max(20, min(300, round(ibpm))))
++                self._bpm_spin.blockSignals(False)
++
+     def _on_state_changed(self, playing: bool) -> None:
+         self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
+         self._play_btn.setAccessibleName("Pause" if playing else "Play")
+@@ -1300,6 +1324,12 @@ class PlayerControls(QWidget):
+         # Store beat grid on the player.
+         self._player.set_beat_times(result.beat_times, result.downbeat_times)
+ 
++        # Enable/disable sync button based on whether beats were found.
++        has_beats = len(result.beat_times) >= 2
++        self._beat_sync_btn.setEnabled(has_beats)
++        if not has_beats and self._beat_sync_btn.isChecked():
++            self._beat_sync_btn.setChecked(False)
++
+         # Update detected BPM label (suggestion only — does NOT set spinbox).
+         if result.bpm > 0:
+             bpm_rounded = round(result.bpm)
+@@ -1484,6 +1514,34 @@ class PlayerControls(QWidget):
+         """User toggled the metronome on/off."""
+         self._player.set_metronome_enabled(checked)
+ 
++    def _on_beat_sync_toggled(self, checked: bool) -> None:
++        """User toggled beat-sync mode for the metronome."""
++        self._player.set_beat_sync_enabled(checked)
++        if checked:
++            # Make BPM spinbox read-only and show instantaneous BPM.
++            self._bpm_spin.setReadOnly(True)
++            self._bpm_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
++            self._bpm_spin.setToolTip(
++                "Metronome synced to detected beats (showing live BPM)"
++            )
++            self._tap_btn.setEnabled(False)
++        else:
++            self._bpm_spin.setReadOnly(False)
++            self._bpm_spin.setButtonSymbols(
++                QSpinBox.ButtonSymbols.UpDownArrows
++            )
++            self._bpm_spin.setToolTip("Metronome tempo")
++            self._tap_btn.setEnabled(True)
++
++    @property
++    def beat_sync_enabled(self) -> bool:
++        """Return whether beat-sync mode is active."""
++        return self._beat_sync_btn.isChecked()
++
++    def set_beat_sync(self, enabled: bool) -> None:
++        """Restore beat-sync state from a saved session."""
++        self._beat_sync_btn.setChecked(enabled)
++
+     def _on_metronome_vol_changed(self, value: int) -> None:
+         """User moved the metronome volume slider."""
+         self._player.set_metronome_volume(value / 100.0)
+diff --git a/tests/test_metronome.py b/tests/test_metronome.py
+index 0befe07..c9f036a 100644
+--- a/tests/test_metronome.py
++++ b/tests/test_metronome.py
+@@ -319,3 +319,182 @@ class TestTapTempo:
+         # Intervals: 0.4, 0.6 -> avg 0.5 -> 120 BPM
+         bpm = tap_tempo([0.0, 0.4, 1.0])
+         assert abs(bpm - 120.0) < 0.1
++
++
++# -----------------------------------------------------------------------
++# Beat-synced metronome
++# -----------------------------------------------------------------------
++
++class TestBeatSyncAPI:
++    """Test the beat-synced metronome public API."""
++
++    def test_default_disabled(self, player):
++        assert player.beat_sync_enabled is False
++
++    def test_set_beat_sync(self, player):
++        player.set_beat_sync_enabled(True)
++        assert player.beat_sync_enabled is True
++        player.set_beat_sync_enabled(False)
++        assert player.beat_sync_enabled is False
++
++    def test_beat_frames_computed_from_beat_times(self, player):
++        """set_beat_times should compute _beat_frames at the correct positions."""
++        player._sample_rate = 44100
++        player._playback_speed = 1.0
++        player.set_beat_times([0.0, 0.5, 1.0], [])
++        expected = np.array([0, 22050, 44100], dtype=np.int64)
++        np.testing.assert_array_equal(player._beat_frames, expected)
++
++    def test_beat_frames_scaled_by_speed(self, player):
++        """At half speed, beat frames should be doubled (audio is stretched)."""
++        player._sample_rate = 44100
++        player._playback_speed = 0.5
++        player.set_beat_times([0.0, 0.5, 1.0], [])
++        expected = np.array([0, 44100, 88200], dtype=np.int64)
++        np.testing.assert_array_equal(player._beat_frames, expected)
++
++    def test_beat_frames_empty_when_no_beats(self, player):
++        player._sample_rate = 44100
++        player.set_beat_times([], [])
++        assert len(player._beat_frames) == 0
++
++    def test_instantaneous_bpm_mid_track(self, player):
++        """BPM between two beats spaced 0.5s apart should be ~120."""
++        player._sample_rate = 44100
++        player._playback_speed = 1.0
++        player.set_beat_times([0.0, 0.5, 1.0, 1.5], [])
++        bpm = player.instantaneous_bpm_at(11025)  # 0.25s
++        assert abs(bpm - 120.0) < 0.1
++
++    def test_instantaneous_bpm_too_few_beats(self, player):
++        player._sample_rate = 44100
++        player.set_beat_times([0.5], [])
++        assert player.instantaneous_bpm_at(0) == 0.0
++
++    def test_instantaneous_bpm_at_end(self, player):
++        """Past the last beat, should use the last interval."""
++        player._sample_rate = 44100
++        player._playback_speed = 1.0
++        player.set_beat_times([0.0, 0.5, 1.0], [])
++        bpm = player.instantaneous_bpm_at(55000)  # past 1.0s
++        assert abs(bpm - 120.0) < 0.1
++
++
++class TestBeatSyncCallback:
++    """Test synced metronome clicks in the audio callback."""
++
++    @pytest.fixture
++    def loaded_player(self, player, tmp_path):
++        """A player with a 2-second silent stem loaded."""
++        import soundfile as sf
++        data = np.zeros((88200, 2), dtype=np.float32)
++        path = tmp_path / "stem.wav"
++        sf.write(str(path), data, 44100)
++        player.load_stems({"vocals": str(path)})
++        return player
++
++    def test_synced_click_at_beat_zero(self, loaded_player):
++        """Beat at frame 0 should produce a click at the start of the buffer."""
++        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
++        loaded_player.set_beat_sync_enabled(True)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        outdata = np.zeros((512, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
++        assert np.max(np.abs(outdata[:100])) > 0.01
++
++    def test_synced_no_click_between_beats(self, loaded_player):
++        """Between beats, the synced metronome should be silent."""
++        loaded_player.set_beat_times([0.0, 1.0], [])
++        loaded_player.set_beat_sync_enabled(True)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        # Advance past the first beat's click tail.
++        click_len = len(loaded_player._click_buf)
++        loaded_player._current_frame = click_len + 100
++
++        outdata = np.zeros((512, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
++        assert np.max(np.abs(outdata)) == 0.0
++
++    def test_synced_click_mid_buffer(self, loaded_player):
++        """A beat that falls in the middle of a buffer should produce a click there."""
++        # Beat at 0.5s = frame 22050.
++        loaded_player.set_beat_times([0.5], [])
++        loaded_player.set_beat_sync_enabled(True)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        # Start just before the beat so it falls in our buffer.
++        loaded_player._current_frame = 22000
++        buf_size = 512
++        outdata = np.zeros((buf_size, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, buf_size, {}, sd.CallbackFlags())
++
++        # Click should appear at offset 50 (22050 - 22000).
++        offset = 50
++        assert np.max(np.abs(outdata[offset:offset + 50])) > 0.01
++        # Samples before the beat should be silent (from stems, which are zeros).
++        assert np.max(np.abs(outdata[:offset])) == 0.0
++
++    def test_synced_fallback_to_grid_when_no_beats(self, loaded_player):
++        """With sync enabled but no beats, grid metronome should be used."""
++        loaded_player.set_beat_times([], [])
++        loaded_player.set_beat_sync_enabled(True)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_bpm(120.0)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        outdata = np.zeros((512, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
++        # Grid metronome starts with a click at phase 0.
++        assert np.max(np.abs(outdata[:100])) > 0.01
++
++    def test_synced_disabled_uses_grid(self, loaded_player):
++        """With sync disabled, grid metronome should be used even with beats."""
++        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
++        loaded_player.set_beat_sync_enabled(False)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_bpm(120.0)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        outdata = np.zeros((512, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
++        # Grid metronome should produce a click.
++        assert np.max(np.abs(outdata[:100])) > 0.01
++        # Phase should advance (grid mode behaviour).
++        assert loaded_player._metronome_phase == 512
++
++    def test_synced_seek_then_click(self, loaded_player):
++        """After seeking to just before a beat, the click should land correctly."""
++        loaded_player.set_beat_times([0.0, 0.5, 1.0], [])
++        loaded_player.set_beat_sync_enabled(True)
++        loaded_player.set_metronome_enabled(True)
++        loaded_player.set_metronome_volume(1.0)
++        loaded_player._is_playing = True
++
++        # Seek to 10 frames before beat at 0.5s (frame 22050).
++        loaded_player.seek(22040.0 / 44100.0)
++        outdata = np.zeros((512, 2), dtype=np.float32)
++        loaded_player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
++
++        # Click at offset ~10.
++        assert np.max(np.abs(outdata[10:60])) > 0.01
++
++    def test_beat_sync_cleared_on_load(self, loaded_player, tmp_path):
++        """Loading new stems should disable beat sync."""
++        import soundfile as sf
++        loaded_player.set_beat_sync_enabled(True)
++        data = np.zeros((44100, 2), dtype=np.float32)
++        path = tmp_path / "new_stem.wav"
++        sf.write(str(path), data, 44100)
++        loaded_player.load_stems({"vocals": str(path)})
++        assert loaded_player.beat_sync_enabled is False
++        assert len(loaded_player._beat_frames) == 0

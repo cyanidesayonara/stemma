@@ -60,7 +60,10 @@ def _make_display_combo(parent_combo: QComboBox) -> None:
     # Forward mouse presses on the line edit to the combo popup.
     original_mouse = le.mousePressEvent
     def _open_on_click(event):  # noqa: ANN001
-        parent_combo.showPopup()
+        if event.button() == Qt.MouseButton.LeftButton:
+            parent_combo.showPopup()
+        else:
+            original_mouse(event)
     le.mousePressEvent = _open_on_click
 
 
@@ -388,10 +391,7 @@ class StemRow(QWidget):
     def set_volume_slider(self, value: int) -> None:
         """Programmatically set the volume slider (0-200)."""
         self._volume_slider.setValue(value)
-        text = f"{value}%"
-        idx = self._vol_combo.findText(text)
-        if idx >= 0:
-            self._vol_combo.setCurrentIndex(idx)
+        self._vol_combo.setEditText(f"{value}%")
 
     def set_mini_peaks(self, peaks: "np.ndarray") -> None:
         """Update the mini waveform with new peak data."""
@@ -462,6 +462,10 @@ class RecordingStemRow(StemRow):
     def _on_nudge_changed(self, value: int) -> None:
         self._player.nudge_stem(self._stem_name, float(value))
         self.mix_changed.emit()
+
+    def set_nudge(self, value: int) -> None:
+        """Programmatically set the nudge spinbox."""
+        self._nudge_spin.setValue(value)
 
 
 class PlayerControls(QWidget):

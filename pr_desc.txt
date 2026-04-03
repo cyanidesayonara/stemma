@@ -1,0 +1,33 @@
+feat: beat-synced metronome (phase 2 of #42)
+
+Adds a "Sync" toggle to the metronome row that locks clicks to the
+detected beat positions instead of the fixed BPM grid.
+
+Player (src/player.py):
+- _beat_frames array — beat_times converted to frame indices,
+  scaled by playback speed so clicks stay aligned after time-stretch
+- _recompute_beat_frames() called on set_beat_times(), speed changes
+  (both 1.0 fast path and _on_speed_ready), and set_beat_sync_enabled()
+- _mix_metronome_synced() — binary-search position-based click overlay,
+  called per segment inside the stem loop so A-B loop wraps mid-buffer
+  are handled correctly
+- Falls back to grid metronome when sync is on but no beats available
+- instantaneous_bpm_at(frame) — local BPM from neighbouring beat frames
+- Beat sync state cleared on load_stems()
+
+UI (src/ui/player_controls.py):
+- "Sync" toggle button on metronome row (after Tap, before volume)
+- When synced: BPM spinbox read-only with no arrows, Tap disabled,
+  spinbox shows live instantaneous BPM via position_changed signal
+- Sync button enabled only when detection found >= 2 beats
+- Cleared/disabled on song close
+
+Persistence (src/ui/main_window.py):
+- session/beat_sync_enabled saved and restored across launches
+
+Tests (tests/test_metronome.py):
+- 14 new tests: API, frame computation, speed scaling, instantaneous BPM,
+  callback click placement, silence between beats, fallback to grid,
+  seek-then-click, state clearing on load
+- 599 total pass, 1 skipped
+
