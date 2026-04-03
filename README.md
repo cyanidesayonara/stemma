@@ -15,9 +15,11 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
 - A-B loop for practice sections (Stop returns to loop A while looping; seek stays inside the loop); pitch-preserving playback speed presets
-- Metronome with BPM entry, tap tempo, mute/solo-friendly click track
+- Metronome with BPM entry, tap tempo, mute/solo-friendly click track; automatic tempo/key detection with beat-synced mode
+- Beat-sync nudge: shift metronome clicks ±500ms relative to detected beat positions to align the click with any song
 - Optional count-in beats before playback (and optionally before each loop repeat)
-- Session persistence: restore last song, position, mixer, loop, speed, metronome, and count-in after restart
+- Session persistence: restore last song, position, mixer, loop, speed, metronome, count-in, and recording take state after restart
+- Library panel shows artist and title on separate lines with teal selection highlight
 - Keyboard shortcuts for transport, stems, loop, speed, metronome, and count-in; full list under **Help > Keyboard Shortcuts**
 - Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions

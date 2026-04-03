@@ -137,7 +137,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-03-26
+Last updated: 2026-04-03
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -193,10 +193,17 @@ All core functionality implemented and tested:
 - [ ] Experimental DSP (#28)
 - [ ] Real-time streaming (#13)
 
+### v2.1.0 Release -- Shipped
+- [x] Metronome beat-sync nudge (±500ms spinbox, all click sources)
+- [x] Count-in controls moved to transport bar
+- [x] Live volume combos (editable, real-time slider sync)
+- [x] Library two-row display with separator lines and teal selection
+- [x] Recording session persistence (nudge/mute/solo/volume per take)
+
 ## Test Suite
 
 ```
-pytest                                    # ~527 fast tests (~17s)
+pytest                                    # ~600 fast tests (~17s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
