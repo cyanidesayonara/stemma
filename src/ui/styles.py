@@ -130,7 +130,7 @@ QPushButton {{
     color: {c["text"]};
     border: 1px solid {c["surface1"]};
     border-radius: 4px;
-    padding: 6px 14px;
+    padding: 4px 8px;
     min-height: 24px;
 }}
 
@@ -165,8 +165,6 @@ QPushButton#icon-btn {{
     border: 1px solid {c["surface1"]};
     border-radius: 4px;
     padding: 2px;
-    min-height: 0;
-    min-width: 0;
 }}
 
 QPushButton#icon-btn:checked {{
@@ -330,7 +328,11 @@ QComboBox {{
     color: {c["text"]};
     border: 1px solid {c["surface1"]};
     border-radius: 4px;
-    padding: 4px 8px;
+    padding: 4px 4px 4px 6px;
+}}
+
+QComboBox:editable {{
+    padding: 0px;
 }}
 
 QComboBox:focus {{
@@ -339,6 +341,13 @@ QComboBox:focus {{
 
 QComboBox::drop-down {{
     border: none;
+}}
+
+QComboBox QLineEdit {{
+    background-color: transparent;
+    color: {c["text"]};
+    border: none;
+    padding: 4px 4px 4px 6px;
 }}
 
 QComboBox QAbstractItemView {{

@@ -47,6 +47,26 @@ _MAX_RECORDING_TAKES = 2
 _MINI_WAVEFORM_WIDTH = 250
 
 
+def _make_display_combo(parent_combo: QComboBox) -> None:
+    """Make an editable combo act as a read-only display that opens on click.
+
+    Sets the combo editable with a read-only line edit, and installs a mouse
+    handler so clicking anywhere on the combo opens the dropdown popup.
+    """
+    parent_combo.setEditable(True)
+    le = parent_combo.lineEdit()
+    le.setReadOnly(True)
+    le.installEventFilter(parent_combo)
+    # Forward mouse presses on the line edit to the combo popup.
+    original_mouse = le.mousePressEvent
+    def _open_on_click(event):  # noqa: ANN001
+        if event.button() == Qt.MouseButton.LeftButton:
+            parent_combo.showPopup()
+        else:
+            original_mouse(event)
+    le.mousePressEvent = _open_on_click
+
+
 def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
                       mini_bins=200):
     """Compute peaks on a background thread. Returns (main_peaks, stem_peaks)."""
@@ -66,15 +86,15 @@ def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
 
 
-def _make_icon(draw_fn, color: QColor) -> QIcon:
+def _make_icon(draw_fn, color: QColor, size: int = _ICON_SIZE) -> QIcon:
     """Create a crisp QIcon by painting with *draw_fn(painter, size)*."""
-    pixmap = QPixmap(QSize(_ICON_SIZE, _ICON_SIZE))
+    pixmap = QPixmap(QSize(size, size))
     pixmap.fill(Qt.GlobalColor.transparent)
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(color)
-    draw_fn(p, _ICON_SIZE)
+    draw_fn(p, size)
     p.end()
     return QIcon(pixmap)
 
@@ -168,6 +188,23 @@ def _draw_power(p: QPainter, s: int) -> None:
     p.setPen(Qt.PenStyle.NoPen)
 
 
+def _draw_trash(p: QPainter, s: int) -> None:
+    """Trash can icon for deleting items."""
+    m = s * 0.2
+    pen = QPen(p.brush().color(), max(1.0, s * 0.08))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    # The painter must be set to NoBrush for stroke-only rects.
+    p.setBrush(Qt.GlobalColor.transparent)
+    p.setPen(pen)
+    # Lid line
+    p.drawLine(QPointF(m * 0.8, m * 1.5), QPointF(s - m * 0.8, m * 1.5))
+    # Handle top
+    p.drawRect(QRectF(s * 0.4, m, s * 0.2, m * 0.5))
+    # Body
+    p.drawRect(QRectF(m * 1.2, m * 1.5, s - m * 2.4, s - m * 2.5))
+    p.setPen(Qt.PenStyle.NoPen)
+
+
 def _draw_repeat(p: QPainter, s: int) -> None:
     """Cycle/repeat arrows icon."""
     cx = s / 2.0
@@ -223,7 +260,9 @@ def _make_toggle_icon(draw_fn, normal_color: QColor,
         p.setBrush(color)
         draw_fn(p, size)
         p.end()
-        icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
+        # Ensure icon is visible in all interaction modes
+        for mode in [QIcon.Mode.Normal, QIcon.Mode.Active, QIcon.Mode.Selected]:
+            icon.addPixmap(pixmap, mode, state)
     return icon
 
 
@@ -303,14 +342,15 @@ class StemRow(QWidget):
         layout.addWidget(self._volume_slider)
 
         self._vol_combo = QComboBox()
+        _make_display_combo(self._vol_combo)
         _VOLUME_PRESETS = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]
         for v in _VOLUME_PRESETS:
             self._vol_combo.addItem(f"{v}%", v)
         self._vol_combo.setCurrentText("100%")
-        self._vol_combo.setFixedWidth(68)
+        self._vol_combo.setFixedSize(62, 28)
         self._vol_combo.setToolTip(f"{display} volume")
         self._vol_combo.setAccessibleName(f"{display} volume preset")
-        self._vol_combo.currentIndexChanged.connect(self._on_vol_combo)
+        self._vol_combo.activated.connect(self._on_vol_combo)
         layout.addWidget(self._vol_combo)
 
     def _on_mini_seek(self, seconds: float) -> None:
@@ -329,14 +369,9 @@ class StemRow(QWidget):
     def _on_volume(self, value: int) -> None:
         gain = value / 100.0
         self._player.set_volume(self._stem_name, gain)
-        # Sync combo without re-firing
-        text = f"{value}%"
-        idx = self._vol_combo.findText(text)
+        # Sync combo display without re-firing
         self._vol_combo.blockSignals(True)
-        if idx >= 0:
-            self._vol_combo.setCurrentIndex(idx)
-        else:
-            self._vol_combo.setEditText(text)
+        self._vol_combo.setEditText(f"{value}%")
         self._vol_combo.blockSignals(False)
         self.mix_changed.emit()
 
@@ -356,10 +391,7 @@ class StemRow(QWidget):
     def set_volume_slider(self, value: int) -> None:
         """Programmatically set the volume slider (0-200)."""
         self._volume_slider.setValue(value)
-        text = f"{value}%"
-        idx = self._vol_combo.findText(text)
-        if idx >= 0:
-            self._vol_combo.setCurrentIndex(idx)
+        self._vol_combo.setEditText(f"{value}%")
 
     def set_mini_peaks(self, peaks: "np.ndarray") -> None:
         """Update the mini waveform with new peak data."""
@@ -400,16 +432,11 @@ class RecordingStemRow(StemRow):
         lay = self.layout()
         insert_pos = lay.count()
 
-        self._nudge_label = QLabel("Nudge:")
-        self._nudge_label.setFixedWidth(46)
-        lay.insertWidget(insert_pos, self._nudge_label)
-        insert_pos += 1
-
         self._nudge_spin = QSpinBox()
         self._nudge_spin.setRange(-200, 200)
         self._nudge_spin.setValue(0)
         self._nudge_spin.setSuffix(" ms")
-        self._nudge_spin.setFixedWidth(90)
+        self._nudge_spin.setFixedWidth(104)
         self._nudge_spin.setToolTip(
             f"Nudge {display_name} alignment (-200 to +200 ms)"
         )
@@ -418,8 +445,13 @@ class RecordingStemRow(StemRow):
         lay.insertWidget(insert_pos, self._nudge_spin)
         insert_pos += 1
 
-        self._delete_btn = QPushButton("X")
+        self._delete_btn = QPushButton()
+        self._delete_btn.setObjectName("icon-btn")
         self._delete_btn.setFixedSize(28, 28)
+        tc = DARK_COLORS if theme == "dark" else LIGHT_COLORS
+        text_c = QColor(tc["text"])
+        self._delete_btn.setIcon(_make_icon(_draw_trash, text_c, _STEM_ICON_SIZE))
+        self._delete_btn.setIconSize(QSize(_STEM_ICON_SIZE, _STEM_ICON_SIZE))
         self._delete_btn.setToolTip(f"Delete {display_name}")
         self._delete_btn.setAccessibleName(f"Delete {display_name}")
         self._delete_btn.clicked.connect(
@@ -430,6 +462,10 @@ class RecordingStemRow(StemRow):
     def _on_nudge_changed(self, value: int) -> None:
         self._player.nudge_stem(self._stem_name, float(value))
         self.mix_changed.emit()
+
+    def set_nudge(self, value: int) -> None:
+        """Programmatically set the nudge spinbox."""
+        self._nudge_spin.setValue(value)
 
 
 class PlayerControls(QWidget):
@@ -547,6 +583,58 @@ class PlayerControls(QWidget):
         transport.addWidget(self._time_label)
 
         transport.addStretch()
+
+        # -- Count-in controls (right side of transport bar) --
+        self._count_in_label = QLabel("")
+        self._count_in_label.setFixedWidth(32)
+        self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        transport.addWidget(self._count_in_label)
+
+        self._ci_label = QLabel("Count-in:")
+        transport.addWidget(self._ci_label)
+
+        self._count_in_toggle = QPushButton()
+        self._count_in_toggle.setObjectName("icon-btn")
+        self._count_in_toggle.setCheckable(True)
+        self._count_in_toggle.setFixedSize(36, 36)
+        self._count_in_toggle.setIcon(
+            _make_toggle_icon(_draw_power, icon_color))
+        self._count_in_toggle.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._count_in_toggle.setToolTip("Toggle count-in before playback (C)")
+        self._count_in_toggle.setAccessibleName("Toggle count-in")
+        self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
+        transport.addWidget(self._count_in_toggle)
+
+        self._count_in_beats_spin = QSpinBox()
+        self._count_in_beats_spin.setRange(1, 8)
+        self._count_in_beats_spin.setValue(4)
+        self._count_in_beats_spin.setSuffix(" beats")
+        self._count_in_beats_spin.setFixedWidth(96)
+        self._count_in_beats_spin.setToolTip("Number of count-in beats")
+        self._count_in_beats_spin.setAccessibleName("Count-in beats")
+        self._count_in_beats_spin.valueChanged.connect(
+            self._on_count_in_beats_changed
+        )
+        transport.addWidget(self._count_in_beats_spin)
+
+        self._count_in_repeats_cb = QPushButton()
+        self._count_in_repeats_cb.setObjectName("icon-btn")
+        self._count_in_repeats_cb.setCheckable(True)
+        self._count_in_repeats_cb.setFixedSize(36, 36)
+        self._count_in_repeats_cb.setIcon(
+            _make_toggle_icon(_draw_repeat, icon_color))
+        self._count_in_repeats_cb.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
+        self._count_in_repeats_cb.setToolTip(
+            "Also count in before each A-B loop repeat"
+        )
+        self._count_in_repeats_cb.setAccessibleName(
+            "Count-in on loop repeats"
+        )
+        self._count_in_repeats_cb.toggled.connect(
+            self._on_count_in_repeats_toggled
+        )
+        transport.addWidget(self._count_in_repeats_cb)
+
         controls_layout.addLayout(transport)
 
         # -- Waveform display --
@@ -570,14 +658,14 @@ class PlayerControls(QWidget):
         loop_speed_bar = QHBoxLayout()
 
         self._loop_a_btn = QPushButton("Set A")
-        self._loop_a_btn.setFixedWidth(60)
+        self._loop_a_btn.setFixedWidth(50)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
         self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_speed_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
-        self._loop_b_btn.setFixedWidth(60)
+        self._loop_b_btn.setFixedWidth(50)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
         self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
@@ -585,14 +673,14 @@ class PlayerControls(QWidget):
 
         self._loop_toggle_btn = QPushButton("Loop")
         self._loop_toggle_btn.setCheckable(True)
-        self._loop_toggle_btn.setFixedWidth(60)
+        self._loop_toggle_btn.setFixedWidth(48)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
         loop_speed_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
-        self._loop_clear_btn.setFixedWidth(60)
+        self._loop_clear_btn.setFixedWidth(48)
         self._loop_clear_btn.setToolTip("Clear loop points")
         self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
@@ -610,6 +698,10 @@ class PlayerControls(QWidget):
         self._key_label.installEventFilter(self)
         loop_speed_bar.addWidget(self._key_label)
 
+        self._speed_status = QLabel("")
+        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
+        loop_speed_bar.addWidget(self._speed_status)
+
         loop_speed_bar.addStretch()
 
         self._speed_label = QLabel("Speed:")
@@ -619,19 +711,15 @@ class PlayerControls(QWidget):
         for preset in SPEED_PRESETS:
             self._speed_combo.addItem(f"{preset}x", preset)
         self._speed_combo.setCurrentText("1.0x")
-        self._speed_combo.setFixedWidth(80)
+        self._speed_combo.setFixedWidth(66)
         self._speed_combo.setToolTip("Playback speed ([ / ])")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
         loop_speed_bar.addWidget(self._speed_combo)
 
-        self._speed_status = QLabel("")
-        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
-        loop_speed_bar.addWidget(self._speed_status)
-
         controls_layout.addLayout(loop_speed_bar)
 
-        # -- Metronome + Count-in bar (merged) --
+        # -- Metronome bar --
         metro_ci_bar = QHBoxLayout()
 
         self._metro_label = QLabel("Metronome:")
@@ -653,7 +741,7 @@ class PlayerControls(QWidget):
         self._bpm_spin.setRange(20, 300)
         self._bpm_spin.setValue(120)
         self._bpm_spin.setSuffix(" BPM")
-        self._bpm_spin.setFixedWidth(110)
+        self._bpm_spin.setFixedWidth(105)
         self._bpm_spin.setToolTip("Metronome tempo")
         self._bpm_spin.setAccessibleName("Metronome BPM")
         self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
@@ -661,7 +749,7 @@ class PlayerControls(QWidget):
 
         self._tap_times: list[float] = []
         self._tap_btn = QPushButton("Tap")
-        self._tap_btn.setFixedWidth(60)
+        self._tap_btn.setFixedWidth(46)
         self._tap_btn.setToolTip("Tap to set tempo")
         self._tap_btn.setAccessibleName("Tap tempo")
         self._tap_btn.clicked.connect(self._on_tap)
@@ -678,26 +766,42 @@ class PlayerControls(QWidget):
         self._beat_sync_btn.toggled.connect(self._on_beat_sync_toggled)
         metro_ci_bar.addWidget(self._beat_sync_btn)
 
+        self._beat_nudge_spin = QSpinBox()
+        self._beat_nudge_spin.setRange(-500, 500)
+        self._beat_nudge_spin.setValue(0)
+        self._beat_nudge_spin.setSuffix(" ms")
+        self._beat_nudge_spin.setFixedWidth(104)
+        self._beat_nudge_spin.setToolTip("Metronome nudge (shift metronome clicking)")
+        self._beat_nudge_spin.setAccessibleName("Sync Nudge")
+        self._beat_nudge_spin.valueChanged.connect(self._on_beat_nudge_changed)
+        metro_ci_bar.addWidget(self._beat_nudge_spin)
+
         self._metronome_vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._metronome_vol_slider.setRange(0, 200)
         self._metronome_vol_slider.setValue(100)
         self._metronome_vol_slider.setFixedWidth(70)
-        self._metronome_vol_slider.setToolTip("Metronome volume")
+        self._metronome_vol_slider.setToolTip(
+            "Metronome volume (0-200%, double-click to reset)"
+        )
         self._metronome_vol_slider.setAccessibleName("Metronome volume")
         self._metronome_vol_slider.valueChanged.connect(
             self._on_metronome_vol_changed
         )
+        self._metronome_vol_slider.mouseDoubleClickEvent = (
+            lambda _: self._metronome_vol_slider.setValue(100)
+        )
         metro_ci_bar.addWidget(self._metronome_vol_slider)
 
         self._metronome_vol_combo = QComboBox()
+        _make_display_combo(self._metronome_vol_combo)
         _MET_VOL_PRESETS = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]
         for v in _MET_VOL_PRESETS:
             self._metronome_vol_combo.addItem(f"{v}%", v)
         self._metronome_vol_combo.setCurrentText("100%")
-        self._metronome_vol_combo.setFixedWidth(68)
+        self._metronome_vol_combo.setFixedWidth(62)
         self._metronome_vol_combo.setToolTip("Metronome volume")
         self._metronome_vol_combo.setAccessibleName("Metronome volume preset")
-        self._metronome_vol_combo.currentIndexChanged.connect(
+        self._metronome_vol_combo.activated.connect(
             self._on_metronome_vol_combo
         )
         metro_ci_bar.addWidget(self._metronome_vol_combo)
@@ -713,57 +817,6 @@ class PlayerControls(QWidget):
         metro_ci_bar.addWidget(self._detected_bpm_label)
 
         metro_ci_bar.addStretch()
-
-        self._ci_label = QLabel("Count-in:")
-        metro_ci_bar.addWidget(self._ci_label)
-
-        self._count_in_toggle = QPushButton()
-        self._count_in_toggle.setObjectName("icon-btn")
-        self._count_in_toggle.setCheckable(True)
-        self._count_in_toggle.setFixedSize(36, 36)
-        self._count_in_toggle.setIcon(
-            _make_toggle_icon(_draw_power, icon_color))
-        self._count_in_toggle.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
-        self._count_in_toggle.setToolTip("Toggle count-in before playback (C)")
-        self._count_in_toggle.setAccessibleName("Toggle count-in")
-        self._count_in_toggle.toggled.connect(self._on_count_in_toggled)
-        metro_ci_bar.addWidget(self._count_in_toggle)
-
-        self._count_in_beats_spin = QSpinBox()
-        self._count_in_beats_spin.setRange(1, 8)
-        self._count_in_beats_spin.setValue(4)
-        self._count_in_beats_spin.setSuffix(" beats")
-        self._count_in_beats_spin.setFixedWidth(90)
-        self._count_in_beats_spin.setToolTip("Number of count-in beats")
-        self._count_in_beats_spin.setAccessibleName("Count-in beats")
-        self._count_in_beats_spin.valueChanged.connect(
-            self._on_count_in_beats_changed
-        )
-        metro_ci_bar.addWidget(self._count_in_beats_spin)
-
-        self._count_in_repeats_cb = QPushButton()
-        self._count_in_repeats_cb.setObjectName("icon-btn")
-        self._count_in_repeats_cb.setCheckable(True)
-        self._count_in_repeats_cb.setFixedSize(36, 36)
-        self._count_in_repeats_cb.setIcon(
-            _make_toggle_icon(_draw_repeat, icon_color))
-        self._count_in_repeats_cb.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
-        self._count_in_repeats_cb.setToolTip(
-            "Also count in before each A-B loop repeat"
-        )
-        self._count_in_repeats_cb.setAccessibleName(
-            "Count-in on loop repeats"
-        )
-        self._count_in_repeats_cb.toggled.connect(
-            self._on_count_in_repeats_toggled
-        )
-        metro_ci_bar.addWidget(self._count_in_repeats_cb)
-
-        self._count_in_label = QLabel("")
-        self._count_in_label.setFixedWidth(40)
-        self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        metro_ci_bar.addWidget(self._count_in_label)
-
         controls_layout.addLayout(metro_ci_bar)
 
         # -- Stem mixer --
@@ -944,8 +997,8 @@ class PlayerControls(QWidget):
         self._record_btn.blockSignals(False)
         self.update_record_button_state()
 
-        # Auto-detect only if no cached results are already displayed.
-        if has_stems and not self._detected_bpm_label.text():
+        # Auto-detect if no beat grid is loaded.
+        if has_stems and not self._player.beat_times:
             self.start_detection()
 
         if stem_names:
@@ -979,6 +1032,10 @@ class PlayerControls(QWidget):
         self._beat_sync_btn.setChecked(False)
         self._beat_sync_btn.setEnabled(False)
         self._beat_sync_btn.blockSignals(False)
+
+        self._beat_nudge_spin.blockSignals(True)
+        self._beat_nudge_spin.setValue(0)
+        self._beat_nudge_spin.blockSignals(False)
 
     def restore_stem_state(
         self,
@@ -1320,15 +1377,24 @@ class PlayerControls(QWidget):
             return self._CONF_COLORS_LIGHT.get(level, "")
         return self._CONF_COLORS_DARK.get(level, "")
 
+    def _update_sync_btn_state(self, has_beats: bool) -> None:
+        """Update beat-sync button enabled state."""
+        self._beat_sync_btn.setEnabled(has_beats)
+        if not has_beats and self._beat_sync_btn.isChecked():
+            self._beat_sync_btn.setChecked(False)
+
+    def restore_beat_times(self, beat_times: list[float], downbeat_times: list[float]) -> None:
+        """Restore beat times from a saved session and update UI."""
+        self._player.set_beat_times(beat_times, downbeat_times)
+        self._update_sync_btn_state(len(beat_times) >= 2)
+
     def _on_detect_completed(self, result: DetectionResult) -> None:
         # Store beat grid on the player.
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
 
         # Enable/disable sync button based on whether beats were found.
         has_beats = len(result.beat_times) >= 2
-        self._beat_sync_btn.setEnabled(has_beats)
-        if not has_beats and self._beat_sync_btn.isChecked():
-            self._beat_sync_btn.setChecked(False)
+        self._update_sync_btn_state(has_beats)
 
         # Update detected BPM label (suggestion only — does NOT set spinbox).
         if result.bpm > 0:
@@ -1337,7 +1403,7 @@ class PlayerControls(QWidget):
             bpm_c = self._conf_color(result.bpm_confidence)
             if bpm_c:
                 self._detected_bpm_label.setStyleSheet(f"color: {bpm_c};")
-            self._detected_bpm_label.setText(f"~{bpm_rounded} BPM")
+            self._detected_bpm_label.setText(f"Detected tempo: ~{bpm_rounded} BPM")
             self._detected_bpm_label.setToolTip(
                 f"Detected tempo: {result.bpm:.1f} BPM\n"
                 f"Confidence: {result.bpm_confidence}\n"
@@ -1428,13 +1494,14 @@ class PlayerControls(QWidget):
     def _on_bpm_only_completed(self, result: DetectionResult) -> None:
         """Update only the BPM label from a re-detection."""
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
+        self._update_sync_btn_state(len(result.beat_times) >= 2)
         if result.bpm > 0:
             bpm_rounded = round(result.bpm)
             self._bpm_conf = result.bpm_confidence
             bpm_c = self._conf_color(result.bpm_confidence)
             if bpm_c:
                 self._detected_bpm_label.setStyleSheet(f"color: {bpm_c};")
-            self._detected_bpm_label.setText(f"~{bpm_rounded} BPM")
+            self._detected_bpm_label.setText(f"Detected tempo: ~{bpm_rounded} BPM")
             self._detected_bpm_label.setToolTip(
                 f"Detected tempo: {result.bpm:.1f} BPM\n"
                 f"Confidence: {result.bpm_confidence}\n"
@@ -1493,6 +1560,9 @@ class PlayerControls(QWidget):
     ) -> None:
         """Restore a previously detected BPM suggestion label with colour and tooltip."""
         if text:
+            # Ensure prefix is present (older sessions may lack it).
+            if not text.startswith("Detected tempo:"):
+                text = f"Detected tempo: {text}"
             self._detected_bpm_label.setText(text)
             self._bpm_conf = confidence
             c = self._conf_color(confidence) if confidence else ""
@@ -1533,6 +1603,18 @@ class PlayerControls(QWidget):
             self._bpm_spin.setToolTip("Metronome tempo")
             self._tap_btn.setEnabled(True)
 
+    def _on_beat_nudge_changed(self, value: int) -> None:
+        self._player.set_beat_sync_nudge_ms(float(value))
+
+    @property
+    def beat_sync_nudge_ms(self) -> float:
+        """Return the user-selected sync nudge offset in ms."""
+        return float(self._beat_nudge_spin.value())
+
+    def set_beat_sync_nudge(self, offset_ms: float) -> None:
+        """Restore the beat sync nudge offset from saved session."""
+        self._beat_nudge_spin.setValue(int(offset_ms))
+
     @property
     def beat_sync_enabled(self) -> bool:
         """Return whether beat-sync mode is active."""
@@ -1545,11 +1627,8 @@ class PlayerControls(QWidget):
     def _on_metronome_vol_changed(self, value: int) -> None:
         """User moved the metronome volume slider."""
         self._player.set_metronome_volume(value / 100.0)
-        text = f"{value}%"
-        idx = self._metronome_vol_combo.findText(text)
         self._metronome_vol_combo.blockSignals(True)
-        if idx >= 0:
-            self._metronome_vol_combo.setCurrentIndex(idx)
+        self._metronome_vol_combo.setEditText(f"{value}%")
         self._metronome_vol_combo.blockSignals(False)
 
     def _on_metronome_vol_combo(self, index: int) -> None:
