@@ -324,6 +324,7 @@ class MainWindow(QMainWindow):
     def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
         """Apply a theme to all child widgets that need explicit updates."""
         self._player_controls.apply_theme(theme, colors)
+        self._library_panel.apply_theme(theme, colors)
 
     def _update_theme_btn(self) -> None:
         """Update the corner toggle (sun glyph in dark mode, drawn moon in light)."""
@@ -447,6 +448,10 @@ class MainWindow(QMainWindow):
         self._settings.setValue(
             "session/volumes", json.dumps(self._player.volumes)
         )
+        self._settings.setValue(
+            "session/nudge_offsets",
+            json.dumps(self._player.nudge_offsets),
+        )
         loop_a = self._player.loop_a
         loop_b = self._player.loop_b
         self._settings.setValue("session/loop_a", loop_a if loop_a is not None else -1)
@@ -493,6 +498,18 @@ class MainWindow(QMainWindow):
                 f"{prefix}/bpm_conf",
                 self._player_controls.bpm_confidence,
             )
+            self._settings.setValue(
+                f"{prefix}/beat_times",
+                json.dumps(self._player.beat_times),
+            )
+            self._settings.setValue(
+                f"{prefix}/downbeat_times",
+                json.dumps(self._player.downbeat_times),
+            )
+            self._settings.setValue(
+                f"{prefix}/beat_nudge_ms",
+                self._player_controls.beat_sync_nudge_ms,
+            )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -520,6 +537,12 @@ class MainWindow(QMainWindow):
             volumes = json.loads(self._settings.value("session/volumes", "{}"))
         except (json.JSONDecodeError, TypeError):
             volumes = {}
+        try:
+            nudge_offsets = json.loads(
+                self._settings.value("session/nudge_offsets", "{}")
+            )
+        except (json.JSONDecodeError, TypeError):
+            nudge_offsets = {}
 
         self._player_controls.restore_stem_state(muted, soloed, volumes)
 
@@ -687,8 +710,24 @@ class MainWindow(QMainWindow):
                 stem_paths[name] = path
 
         if stem_paths:
-            # Save detection results for the outgoing song.
+            # Save state for the outgoing song.
             if self._current_song_id:
+                self._settings.setValue(
+                    "session/muted_stems",
+                    json.dumps(sorted(self._player.muted_stems)),
+                )
+                self._settings.setValue(
+                    "session/soloed_stems",
+                    json.dumps(sorted(self._player.soloed_stems)),
+                )
+                self._settings.setValue(
+                    "session/volumes",
+                    json.dumps(self._player.volumes),
+                )
+                self._settings.setValue(
+                    "session/nudge_offsets",
+                    json.dumps(self._player.nudge_offsets),
+                )
                 prefix = f"detection/{self._current_song_id}"
                 self._settings.setValue(
                     f"{prefix}/key",
@@ -705,6 +744,18 @@ class MainWindow(QMainWindow):
                 self._settings.setValue(
                     f"{prefix}/bpm_conf",
                     self._player_controls.bpm_confidence,
+                )
+                self._settings.setValue(
+                    f"{prefix}/beat_times",
+                    json.dumps(self._player.beat_times),
+                )
+                self._settings.setValue(
+                    f"{prefix}/downbeat_times",
+                    json.dumps(self._player.downbeat_times),
+                )
+                self._settings.setValue(
+                    f"{prefix}/beat_nudge_ms",
+                    self._player_controls.beat_sync_nudge_ms,
                 )
 
             self._player.stop()
@@ -732,16 +783,36 @@ class MainWindow(QMainWindow):
                 saved_bpm, saved_bpm_conf,
             )
 
+            try:
+                nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
+                nudge = float(nudge_str) if nudge_str else 0.0
+                self._player_controls.set_beat_sync_nudge(nudge)
+
+                bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
+                dt_str = self._settings.value(f"{prefix}/downbeat_times", "[]")
+                b_times = json.loads(str(bt_str)) if bt_str else []
+                d_times = json.loads(str(dt_str)) if dt_str else []
+                if b_times:
+                    self._player_controls.restore_beat_times(b_times, d_times)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
             self._player_controls.set_stem_names(list(stem_paths.keys()))
             self._player.set_recording_song_dir(song.stems_path)
             self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
             self._load_existing_recordings(song.stems_path)
 
     def _load_existing_recordings(self, song_dir: str) -> None:
-        """Scan *song_dir* for recording_take*.wav and load them as stems."""
+        """Scan *song_dir* for recording_take*.wav and load them as stems.
+
+        After loading, restores any saved mute/solo/volume/nudge state for
+        the recording stems from QSettings.
+        """
         takes = sorted(glob.glob(
             os.path.join(song_dir, "recording_take*.wav")
         ))
+        if not takes:
+            return
         for take_path in takes:
             base = os.path.basename(take_path)
             stem_name = base.replace(".wav", "")
@@ -753,6 +824,31 @@ class MainWindow(QMainWindow):
             except ValueError:
                 display = stem_name
             self._add_recording_stem(stem_name, take_path, display)
+
+        # Restore saved state for recording stems.
+        try:
+            muted = set(json.loads(
+                self._settings.value("session/muted_stems", "[]")
+            ))
+            soloed = set(json.loads(
+                self._settings.value("session/soloed_stems", "[]")
+            ))
+            volumes = json.loads(
+                self._settings.value("session/volumes", "{}")
+            )
+            nudges = json.loads(
+                self._settings.value("session/nudge_offsets", "{}")
+            )
+        except (json.JSONDecodeError, TypeError):
+            return
+        for row in self._player_controls._recording_rows.values():
+            name = row._stem_name
+            row.set_muted(name in muted)
+            row.set_soloed(name in soloed)
+            if name in volumes:
+                row.set_volume_slider(int(volumes[name] * 100))
+            if name in nudges:
+                row._nudge_spin.setValue(int(nudges[name]))
 
     def _on_recording_saved(self, path: str) -> None:
         """Handle a newly saved recording: load it and add a UI row."""

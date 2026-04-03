@@ -4,7 +4,8 @@ Displays the song library as a list and emits a signal when a song is
 selected. Full implementation in ticket #10.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -16,11 +17,94 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
 
 from src.library import Song, SongLibrary
+
+# Custom data roles for two-line display.
+_ARTIST_ROLE = Qt.ItemDataRole.UserRole + 1
+_TITLE_ROLE = Qt.ItemDataRole.UserRole + 2
+
+
+class _SongDelegate(QStyledItemDelegate):
+    """Two-line delegate: artist (bold) on top, title (subdued) below."""
+
+    _V_PADDING = 4
+
+    def __init__(
+        self, parent=None, separator_color: str = "#45475a",
+        accent_color: str = "#4fb8b8",
+    ):
+        super().__init__(parent)
+        self._separator_color = QColor(separator_color)
+        self._accent_color = QColor(accent_color)
+
+    def set_separator_color(self, color: str) -> None:
+        self._separator_color = QColor(color)
+
+    def set_accent_color(self, color: str) -> None:
+        self._accent_color = QColor(color)
+
+    def paint(self, painter, option, index):  # noqa: D401
+        self.initStyleOption(option, index)
+        painter.save()
+
+        # Draw selection / hover background.
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        if selected:
+            painter.fillRect(option.rect, self._accent_color)
+            text_color = QColor("#1e1e2e")  # Dark text on accent.
+            sub_color = QColor(text_color)
+            sub_color.setAlphaF(0.7)
+        else:
+            text_color = option.palette.text().color()
+            # Subdued color for title line.
+            sub_color = QColor(text_color)
+            sub_color.setAlphaF(0.6)
+
+        artist = index.data(_ARTIST_ROLE) or ""
+        title = index.data(_TITLE_ROLE) or ""
+        rect = option.rect.adjusted(6, self._V_PADDING, -4, -self._V_PADDING)
+
+        # Artist line (bold).
+        bold_font = QFont(option.font)
+        bold_font.setBold(True)
+        painter.setFont(bold_font)
+        painter.setPen(text_color)
+        artist_rect = rect.adjusted(0, 0, 0, -rect.height() // 2)
+        painter.drawText(
+            artist_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            artist,
+        )
+
+        # Title line (normal, slightly smaller, subdued).
+        normal_font = QFont(option.font)
+        normal_font.setPointSizeF(option.font.pointSizeF() * 0.9)
+        painter.setFont(normal_font)
+        painter.setPen(sub_color)
+        title_rect = rect.adjusted(0, rect.height() // 2, 0, 0)
+        painter.drawText(
+            title_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            title,
+        )
+
+        # Separator line at the bottom of each item.
+        painter.setPen(QPen(self._separator_color, 1))
+        y = option.rect.bottom()
+        painter.drawLine(option.rect.left() + 6, y, option.rect.right() - 6, y)
+
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        fm = QFontMetrics(option.font)
+        return QSize(0, fm.height() * 2 + self._V_PADDING * 2 + 4)
 
 
 class EditSongDialog(QDialog):
@@ -96,6 +180,8 @@ class LibraryPanel(QWidget):
         layout.addWidget(self._search_edit)
 
         self._list = QListWidget()
+        self._song_delegate = _SongDelegate(self._list)
+        self._list.setItemDelegate(self._song_delegate)
         self._list.setAccessibleName("Song library")
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
@@ -112,12 +198,21 @@ class LibraryPanel(QWidget):
         self._remove_btn.clicked.connect(self._on_remove_clicked)
         layout.addWidget(self._remove_btn)
 
+    def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
+        """Update delegate colors for the current theme."""
+        self._song_delegate.set_separator_color(colors["surface1"])
+        self._song_delegate.set_accent_color(colors["accent"])
+        self._list.viewport().update()
+
     def refresh(self) -> None:
         """Reload the song list from the library."""
         self._list.clear()
         for song in self._library.songs:
+            # Display text used for search filtering; delegate paints the rows.
             item = QListWidgetItem(f"{song.artist} - {song.title}")
             item.setData(Qt.ItemDataRole.UserRole, song.id)
+            item.setData(_ARTIST_ROLE, song.artist)
+            item.setData(_TITLE_ROLE, song.title)
             self._list.addItem(item)
         self._apply_filter(self._search_edit.text())
 

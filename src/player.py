@@ -148,6 +148,7 @@ class MultiTrackPlayer(QObject):
         self._beat_times: list[float] = []
         self._downbeat_times: list[float] = []
         self._beat_sync_enabled: bool = False
+        self._beat_sync_nudge_ms: float = 0.0
         self._beat_frames: np.ndarray = np.array([], dtype=np.int64)
 
         # Count-in state.
@@ -264,8 +265,8 @@ class MultiTrackPlayer(QObject):
         self, beats: list[float], downbeats: list[float],
     ) -> None:
         """Store detected beat/downbeat timestamps."""
-        self._beat_times = list(beats)
-        self._downbeat_times = list(downbeats)
+        self._beat_times = [float(b) for b in beats]
+        self._downbeat_times = [float(b) for b in downbeats]
         self._recompute_beat_frames()
 
     # -- Beat-synced metronome API ------------------------------------------
@@ -281,6 +282,17 @@ class MultiTrackPlayer(QObject):
         if enabled:
             self._recompute_beat_frames()
 
+    @property
+    def beat_sync_nudge_ms(self) -> float:
+        """Return the user-defined metronome synchronization offset in ms."""
+        return self._beat_sync_nudge_ms
+
+    def set_beat_sync_nudge_ms(self, offset_ms: float) -> None:
+        """Shift the metronome click timing by `offset_ms` milliseconds."""
+        self._beat_sync_nudge_ms = float(offset_ms)
+        if self._beat_sync_enabled:
+            self._recompute_beat_frames()
+
     def _recompute_beat_frames(self) -> None:
         """Convert beat_times (seconds) to frame indices for the current speed.
 
@@ -293,8 +305,9 @@ class MultiTrackPlayer(QObject):
             return
         speed = self._playback_speed if self._playback_speed > 0 else 1.0
         sr = self._sample_rate
+        offset_sec = self._beat_sync_nudge_ms / 1000.0
         self._beat_frames = np.array(
-            [int(t / speed * sr) for t in self._beat_times],
+            [max(0, int((t + offset_sec) / speed * sr)) for t in self._beat_times],
             dtype=np.int64,
         )
 
@@ -501,6 +514,11 @@ class MultiTrackPlayer(QObject):
         """Return the current nudge offset in ms for *name* (default 0)."""
         return self._nudge_offsets.get(name, 0.0)
 
+    @property
+    def nudge_offsets(self) -> dict[str, float]:
+        """Return a copy of all per-stem nudge offsets (ms)."""
+        return dict(self._nudge_offsets)
+
     def _recalculate_total_frames(self) -> None:
         """Recompute ``_total_frames`` from the current stems dict."""
         self._total_frames = max(
@@ -526,6 +544,7 @@ class MultiTrackPlayer(QObject):
         self._beat_times.clear()
         self._downbeat_times.clear()
         self._beat_sync_enabled = False
+        self._beat_sync_nudge_ms = 0.0
         self._beat_frames = np.array([], dtype=np.int64)
         self._loop_a_frame = None
         self._loop_b_frame = None
@@ -962,15 +981,16 @@ class MultiTrackPlayer(QObject):
         and starting new clicks within this buffer.
         """
         gain = self._metronome_volume
-        phase = self._metronome_phase
+        offset_frames = int(self._beat_sync_nudge_ms / 1000.0 * self._sample_rate)
+        render_phase = (self._metronome_phase - offset_frames) % beat_interval
 
         # Continue any click that started in a previous callback.
-        if phase < click_len:
-            n = min(click_len - phase, frames_written)
-            outdata[:n] += self._click_buf[phase:phase + n] * gain
+        if render_phase < click_len:
+            n = min(click_len - render_phase, frames_written)
+            outdata[:n] += self._click_buf[render_phase:render_phase + n] * gain
 
         # Walk through the buffer finding beat boundaries.
-        pos = beat_interval - phase  # Frames until next beat start
+        pos = beat_interval - render_phase  # Frames until next beat start
         while pos < frames_written:
             # Overlay click starting at this beat.
             n = min(click_len, frames_written - pos)
@@ -979,7 +999,7 @@ class MultiTrackPlayer(QObject):
             pos += beat_interval
 
         # Update phase for the next callback.
-        self._metronome_phase = (phase + frames_written) % beat_interval
+        self._metronome_phase = (self._metronome_phase + frames_written) % beat_interval
 
     def _mix_metronome_synced(
         self, outdata: np.ndarray, frame_start: int, frame_count: int,
@@ -1022,20 +1042,21 @@ class MultiTrackPlayer(QObject):
         Updates ``_count_in_beat`` (1-based) for UI feedback.
         """
         gain = self._metronome_volume
-        phase = self._count_in_phase
+        offset_frames = int(self._beat_sync_nudge_ms / 1000.0 * self._sample_rate)
+        render_phase = (self._count_in_phase - offset_frames) % beat_interval
 
-        if phase < click_len:
-            n = min(click_len - phase, ci_frames)
-            outdata[:n] += self._click_buf[phase:phase + n] * gain
+        if render_phase < click_len:
+            n = min(click_len - render_phase, ci_frames)
+            outdata[:n] += self._click_buf[render_phase:render_phase + n] * gain
 
-        pos = beat_interval - phase
+        pos = beat_interval - render_phase
         while pos < ci_frames:
             n = min(click_len, ci_frames - pos)
             if n > 0:
                 outdata[pos:pos + n] += self._click_buf[:n] * gain
             pos += beat_interval
 
-        new_phase = (phase + ci_frames) % beat_interval
+        new_phase = (self._count_in_phase + ci_frames) % beat_interval
         self._count_in_phase = new_phase
 
         total_elapsed = (self._count_in_beats * beat_interval
