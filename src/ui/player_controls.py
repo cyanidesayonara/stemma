@@ -698,6 +698,12 @@ class PlayerControls(QWidget):
         self._key_label.installEventFilter(self)
         loop_speed_bar.addWidget(self._key_label)
 
+        self._time_sig_label = QLabel("")
+        self._time_sig_label.setToolTip("Detected time signature")
+        self._time_sig_label.setAccessibleName("Detected time signature")
+        self._time_sig_label.setStyleSheet(f"color: {colors['surface2']};")
+        loop_speed_bar.addWidget(self._time_sig_label)
+
         self._speed_status = QLabel("")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
         loop_speed_bar.addWidget(self._speed_status)
@@ -920,6 +926,7 @@ class PlayerControls(QWidget):
             if c:
                 self._key_label.setStyleSheet(f"color: {c};")
 
+        self._time_sig_label.setStyleSheet(f"color: {colors['surface2']};")
         if not self._detected_bpm_label.text():
             self._detected_bpm_label.setStyleSheet(
                 f"color: {colors['surface2']};"
@@ -1023,6 +1030,8 @@ class PlayerControls(QWidget):
         self._key_label.setToolTip(
             "Detected musical key (double-click to re-detect)"
         )
+        self._time_sig_label.setText("")
+        self._time_sig_label.setToolTip("Detected time signature")
         self._detected_bpm_label.setText("")
         self._bpm_conf = ""
         self._detected_bpm_label.setToolTip(
@@ -1429,9 +1438,19 @@ class PlayerControls(QWidget):
             self._key_label.setText("")
             self._key_conf = ""
 
+        # Update time signature label.
+        if result.time_signature:
+            self._time_sig_label.setText(result.time_signature)
+            self._time_sig_label.setToolTip(
+                f"Detected time signature: {result.time_signature}"
+            )
+        else:
+            self._time_sig_label.setText("")
+
     def _on_detect_error(self, msg: str) -> None:
         self._key_label.setText("")
         self._detected_bpm_label.setText("")
+        self._time_sig_label.setText("")
 
     def _on_detect_finished(self) -> None:
         self._detection_worker = None
@@ -1534,6 +1553,22 @@ class PlayerControls(QWidget):
     def bpm_confidence(self) -> str:
         """Return the last BPM confidence level, or empty string."""
         return self._bpm_conf
+
+    @property
+    def time_signature(self) -> str:
+        """Return the displayed time signature (e.g. '4/4'), or empty."""
+        return self._time_sig_label.text()
+
+    def set_time_signature(self, sig: str) -> None:
+        """Restore a previously detected time signature label."""
+        if sig:
+            self._time_sig_label.setText(sig)
+            self._time_sig_label.setToolTip(
+                f"Detected time signature: {sig}"
+            )
+        else:
+            self._time_sig_label.setText("")
+            self._time_sig_label.setToolTip("Detected time signature")
 
     def set_detected_key(self, key: str, confidence: str = "") -> None:
         """Restore a previously detected key label with colour and tooltip."""

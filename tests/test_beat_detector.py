@@ -11,6 +11,7 @@ from src.beat_detector import (
     _bpm_confidence,
     _detect_beats_librosa,
     _detect_key,
+    _detect_time_signature,
     _key_confidence,
     _peak_pick,
     _sigmoid,
@@ -57,12 +58,73 @@ class TestDetectionResult:
         assert r.bpm == 0.0
         assert r.key == ""
         assert r.beat_times == []
+        assert r.time_signature == ""
 
     def test_fields(self):
         r = DetectionResult(bpm=120.0, key="C major", bpm_confidence="high")
         assert r.bpm == 120.0
         assert r.key == "C major"
         assert r.bpm_confidence == "high"
+
+
+# ---------------------------------------------------------------------------
+# Time signature detection
+# ---------------------------------------------------------------------------
+
+class TestDetectTimeSignature:
+    def test_four_four(self):
+        """4 beats per bar -> 4/4."""
+        downbeats = [0.0, 2.0, 4.0, 6.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5,
+                 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5]
+        assert _detect_time_signature(beats, downbeats) == "4/4"
+
+    def test_three_four(self):
+        """3 beats per bar -> 3/4."""
+        downbeats = [0.0, 1.5, 3.0, 4.5]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
+        assert _detect_time_signature(beats, downbeats) == "3/4"
+
+    def test_six_eight(self):
+        """6 beats per bar -> 6/8."""
+        downbeats = [0.0, 3.0, 6.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
+        assert _detect_time_signature(beats, downbeats) == "6/8"
+
+    def test_no_downbeats(self):
+        """No downbeats -> empty string (librosa fallback)."""
+        assert _detect_time_signature([0.0, 0.5, 1.0], []) == ""
+
+    def test_single_downbeat(self):
+        """Only one downbeat -> not enough to measure a bar."""
+        assert _detect_time_signature([0.0, 0.5, 1.0], [0.0]) == ""
+
+    def test_no_beats(self):
+        """No beats at all."""
+        assert _detect_time_signature([], [0.0, 2.0]) == ""
+
+    def test_unusual_meter(self):
+        """5 beats per bar -> 5/4."""
+        downbeats = [0.0, 2.5, 5.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+        assert _detect_time_signature(beats, downbeats) == "5/4"
+
+    def test_unmapped_meter_fallback(self):
+        """Meter not in the standard map falls back to N/4."""
+        downbeats = [0.0, 4.0, 8.0]
+        beats = [float(i) * 0.5 for i in range(16)]  # 8 beats per bar
+        assert _detect_time_signature(beats, downbeats) == "8/4"
+
+    def test_robust_to_outlier_bars(self):
+        """Median ignores outlier bars (e.g. partial last bar)."""
+        # 3 bars of 4/4 plus a partial bar of 2 beats
+        downbeats = [0.0, 2.0, 4.0, 6.0, 7.0]
+        beats = [0.0, 0.5, 1.0, 1.5,
+                 2.0, 2.5, 3.0, 3.5,
+                 4.0, 4.5, 5.0, 5.5,
+                 6.0, 6.5,
+                 7.0, 7.5]
+        assert _detect_time_signature(beats, downbeats) == "4/4"
 
 
 # ---------------------------------------------------------------------------

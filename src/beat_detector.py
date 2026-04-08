@@ -31,6 +31,7 @@ class DetectionResult:
     key_confidence: str = ""        # "high" / "medium" / "low"
     beat_times: list[float] = dataclasses.field(default_factory=list)
     downbeat_times: list[float] = dataclasses.field(default_factory=list)
+    time_signature: str = ""        # e.g. "4/4", "3/4", "" if unknown
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +254,38 @@ def _key_confidence(correlation: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Time signature detection
+# ---------------------------------------------------------------------------
+
+_TIME_SIG_MAP = {2: "2/4", 3: "3/4", 4: "4/4", 5: "5/4", 6: "6/8", 7: "7/8"}
+
+
+def _detect_time_signature(
+    beat_times: list[float], downbeat_times: list[float],
+) -> str:
+    """Infer time signature from beats between consecutive downbeats.
+
+    Requires at least two downbeats (one complete bar) produced by the
+    beat_this ONNX model.  Returns e.g. ``"4/4"`` or ``""`` if unknown.
+    """
+    if len(downbeat_times) < 2 or len(beat_times) < 2:
+        return ""
+
+    bt = np.asarray(beat_times)
+    beats_per_bar: list[int] = []
+    for i in range(len(downbeat_times) - 1):
+        count = int(np.sum((bt >= downbeat_times[i]) & (bt < downbeat_times[i + 1])))
+        if count > 0:
+            beats_per_bar.append(count)
+
+    if not beats_per_bar:
+        return ""
+
+    median_bpb = int(round(float(np.median(beats_per_bar))))
+    return _TIME_SIG_MAP.get(median_bpb, f"{median_bpb}/4")
+
+
+# ---------------------------------------------------------------------------
 # High-level detection function
 # ---------------------------------------------------------------------------
 
@@ -320,6 +353,9 @@ def detect_bpm_and_key(
     if bpm > 0:
         bpm = max(20.0, min(300.0, bpm))
 
+    # Time signature (requires downbeats from beat_this ONNX).
+    time_sig = _detect_time_signature(beat_times, downbeat_times)
+
     return DetectionResult(
         bpm=bpm,
         bpm_confidence=_bpm_confidence(beat_times),
@@ -327,6 +363,7 @@ def detect_bpm_and_key(
         key_confidence=_key_confidence(key_corr),
         beat_times=beat_times,
         downbeat_times=downbeat_times,
+        time_signature=time_sig,
     )
 
 

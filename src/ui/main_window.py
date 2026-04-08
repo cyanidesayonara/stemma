@@ -510,6 +510,10 @@ class MainWindow(QMainWindow):
                 f"{prefix}/beat_nudge_ms",
                 self._player_controls.beat_sync_nudge_ms,
             )
+            self._settings.setValue(
+                f"{prefix}/time_sig",
+                self._player_controls.time_signature,
+            )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -662,6 +666,11 @@ class MainWindow(QMainWindow):
                 self._player_controls.set_detected_bpm_text(
                     str(detected_bpm), bpm_conf,
                 )
+            saved_time_sig = str(
+                self._settings.value(f"{prefix}/time_sig", "") or ""
+            )
+            if saved_time_sig:
+                self._player_controls.set_time_signature(saved_time_sig)
 
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
@@ -757,6 +766,10 @@ class MainWindow(QMainWindow):
                     f"{prefix}/beat_nudge_ms",
                     self._player_controls.beat_sync_nudge_ms,
                 )
+                self._settings.setValue(
+                    f"{prefix}/time_sig",
+                    self._player_controls.time_signature,
+                )
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -782,6 +795,10 @@ class MainWindow(QMainWindow):
             self._player_controls.set_detected_bpm_text(
                 saved_bpm, saved_bpm_conf,
             )
+            saved_time_sig = str(
+                self._settings.value(f"{prefix}/time_sig", "") or ""
+            )
+            self._player_controls.set_time_signature(saved_time_sig)
 
             try:
                 nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
