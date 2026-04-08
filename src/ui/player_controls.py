@@ -1008,12 +1008,11 @@ class PlayerControls(QWidget):
         self._record_btn.blockSignals(False)
         self.update_record_button_state()
 
-        # Auto-detect if no beat grid is loaded, or if the session is
-        # missing newer detection fields (chord/downbeat data).
+        # Auto-detect if no beat grid is loaded, or if chord data is
+        # missing (upgraded from an older cached session).
         if has_stems and (
             not self._player.beat_times
             or not self._player.chord_sequence
-            or not self._player.downbeat_times
         ):
             self.start_detection()
 
@@ -1381,12 +1380,20 @@ class PlayerControls(QWidget):
         if not self._player.stems:
             return
         if self._detection_worker is not None:
-            self._detection_worker.wait(2000)
+            # Detach the old worker so its results are silently discarded.
+            # It will clean itself up when the thread finishes.
+            old = self._detection_worker
+            old.completed.disconnect()
+            old.error.disconnect()
+            old.finished.disconnect()
+            old.finished.connect(old.deleteLater)
             self._detection_worker = None
 
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         dim_style = (
-            f"background: {dim['surface0']}; border-radius: 4px; "
+            f"background: {dim['surface0']}; "
+            f"border: 1px solid {dim['surface1']}; "
+            f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['surface2']};"
         )
         self._detected_bpm_label.setStyleSheet(dim_style)
@@ -1426,6 +1433,7 @@ class PlayerControls(QWidget):
         colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         return (
             f"background: {colors['surface0']}; "
+            f"border: 1px solid {colors['surface1']}; "
             f"border-radius: 4px; "
             f"padding: 1px 6px; "
             f"margin: 0px 1px;"
@@ -1548,7 +1556,9 @@ class PlayerControls(QWidget):
             return  # Already running.
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         self._key_label.setStyleSheet(
-            f"background: {dim['surface0']}; border-radius: 4px; "
+            f"background: {dim['surface0']}; "
+            f"border: 1px solid {dim['surface1']}; "
+            f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['surface2']};"
         )
         self._key_label.setText("detecting...")
@@ -1588,7 +1598,9 @@ class PlayerControls(QWidget):
             return  # Already running.
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         self._detected_bpm_label.setStyleSheet(
-            f"background: {dim['surface0']}; border-radius: 4px; "
+            f"background: {dim['surface0']}; "
+            f"border: 1px solid {dim['surface1']}; "
+            f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['surface2']};"
         )
         self._detected_bpm_label.setText("detecting...")

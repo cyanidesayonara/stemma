@@ -518,6 +518,7 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
+            self._settings.setValue(f"{prefix}/det_ver", 2)
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -676,16 +677,23 @@ class MainWindow(QMainWindow):
             if saved_time_sig:
                 self._player_controls.set_time_signature(saved_time_sig)
 
-            try:
-                cs_str = self._settings.value(
-                    f"{prefix}/chord_sequence", "[]",
-                )
-                chords = json.loads(str(cs_str)) if cs_str else []
-                chords = [(float(t), str(c)) for t, c in chords]
-                if chords:
-                    self._player_controls.restore_chord_sequence(chords)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+            # Schema version 2 = chord + downbeat detection with lower
+            # downbeat threshold.  Skip restoring beat/chord data for
+            # older sessions so the auto-detect trigger fires once.
+            det_ver = int(
+                self._settings.value(f"{prefix}/det_ver", 0) or 0
+            )
+            if det_ver >= 2:
+                try:
+                    cs_str = self._settings.value(
+                        f"{prefix}/chord_sequence", "[]",
+                    )
+                    chords = json.loads(str(cs_str)) if cs_str else []
+                    chords = [(float(t), str(c)) for t, c in chords]
+                    if chords:
+                        self._player_controls.restore_chord_sequence(chords)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
 
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
@@ -789,6 +797,7 @@ class MainWindow(QMainWindow):
                     f"{prefix}/chord_sequence",
                     json.dumps(self._player.chord_sequence),
                 )
+                self._settings.setValue(f"{prefix}/det_ver", 2)
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -819,25 +828,36 @@ class MainWindow(QMainWindow):
             )
             self._player_controls.set_time_signature(saved_time_sig)
 
+            # Schema version 2 = chord + downbeat detection with lower
+            # downbeat threshold.  For older sessions, skip restoring
+            # beat/chord data so set_stem_names triggers re-detection.
+            det_ver = int(
+                self._settings.value(f"{prefix}/det_ver", 0) or 0
+            )
             try:
                 nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
                 nudge = float(nudge_str) if nudge_str else 0.0
                 self._player_controls.set_beat_sync_nudge(nudge)
 
-                bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
-                dt_str = self._settings.value(f"{prefix}/downbeat_times", "[]")
-                b_times = json.loads(str(bt_str)) if bt_str else []
-                d_times = json.loads(str(dt_str)) if dt_str else []
-                if b_times:
-                    self._player_controls.restore_beat_times(b_times, d_times)
+                if det_ver >= 2:
+                    bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
+                    dt_str = self._settings.value(
+                        f"{prefix}/downbeat_times", "[]",
+                    )
+                    b_times = json.loads(str(bt_str)) if bt_str else []
+                    d_times = json.loads(str(dt_str)) if dt_str else []
+                    if b_times:
+                        self._player_controls.restore_beat_times(
+                            b_times, d_times,
+                        )
 
-                cs_str = self._settings.value(
-                    f"{prefix}/chord_sequence", "[]",
-                )
-                chords = json.loads(str(cs_str)) if cs_str else []
-                chords = [(float(t), str(c)) for t, c in chords]
-                if chords:
-                    self._player_controls.restore_chord_sequence(chords)
+                    cs_str = self._settings.value(
+                        f"{prefix}/chord_sequence", "[]",
+                    )
+                    chords = json.loads(str(cs_str)) if cs_str else []
+                    chords = [(float(t), str(c)) for t, c in chords]
+                    if chords:
+                        self._player_controls.restore_chord_sequence(chords)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
