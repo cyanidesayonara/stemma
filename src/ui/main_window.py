@@ -856,8 +856,9 @@ class MainWindow(QMainWindow):
                     )
                     chords = json.loads(str(cs_str)) if cs_str else []
                     chords = [(float(t), str(c)) for t, c in chords]
-                    if chords:
-                        self._player_controls.restore_chord_sequence(chords)
+                    # Restore even when empty: signals detection ran but
+                    # found no chords (prevents spurious re-detection).
+                    self._player_controls.restore_chord_sequence(chords)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 

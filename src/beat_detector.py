@@ -287,6 +287,62 @@ def _detect_time_signature(
     return _TIME_SIG_MAP.get(median_bpb, f"{median_bpb}/4")
 
 
+def _infer_time_signature_from_beats(
+    beat_times: list[float],
+    audio_mono: np.ndarray,
+    sample_rate: int,
+) -> str:
+    """Estimate meter from beat-strength autocorrelation when downbeats unavailable.
+
+    Samples onset strength at each beat position, mean-subtracts, then
+    computes the full autocorrelation and finds the lag in [2..6] with the
+    highest positive value.  That lag gives the number of beats per bar.
+
+    Returns ``""`` when no clear periodicity is found (ambient / atonal
+    material or fewer than 8 beats detected).
+    """
+    if len(beat_times) < 8:
+        return ""
+
+    hop = 512
+    onset_env = librosa.onset.onset_strength(
+        y=audio_mono, sr=sample_rate, hop_length=hop,
+    )
+    n_frames = len(onset_env)
+    raw_frames = librosa.time_to_frames(
+        np.asarray(beat_times), sr=sample_rate, hop_length=hop,
+    ).astype(int)
+    # Peak in a ±3-frame window to handle spectrogram-window latency.
+    window = 3
+    strengths = np.array([
+        onset_env[max(0, f - window): min(n_frames, f + window + 1)].max()
+        for f in raw_frames
+    ], dtype=np.float64)
+
+    # Mean-subtract so autocorrelation measures periodic variation, not
+    # overall level, then compute full autocorrelation.
+    s = strengths - strengths.mean()
+    autocorr = np.correlate(s, s, mode="full")
+    ac = autocorr[len(autocorr) // 2:]   # positive lags: ac[0] = zero-lag energy
+
+    if ac[0] <= 0:
+        return ""
+
+    # Pick the lag in [2..6] with the highest positive autocorrelation.
+    # Lag k means the beat-strength pattern repeats every k beats (bar length).
+    best_lag = max(range(2, 7), key=lambda k: ac[k] if k < len(ac) else -np.inf)
+
+    if ac[best_lag] <= 0:
+        return ""
+
+    # Require the periodic component to be at least 10 % of zero-lag energy.
+    confidence = ac[best_lag] / (ac[0] + 1e-6)
+    if confidence < 0.10:
+        return ""
+
+    return _TIME_SIG_MAP.get(best_lag, f"{best_lag}/4")
+
+
 # ---------------------------------------------------------------------------
 # Chord detection — chromagram template matching + HMM smoothing
 # ---------------------------------------------------------------------------
@@ -499,8 +555,14 @@ def detect_bpm_and_key(
     if bpm > 0:
         bpm = max(20.0, min(300.0, bpm))
 
-    # Time signature (requires downbeats from beat_this ONNX).
+    # Time signature: prefer beat_this downbeats; fall back to onset
+    # periodicity heuristic when the ONNX model is absent or produces
+    # no downbeats (e.g. single-output export).
     time_sig = _detect_time_signature(beat_times, downbeat_times)
+    if not time_sig and beat_times:
+        time_sig = _infer_time_signature_from_beats(
+            beat_times, mono, sample_rate,
+        )
 
     # Chord detection.
     chord_sequence = _detect_chords(mono, sample_rate)

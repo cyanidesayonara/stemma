@@ -490,6 +490,9 @@ class PlayerControls(QWidget):
         self._peak_poll_timer.timeout.connect(self._poll_peak_future)
 
         self._detection_worker: DetectionWorker | None = None
+        # Keep Python refs to old workers until their OS threads finish;
+        # prevents "QThread: Destroyed while thread is still running".
+        self._orphaned_workers: list[DetectionWorker] = []
         self._beat_model_path: str | None = None
         self._key_conf: str = ""
         self._bpm_conf: str = ""
@@ -1008,12 +1011,10 @@ class PlayerControls(QWidget):
         self._record_btn.blockSignals(False)
         self.update_record_button_state()
 
-        # Auto-detect if no beat grid is loaded, or if chord data is
-        # missing (upgraded from an older cached session).
-        if has_stems and (
-            not self._player.beat_times
-            or not self._player.chord_sequence
-        ):
+        # Auto-detect if no beat grid has been loaded yet.
+        # Old sessions are handled by the det_ver gate in main_window:
+        # if det_ver < 2, beat_times are not restored, so this fires.
+        if has_stems and not self._player.beat_times:
             self.start_detection()
 
         if stem_names:
@@ -1380,13 +1381,27 @@ class PlayerControls(QWidget):
         if not self._player.stems:
             return
         if self._detection_worker is not None:
-            # Detach the old worker so its results are silently discarded.
-            # It will clean itself up when the thread finishes.
             old = self._detection_worker
-            old.completed.disconnect()
-            old.error.disconnect()
-            old.finished.disconnect()
-            old.finished.connect(old.deleteLater)
+            # Disconnect our callbacks so stale results are silently
+            # ignored.  Disconnect each signal individually to avoid
+            # RuntimeError if a slot was never connected.
+            for sig, slot in [
+                (old.completed, self._on_detect_completed),
+                (old.error, self._on_detect_error),
+                (old.finished, self._on_detect_finished),
+            ]:
+                try:
+                    sig.disconnect(slot)
+                except RuntimeError:
+                    pass
+            # Store a reference so Python's GC cannot destroy the
+            # QThread wrapper while the OS thread is still running.
+            # The lambda removes it once the thread exits cleanly.
+            self._orphaned_workers.append(old)
+            old.finished.connect(
+                lambda w=old: self._orphaned_workers.remove(w)
+                if w in self._orphaned_workers else None
+            )
             self._detection_worker = None
 
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
@@ -1444,10 +1459,12 @@ class PlayerControls(QWidget):
         colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         text_c = colors["text"]
         val_c = color or text_c
-        return (
-            f'<span style="color:{text_c};">{label} </span>'
-            f'<span style="color:{val_c};">{value}</span>'
-        )
+        if label:
+            return (
+                f'<span style="color:{text_c};">{label} </span>'
+                f'<span style="color:{val_c};">{value}</span>'
+            )
+        return f'<span style="color:{val_c};">{value}</span>'
 
     def _update_sync_btn_state(self, has_beats: bool) -> None:
         """Update beat-sync button enabled state."""

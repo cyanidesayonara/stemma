@@ -15,6 +15,7 @@ from src.beat_detector import (
     _detect_key,
     _detect_time_signature,
     _key_confidence,
+    _infer_time_signature_from_beats,
     _peak_pick,
     _sigmoid,
     _viterbi_smooth,
@@ -128,6 +129,52 @@ class TestDetectTimeSignature:
                  6.0, 6.5,
                  7.0, 7.5]
         assert _detect_time_signature(beats, downbeats) == "4/4"
+
+
+# ---------------------------------------------------------------------------
+# _infer_time_signature_from_beats
+# ---------------------------------------------------------------------------
+
+class TestInferTimeSignatureFromBeats:
+    SR = 22050
+
+    def _make_audio_with_strong_beat1(self, n_beats: int, bpb: int) -> tuple:
+        """Build a simple tone where beat 1 of each bar is louder."""
+        beat_dur = 0.5  # seconds per beat
+        sr = self.SR
+        beat_times = [i * beat_dur for i in range(n_beats)]
+        total = int(n_beats * beat_dur * sr) + sr
+        audio = np.zeros(total, dtype=np.float32)
+        for i, bt in enumerate(beat_times):
+            amp = 0.8 if (i % bpb == 0) else 0.2
+            start = int(bt * sr)
+            end = min(start + int(0.05 * sr), total)
+            audio[start:end] = amp * np.sin(
+                2 * np.pi * 440 * np.arange(end - start) / sr
+            )
+        return beat_times, audio
+
+    def test_4_4_meter(self):
+        beat_times, audio = self._make_audio_with_strong_beat1(32, 4)
+        result = _infer_time_signature_from_beats(beat_times, audio, self.SR)
+        assert result == "4/4"
+
+    def test_3_4_meter(self):
+        beat_times, audio = self._make_audio_with_strong_beat1(30, 3)
+        result = _infer_time_signature_from_beats(beat_times, audio, self.SR)
+        assert result == "3/4"
+
+    def test_too_few_beats_returns_empty(self):
+        beat_times, audio = self._make_audio_with_strong_beat1(4, 4)
+        result = _infer_time_signature_from_beats(beat_times, audio, self.SR)
+        assert result == ""
+
+    def test_flat_audio_returns_empty(self):
+        """Uniform onset strength → no clear meter → empty string."""
+        beat_times = [i * 0.5 for i in range(32)]
+        audio = np.zeros(int(32 * 0.5 * self.SR) + self.SR, dtype=np.float32)
+        result = _infer_time_signature_from_beats(beat_times, audio, self.SR)
+        assert result == ""
 
 
 # ---------------------------------------------------------------------------
