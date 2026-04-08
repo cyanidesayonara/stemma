@@ -267,10 +267,10 @@ def _detect_time_signature(
     """Infer time signature from beats between consecutive downbeats.
 
     Requires at least two downbeats (one complete bar) produced by the
-    beat_this ONNX model.  Returns e.g. ``"4/4"`` or ``""`` if unknown.
+    beat_this ONNX model.  Returns e.g. ``"4/4"`` or ``"--"`` if unknown.
     """
     if len(downbeat_times) < 2 or len(beat_times) < 2:
-        return ""
+        return "--"
 
     bt = np.asarray(beat_times)
     beats_per_bar: list[int] = []
@@ -280,7 +280,7 @@ def _detect_time_signature(
             beats_per_bar.append(count)
 
     if not beats_per_bar:
-        return ""
+        return "--"
 
     median_bpb = int(round(float(np.median(beats_per_bar))))
     return _TIME_SIG_MAP.get(median_bpb, f"{median_bpb}/4")
@@ -293,41 +293,40 @@ def _detect_time_signature(
 _CHORD_NAMES = ["C", "C#", "D", "Eb", "E", "F",
                 "F#", "G", "Ab", "A", "Bb", "B"]
 
-# Template profiles: each row is a 12-semitone chroma pattern.
-# 1 = note present, 0 = absent, fractional = softer harmonic.
-_CHORD_TEMPLATES: list[tuple[str, np.ndarray]] = []
+# Interval patterns relative to root (semitones from root).
+_QUALITY_INTERVALS: dict[str, list[int]] = {
+    "":     [0, 4, 7],           # major
+    "m":    [0, 3, 7],           # minor
+    "7":    [0, 4, 7, 10],       # dominant 7th
+    "maj7": [0, 4, 7, 11],       # major 7th
+    "m7":   [0, 3, 7, 10],       # minor 7th
+    "dim":  [0, 3, 6],           # diminished
+    "aug":  [0, 4, 8],           # augmented
+}
 
 
-def _build_chord_templates() -> list[tuple[str, np.ndarray]]:
+def _build_chord_templates() -> tuple[tuple[str, np.ndarray], ...]:
     """Build chord templates for all roots and quality types.
 
-    Returns a list of (label, 12-dim_chroma_vector) tuples.
+    Returns a tuple of (label, 12-dim_chroma_vector) tuples.
+    Built once at module load — thread-safe and immutable.
     """
-    if _CHORD_TEMPLATES:
-        return _CHORD_TEMPLATES
-
-    # Interval patterns relative to root (semitones from root).
-    quality_intervals: dict[str, list[int]] = {
-        "":     [0, 4, 7],           # major
-        "m":    [0, 3, 7],           # minor
-        "7":    [0, 4, 7, 10],       # dominant 7th
-        "maj7": [0, 4, 7, 11],       # major 7th
-        "m7":   [0, 3, 7, 10],       # minor 7th
-        "dim":  [0, 3, 6],           # diminished
-        "aug":  [0, 4, 8],           # augmented
-    }
-
+    templates: list[tuple[str, np.ndarray]] = []
     for root_idx, root_name in enumerate(_CHORD_NAMES):
-        for suffix, intervals in quality_intervals.items():
+        for suffix, intervals in _QUALITY_INTERVALS.items():
             template = np.zeros(12, dtype=np.float64)
             for iv in intervals:
                 template[(root_idx + iv) % 12] = 1.0
             norm = np.linalg.norm(template)
             if norm > 0:
                 template /= norm
-            _CHORD_TEMPLATES.append((f"{root_name}{suffix}", template))
+            template.flags.writeable = False
+            templates.append((f"{root_name}{suffix}", template))
+    return tuple(templates)
 
-    return _CHORD_TEMPLATES
+
+# Built eagerly at import time — 84 templates, ~8 KB, thread-safe.
+_CHORD_TEMPLATES = _build_chord_templates()
 
 
 def _viterbi_smooth(
@@ -338,6 +337,9 @@ def _viterbi_smooth(
 
     Encourages staying in the same chord state across consecutive frames,
     reducing noisy frame-by-frame flickering.
+
+    Vectorised: the inner state loop uses NumPy broadcasting so the
+    Python-level complexity is O(T × N) instead of O(T × N²).
     """
     n_frames = len(frame_labels)
     if n_frames == 0:
@@ -346,39 +348,34 @@ def _viterbi_smooth(
     # Uniform initial probability.
     log_pi = np.full(n_states, -math.log(n_states))
 
-    # Transition: high self-transition, uniform otherwise.
+    # Transition matrix: log_trans[prev, cur].
     other_prob = (1.0 - self_prob) / max(1, n_states - 1)
-    log_self = math.log(self_prob)
     log_other = math.log(other_prob) if other_prob > 0 else -1e12
+    log_trans = np.full((n_states, n_states), log_other)
+    np.fill_diagonal(log_trans, math.log(self_prob))
 
-    # Emission: deterministic from the template-matched label.
-    # P(obs=j | state=i) = high if i==j, low otherwise.
+    # Emission log-probabilities.
     emit_match = math.log(0.8)
     emit_miss = math.log(0.2 / max(1, n_states - 1))
 
-    # Viterbi forward pass.
+    # Viterbi forward pass — fully vectorised inner loop.
     viterbi = np.full((n_frames, n_states), -np.inf)
     backptr = np.zeros((n_frames, n_states), dtype=np.int32)
 
-    obs = frame_labels[0]
-    for s in range(n_states):
-        emit = emit_match if s == obs else emit_miss
-        viterbi[0, s] = log_pi[s] + emit
+    # Initialise t=0.
+    emit_vec = np.full(n_states, emit_miss)
+    emit_vec[frame_labels[0]] = emit_match
+    viterbi[0] = log_pi + emit_vec
 
     for t in range(1, n_frames):
-        obs = frame_labels[t]
-        for s in range(n_states):
-            emit = emit_match if s == obs else emit_miss
-            best_prev = -np.inf
-            best_idx = 0
-            for p in range(n_states):
-                trans = log_self if p == s else log_other
-                score = viterbi[t - 1, p] + trans
-                if score > best_prev:
-                    best_prev = score
-                    best_idx = p
-            viterbi[t, s] = best_prev + emit
-            backptr[t, s] = best_idx
+        # scores[prev, cur] = viterbi[t-1, prev] + log_trans[prev, cur]
+        scores = viterbi[t - 1, :, np.newaxis] + log_trans  # (N, N)
+        backptr[t] = np.argmax(scores, axis=0)               # (N,)
+        best_scores = scores[backptr[t], np.arange(n_states)] # (N,)
+
+        emit_vec = np.full(n_states, emit_miss)
+        emit_vec[frame_labels[t]] = emit_match
+        viterbi[t] = best_scores + emit_vec
 
     # Backtrack.
     path = [0] * n_frames

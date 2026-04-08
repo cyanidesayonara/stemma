@@ -1615,7 +1615,7 @@ class PlayerControls(QWidget):
     ) -> None:
         """Restore a previously detected chord sequence from QSettings."""
         self._player.set_chord_sequence(chords)
-        if chords:
+        if chords and self._player.is_playing:
             self._chord_timer.start()
 
     def set_detected_key(self, key: str, confidence: str = "") -> None:

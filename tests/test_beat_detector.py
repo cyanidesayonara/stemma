@@ -96,15 +96,15 @@ class TestDetectTimeSignature:
 
     def test_no_downbeats(self):
         """No downbeats -> empty string (librosa fallback)."""
-        assert _detect_time_signature([0.0, 0.5, 1.0], []) == ""
+        assert _detect_time_signature([0.0, 0.5, 1.0], []) == "--"
 
     def test_single_downbeat(self):
         """Only one downbeat -> not enough to measure a bar."""
-        assert _detect_time_signature([0.0, 0.5, 1.0], [0.0]) == ""
+        assert _detect_time_signature([0.0, 0.5, 1.0], [0.0]) == "--"
 
     def test_no_beats(self):
         """No beats at all."""
-        assert _detect_time_signature([], [0.0, 2.0]) == ""
+        assert _detect_time_signature([], [0.0, 2.0]) == "--"
 
     def test_unusual_meter(self):
         """5 beats per bar -> 5/4."""
