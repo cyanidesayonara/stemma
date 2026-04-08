@@ -42,10 +42,9 @@ def _play_winsound_fallback(path: Path) -> None:
     if not _HAS_WINSOUND:
         return
     try:
-        winsound.PlaySound(
-            str(path),
-            winsound.SND_ASYNC | winsound.SND_FILENAME,
-        )
+        # Use SND_MEMORY to avoid MSIX sandbox path-resolution failures.
+        data = path.read_bytes()
+        winsound.PlaySound(data, winsound.SND_ASYNC | winsound.SND_MEMORY)
     except OSError:
         pass
 

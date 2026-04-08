@@ -267,10 +267,10 @@ def _detect_time_signature(
     """Infer time signature from beats between consecutive downbeats.
 
     Requires at least two downbeats (one complete bar) produced by the
-    beat_this ONNX model.  Returns e.g. ``"4/4"`` or ``"--"`` if unknown.
+    beat_this ONNX model.  Returns e.g. ``"4/4"`` or ``""`` if unknown.
     """
     if len(downbeat_times) < 2 or len(beat_times) < 2:
-        return "--"
+        return ""
 
     bt = np.asarray(beat_times)
     beats_per_bar: list[int] = []
@@ -280,7 +280,7 @@ def _detect_time_signature(
             beats_per_bar.append(count)
 
     if not beats_per_bar:
-        return "--"
+        return ""
 
     median_bpb = int(round(float(np.median(beats_per_bar))))
     return _TIME_SIG_MAP.get(median_bpb, f"{median_bpb}/4")

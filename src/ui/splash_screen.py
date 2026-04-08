@@ -234,9 +234,9 @@ class SplashScreen(QWidget):
             and os.path.isfile(self._audio_path)
         ):
             if elapsed <= _SOUND_DEFER_IF_FRAME2_AFTER_MS:
+                data = open(self._audio_path, "rb").read()  # noqa: SIM115
                 winsound.PlaySound(
-                    self._audio_path,
-                    winsound.SND_ASYNC | winsound.SND_FILENAME,
+                    data, winsound.SND_ASYNC | winsound.SND_MEMORY,
                 )
                 self._sound_played_on_frame2 = True
 
@@ -306,9 +306,9 @@ class SplashScreen(QWidget):
             and self._audio_path
             and os.path.isfile(self._audio_path)
         ):
+            data = open(self._audio_path, "rb").read()  # noqa: SIM115
             winsound.PlaySound(
-                self._audio_path,
-                winsound.SND_ASYNC | winsound.SND_FILENAME,
+                data, winsound.SND_ASYNC | winsound.SND_MEMORY,
             )
 
     # -- helpers --------------------------------------------------------
