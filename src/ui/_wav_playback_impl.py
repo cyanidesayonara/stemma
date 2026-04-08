@@ -18,6 +18,7 @@ status on the GUI thread until ``Ready`` or ``Error`` (avoids duplicate
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl
@@ -43,8 +44,13 @@ def _play_winsound_fallback(path: Path) -> None:
         return
     try:
         # Use SND_MEMORY to avoid MSIX sandbox path-resolution failures.
+        # Play in a daemon thread: Python disallows SND_ASYNC | SND_MEMORY.
         data = path.read_bytes()
-        winsound.PlaySound(data, winsound.SND_ASYNC | winsound.SND_MEMORY)
+        threading.Thread(
+            target=winsound.PlaySound,
+            args=(data, winsound.SND_MEMORY),
+            daemon=True,
+        ).start()
     except OSError:
         pass
 

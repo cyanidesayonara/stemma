@@ -8,6 +8,7 @@ immediate feedback.
 
 import math
 import os
+import threading
 
 from PySide6.QtCore import (
     QByteArray,
@@ -235,9 +236,11 @@ class SplashScreen(QWidget):
         ):
             if elapsed <= _SOUND_DEFER_IF_FRAME2_AFTER_MS:
                 data = open(self._audio_path, "rb").read()  # noqa: SIM115
-                winsound.PlaySound(
-                    data, winsound.SND_ASYNC | winsound.SND_MEMORY,
-                )
+                threading.Thread(
+                    target=winsound.PlaySound,
+                    args=(data, winsound.SND_MEMORY),
+                    daemon=True,
+                ).start()
                 self._sound_played_on_frame2 = True
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -307,9 +310,11 @@ class SplashScreen(QWidget):
             and os.path.isfile(self._audio_path)
         ):
             data = open(self._audio_path, "rb").read()  # noqa: SIM115
-            winsound.PlaySound(
-                data, winsound.SND_ASYNC | winsound.SND_MEMORY,
-            )
+            threading.Thread(
+                target=winsound.PlaySound,
+                args=(data, winsound.SND_MEMORY),
+                daemon=True,
+            ).start()
 
     # -- helpers --------------------------------------------------------
 
