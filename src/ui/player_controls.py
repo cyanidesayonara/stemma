@@ -1008,10 +1008,12 @@ class PlayerControls(QWidget):
         self._record_btn.blockSignals(False)
         self.update_record_button_state()
 
-        # Auto-detect if no beat grid is loaded, or if beat grid exists
-        # but chord data is missing (upgraded from older cached session).
+        # Auto-detect if no beat grid is loaded, or if the session is
+        # missing newer detection fields (chord/downbeat data).
         if has_stems and (
-            not self._player.beat_times or not self._player.chord_sequence
+            not self._player.beat_times
+            or not self._player.chord_sequence
+            or not self._player.downbeat_times
         ):
             self.start_detection()
 
@@ -1652,6 +1654,8 @@ class PlayerControls(QWidget):
 
     def set_time_signature(self, sig: str) -> None:
         """Restore a previously detected time signature label."""
+        if sig == "--":
+            sig = ""  # Legacy cached value; treat as unknown.
         self._detected_time_sig_raw = sig
         if sig:
             self._time_sig_label.setStyleSheet(self._badge_style())

@@ -49,7 +49,8 @@ _BT_FMAX = 10000.0
 
 # Peak-picking parameters.
 _BEAT_THRESHOLD = 0.3
-_BEAT_MIN_DIST = 6      # ~120 ms at 50 fps
+_DOWNBEAT_THRESHOLD = 0.15  # Lower: downbeat activations are weaker
+_BEAT_MIN_DIST = 6          # ~120 ms at 50 fps
 
 
 def _create_onnx_session(model_path: str):
@@ -137,7 +138,7 @@ def _detect_beats_onnx(
     # Peak-pick downbeats.
     downbeat_times: list[float] = []
     if downbeat_logits is not None:
-        db_frames = _peak_pick(downbeat_logits, _BEAT_THRESHOLD, _BEAT_MIN_DIST)
+        db_frames = _peak_pick(downbeat_logits, _DOWNBEAT_THRESHOLD, _BEAT_MIN_DIST)
         downbeat_times = [f / fps for f in db_frames]
 
     # Derive BPM from median inter-beat interval.
