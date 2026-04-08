@@ -151,6 +151,10 @@ class MultiTrackPlayer(QObject):
         self._beat_sync_nudge_ms: float = 0.0
         self._beat_frames: np.ndarray = np.array([], dtype=np.int64)
 
+        # Chord sequence: list of (onset_seconds, chord_label).
+        self._chord_sequence: list[tuple[float, str]] = []
+        self._chord_times: np.ndarray = np.array([], dtype=np.float64)
+
         # Count-in state.
         self._count_in_enabled: bool = False
         self._count_in_beats: int = 4
@@ -268,6 +272,38 @@ class MultiTrackPlayer(QObject):
         self._beat_times = [float(b) for b in beats]
         self._downbeat_times = [float(b) for b in downbeats]
         self._recompute_beat_frames()
+
+    # -- Chord sequence API -------------------------------------------------
+
+    @property
+    def chord_sequence(self) -> list[tuple[float, str]]:
+        """Chord onsets: list of (time_seconds, chord_label)."""
+        return self._chord_sequence
+
+    def set_chord_sequence(self, chords: list[tuple[float, str]]) -> None:
+        """Store detected chord sequence."""
+        self._chord_sequence = [(float(t), str(c)) for t, c in chords]
+        if self._chord_sequence:
+            self._chord_times = np.array(
+                [t for t, _ in self._chord_sequence], dtype=np.float64,
+            )
+        else:
+            self._chord_times = np.array([], dtype=np.float64)
+
+    def chord_at(self, frame: int) -> str:
+        """Return the chord label active at the given frame index.
+
+        Uses binary search on chord onset times. Returns empty string
+        if no chord data is available.
+        """
+        if len(self._chord_times) == 0 or self._sample_rate == 0:
+            return ""
+        speed = self._playback_speed if self._playback_speed > 0 else 1.0
+        time_sec = frame / self._sample_rate * speed
+        idx = int(np.searchsorted(self._chord_times, time_sec, side="right")) - 1
+        if idx < 0:
+            return ""
+        return self._chord_sequence[idx][1]
 
     # -- Beat-synced metronome API ------------------------------------------
 
@@ -546,6 +582,8 @@ class MultiTrackPlayer(QObject):
         self._beat_sync_enabled = False
         self._beat_sync_nudge_ms = 0.0
         self._beat_frames = np.array([], dtype=np.int64)
+        self._chord_sequence.clear()
+        self._chord_times = np.array([], dtype=np.float64)
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False

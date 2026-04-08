@@ -514,6 +514,10 @@ class MainWindow(QMainWindow):
                 f"{prefix}/time_sig",
                 self._player_controls.time_signature,
             )
+            self._settings.setValue(
+                f"{prefix}/chord_sequence",
+                json.dumps(self._player.chord_sequence),
+            )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -672,6 +676,17 @@ class MainWindow(QMainWindow):
             if saved_time_sig:
                 self._player_controls.set_time_signature(saved_time_sig)
 
+            try:
+                cs_str = self._settings.value(
+                    f"{prefix}/chord_sequence", "[]",
+                )
+                chords = json.loads(str(cs_str)) if cs_str else []
+                chords = [(float(t), str(c)) for t, c in chords]
+                if chords:
+                    self._player_controls.restore_chord_sequence(chords)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
         super().showEvent(event)
@@ -770,6 +785,10 @@ class MainWindow(QMainWindow):
                     f"{prefix}/time_sig",
                     self._player_controls.time_signature,
                 )
+                self._settings.setValue(
+                    f"{prefix}/chord_sequence",
+                    json.dumps(self._player.chord_sequence),
+                )
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -811,6 +830,14 @@ class MainWindow(QMainWindow):
                 d_times = json.loads(str(dt_str)) if dt_str else []
                 if b_times:
                     self._player_controls.restore_beat_times(b_times, d_times)
+
+                cs_str = self._settings.value(
+                    f"{prefix}/chord_sequence", "[]",
+                )
+                chords = json.loads(str(cs_str)) if cs_str else []
+                chords = [(float(t), str(c)) for t, c in chords]
+                if chords:
+                    self._player_controls.restore_chord_sequence(chords)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 

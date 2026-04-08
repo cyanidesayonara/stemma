@@ -32,6 +32,7 @@ class DetectionResult:
     beat_times: list[float] = dataclasses.field(default_factory=list)
     downbeat_times: list[float] = dataclasses.field(default_factory=list)
     time_signature: str = ""        # e.g. "4/4", "3/4", "" if unknown
+    chord_sequence: list = dataclasses.field(default_factory=list)  # list[tuple[float, str]]
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,153 @@ def _detect_time_signature(
 
 
 # ---------------------------------------------------------------------------
+# Chord detection — chromagram template matching + HMM smoothing
+# ---------------------------------------------------------------------------
+
+_CHORD_NAMES = ["C", "C#", "D", "Eb", "E", "F",
+                "F#", "G", "Ab", "A", "Bb", "B"]
+
+# Template profiles: each row is a 12-semitone chroma pattern.
+# 1 = note present, 0 = absent, fractional = softer harmonic.
+_CHORD_TEMPLATES: list[tuple[str, np.ndarray]] = []
+
+
+def _build_chord_templates() -> list[tuple[str, np.ndarray]]:
+    """Build chord templates for all roots and quality types.
+
+    Returns a list of (label, 12-dim_chroma_vector) tuples.
+    """
+    if _CHORD_TEMPLATES:
+        return _CHORD_TEMPLATES
+
+    # Interval patterns relative to root (semitones from root).
+    quality_intervals: dict[str, list[int]] = {
+        "":     [0, 4, 7],           # major
+        "m":    [0, 3, 7],           # minor
+        "7":    [0, 4, 7, 10],       # dominant 7th
+        "maj7": [0, 4, 7, 11],       # major 7th
+        "m7":   [0, 3, 7, 10],       # minor 7th
+        "dim":  [0, 3, 6],           # diminished
+        "aug":  [0, 4, 8],           # augmented
+    }
+
+    for root_idx, root_name in enumerate(_CHORD_NAMES):
+        for suffix, intervals in quality_intervals.items():
+            template = np.zeros(12, dtype=np.float64)
+            for iv in intervals:
+                template[(root_idx + iv) % 12] = 1.0
+            norm = np.linalg.norm(template)
+            if norm > 0:
+                template /= norm
+            _CHORD_TEMPLATES.append((f"{root_name}{suffix}", template))
+
+    return _CHORD_TEMPLATES
+
+
+def _viterbi_smooth(
+    frame_labels: list[int], n_states: int,
+    self_prob: float = 0.96,
+) -> list[int]:
+    """Viterbi smoothing with a simple self-transition-biased HMM.
+
+    Encourages staying in the same chord state across consecutive frames,
+    reducing noisy frame-by-frame flickering.
+    """
+    n_frames = len(frame_labels)
+    if n_frames == 0:
+        return []
+
+    # Uniform initial probability.
+    log_pi = np.full(n_states, -math.log(n_states))
+
+    # Transition: high self-transition, uniform otherwise.
+    other_prob = (1.0 - self_prob) / max(1, n_states - 1)
+    log_self = math.log(self_prob)
+    log_other = math.log(other_prob) if other_prob > 0 else -1e12
+
+    # Emission: deterministic from the template-matched label.
+    # P(obs=j | state=i) = high if i==j, low otherwise.
+    emit_match = math.log(0.8)
+    emit_miss = math.log(0.2 / max(1, n_states - 1))
+
+    # Viterbi forward pass.
+    viterbi = np.full((n_frames, n_states), -np.inf)
+    backptr = np.zeros((n_frames, n_states), dtype=np.int32)
+
+    obs = frame_labels[0]
+    for s in range(n_states):
+        emit = emit_match if s == obs else emit_miss
+        viterbi[0, s] = log_pi[s] + emit
+
+    for t in range(1, n_frames):
+        obs = frame_labels[t]
+        for s in range(n_states):
+            emit = emit_match if s == obs else emit_miss
+            best_prev = -np.inf
+            best_idx = 0
+            for p in range(n_states):
+                trans = log_self if p == s else log_other
+                score = viterbi[t - 1, p] + trans
+                if score > best_prev:
+                    best_prev = score
+                    best_idx = p
+            viterbi[t, s] = best_prev + emit
+            backptr[t, s] = best_idx
+
+    # Backtrack.
+    path = [0] * n_frames
+    path[-1] = int(np.argmax(viterbi[-1]))
+    for t in range(n_frames - 2, -1, -1):
+        path[t] = int(backptr[t + 1, path[t + 1]])
+
+    return path
+
+
+def _detect_chords(
+    audio_mono: np.ndarray, sr: int,
+    hop_length: int = 2048,
+) -> list[tuple[float, str]]:
+    """Detect chords using chromagram template matching + HMM smoothing.
+
+    Returns a list of (onset_seconds, chord_label) tuples representing
+    consecutive chord segments.
+    """
+    chroma = librosa.feature.chroma_cqt(
+        y=audio_mono, sr=sr, hop_length=hop_length,
+    )  # (12, n_frames)
+    n_frames = chroma.shape[1]
+    if n_frames == 0:
+        return []
+
+    templates = _build_chord_templates()
+    template_matrix = np.array([t[1] for t in templates])  # (n_templates, 12)
+
+    # Normalise each chroma frame.
+    norms = np.linalg.norm(chroma, axis=0, keepdims=True)
+    norms = np.where(norms < 1e-9, 1.0, norms)
+    chroma_norm = chroma / norms  # (12, n_frames)
+
+    # Cosine similarity: (n_templates, n_frames).
+    similarities = template_matrix @ chroma_norm
+    frame_labels = np.argmax(similarities, axis=0).tolist()
+
+    # HMM smoothing.
+    n_states = len(templates)
+    smoothed = _viterbi_smooth(frame_labels, n_states)
+
+    # Merge consecutive same-chord frames into segments.
+    fps = sr / hop_length
+    segments: list[tuple[float, str]] = []
+    prev_label = -1
+    for i, label in enumerate(smoothed):
+        if label != prev_label:
+            segments.append((i / fps, templates[label][0]))
+            prev_label = label
+
+    return segments
+
+
+# ---------------------------------------------------------------------------
 # High-level detection function
 # ---------------------------------------------------------------------------
 
@@ -356,6 +504,9 @@ def detect_bpm_and_key(
     # Time signature (requires downbeats from beat_this ONNX).
     time_sig = _detect_time_signature(beat_times, downbeat_times)
 
+    # Chord detection.
+    chord_sequence = _detect_chords(mono, sample_rate)
+
     return DetectionResult(
         bpm=bpm,
         bpm_confidence=_bpm_confidence(beat_times),
@@ -364,6 +515,7 @@ def detect_bpm_and_key(
         beat_times=beat_times,
         downbeat_times=downbeat_times,
         time_signature=time_sig,
+        chord_sequence=chord_sequence,
     )
 
 

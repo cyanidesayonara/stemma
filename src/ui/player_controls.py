@@ -494,6 +494,11 @@ class PlayerControls(QWidget):
         self._key_conf: str = ""
         self._bpm_conf: str = ""
 
+        # Chord display polling timer (~4 Hz).
+        self._chord_timer = QTimer(self)
+        self._chord_timer.setInterval(250)
+        self._chord_timer.timeout.connect(self._update_chord_label)
+
         self._setup_ui()
         self._connect_signals()
 
@@ -703,6 +708,12 @@ class PlayerControls(QWidget):
         self._time_sig_label.setAccessibleName("Detected time signature")
         self._time_sig_label.setStyleSheet(f"color: {colors['surface2']};")
         loop_speed_bar.addWidget(self._time_sig_label)
+
+        self._chord_label = QLabel("")
+        self._chord_label.setToolTip("Detected chord (suggestion)")
+        self._chord_label.setAccessibleName("Detected chord")
+        self._chord_label.setStyleSheet(f"color: {colors['surface2']};")
+        loop_speed_bar.addWidget(self._chord_label)
 
         self._speed_status = QLabel("")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
@@ -927,6 +938,7 @@ class PlayerControls(QWidget):
                 self._key_label.setStyleSheet(f"color: {c};")
 
         self._time_sig_label.setStyleSheet(f"color: {colors['surface2']};")
+        self._chord_label.setStyleSheet(f"color: {colors['surface2']};")
         if not self._detected_bpm_label.text():
             self._detected_bpm_label.setStyleSheet(
                 f"color: {colors['surface2']};"
@@ -1032,6 +1044,9 @@ class PlayerControls(QWidget):
         )
         self._time_sig_label.setText("")
         self._time_sig_label.setToolTip("Detected time signature")
+        self._chord_label.setText("")
+        self._chord_label.setToolTip("Detected chord (suggestion)")
+        self._chord_timer.stop()
         self._detected_bpm_label.setText("")
         self._bpm_conf = ""
         self._detected_bpm_label.setToolTip(
@@ -1118,15 +1133,29 @@ class PlayerControls(QWidget):
                 self._bpm_spin.setValue(max(20, min(300, round(ibpm))))
                 self._bpm_spin.blockSignals(False)
 
+    def _update_chord_label(self) -> None:
+        """Poll the player for the current chord and update the label."""
+        if not self._player.is_playing:
+            return
+        frame = int(self._player.current_seconds * self._player.sample_rate)
+        chord = self._player.chord_at(frame)
+        if chord:
+            self._chord_label.setText(f"Chord: {chord}")
+        else:
+            self._chord_label.setText("")
+
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
         self._play_btn.setAccessibleName("Pause" if playing else "Play")
         if not playing:
             self._count_in_label.setText("")
+            self._chord_timer.stop()
             if not self._player.recording_armed:
                 self._record_btn.blockSignals(True)
                 self._record_btn.setChecked(False)
                 self._record_btn.blockSignals(False)
+        elif self._player.chord_sequence:
+            self._chord_timer.start()
 
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
@@ -1447,10 +1476,21 @@ class PlayerControls(QWidget):
         else:
             self._time_sig_label.setText("")
 
+        # Store chord sequence and start polling timer.
+        if result.chord_sequence:
+            self._player.set_chord_sequence(result.chord_sequence)
+            self._chord_timer.start()
+        else:
+            self._player.set_chord_sequence([])
+            self._chord_label.setText("")
+            self._chord_timer.stop()
+
     def _on_detect_error(self, msg: str) -> None:
         self._key_label.setText("")
         self._detected_bpm_label.setText("")
         self._time_sig_label.setText("")
+        self._chord_label.setText("")
+        self._chord_timer.stop()
 
     def _on_detect_finished(self) -> None:
         self._detection_worker = None
@@ -1569,6 +1609,14 @@ class PlayerControls(QWidget):
         else:
             self._time_sig_label.setText("")
             self._time_sig_label.setToolTip("Detected time signature")
+
+    def restore_chord_sequence(
+        self, chords: list[tuple[float, str]],
+    ) -> None:
+        """Restore a previously detected chord sequence from QSettings."""
+        self._player.set_chord_sequence(chords)
+        if chords:
+            self._chord_timer.start()
 
     def set_detected_key(self, key: str, confidence: str = "") -> None:
         """Restore a previously detected key label with colour and tooltip."""

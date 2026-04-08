@@ -9,12 +9,15 @@ from src.beat_detector import (
     DetectionResult,
     DetectionWorker,
     _bpm_confidence,
+    _build_chord_templates,
     _detect_beats_librosa,
+    _detect_chords,
     _detect_key,
     _detect_time_signature,
     _key_confidence,
     _peak_pick,
     _sigmoid,
+    _viterbi_smooth,
     detect_bpm_and_key,
 )
 
@@ -359,3 +362,109 @@ class TestDetectionWorker:
         # Empty stems should return an empty result, not an error.
         assert len(results) == 1
         assert results[0].bpm == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Chord templates
+# ---------------------------------------------------------------------------
+
+class TestBuildChordTemplates:
+    def test_template_count(self):
+        """12 roots x 7 qualities = 84 templates."""
+        templates = _build_chord_templates()
+        assert len(templates) == 84
+
+    def test_templates_normalised(self):
+        """Every template should be unit-normalised."""
+        for label, vec in _build_chord_templates():
+            norm = float(np.linalg.norm(vec))
+            assert abs(norm - 1.0) < 1e-6, f"{label}: norm={norm}"
+
+    def test_c_major_template(self):
+        """C major template should have energy on C, E, G (indices 0, 4, 7)."""
+        templates = _build_chord_templates()
+        c_major = [v for l, v in templates if l == "C"][0]
+        assert c_major[0] > 0   # C
+        assert c_major[4] > 0   # E
+        assert c_major[7] > 0   # G
+        assert c_major[1] == 0  # C#
+
+    def test_am7_template(self):
+        """Am7 = A(9) + C(0) + E(4) + G(7)."""
+        templates = _build_chord_templates()
+        am7 = [v for l, v in templates if l == "Am7"][0]
+        assert am7[9] > 0   # A
+        assert am7[0] > 0   # C
+        assert am7[4] > 0   # E
+        assert am7[7] > 0   # G
+
+
+# ---------------------------------------------------------------------------
+# Viterbi smoothing
+# ---------------------------------------------------------------------------
+
+class TestViterbiSmooth:
+    def test_empty(self):
+        assert _viterbi_smooth([], 10) == []
+
+    def test_stable_sequence(self):
+        """Already-stable sequence should remain unchanged."""
+        labels = [0] * 10 + [1] * 10
+        smoothed = _viterbi_smooth(labels, 5)
+        assert smoothed == labels
+
+    def test_removes_isolated_spike(self):
+        """A single-frame spike should be smoothed away."""
+        labels = [0] * 5 + [3] + [0] * 5
+        smoothed = _viterbi_smooth(labels, 5)
+        assert smoothed[5] == 0  # spike removed
+
+    def test_preserves_real_change(self):
+        """A sustained change should be preserved."""
+        labels = [0] * 20 + [2] * 20
+        smoothed = _viterbi_smooth(labels, 5)
+        # The bulk of each segment should match.
+        assert smoothed[5] == 0
+        assert smoothed[35] == 2
+
+
+# ---------------------------------------------------------------------------
+# Chord detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+class TestDetectChords:
+    def test_c_major_chord(self):
+        """A sustained C major chord should be detected as C or C-related."""
+        audio = _chord([261.63, 329.63, 392.00], duration=5.0)
+        chords = _detect_chords(audio, sr=44100)
+        assert len(chords) >= 1
+        # First chord should be C-something.
+        assert chords[0][1].startswith("C")
+
+    def test_chord_segments_sorted(self):
+        """Chord onsets should be in ascending time order."""
+        audio = _chord([261.63, 329.63, 392.00], duration=5.0)
+        chords = _detect_chords(audio, sr=44100)
+        times = [t for t, _ in chords]
+        assert times == sorted(times)
+
+    def test_silence_returns_chords(self):
+        """Even silence should produce some output (possibly a single chord)."""
+        audio = np.zeros(44100 * 4, dtype=np.float32)
+        chords = _detect_chords(audio, sr=44100)
+        # Should not crash; may return empty or a single dim chord.
+        assert isinstance(chords, list)
+
+    def test_two_chord_sequence(self):
+        """Two distinct chords played sequentially should produce at least 2 segments."""
+        sr = 44100
+        c_major = _chord([261.63, 329.63, 392.00], duration=3.0, sr=sr)
+        a_minor = _chord([220.00, 261.63, 329.63], duration=3.0, sr=sr)
+        audio = np.concatenate([c_major, a_minor])
+        chords = _detect_chords(audio, sr=sr)
+        # Should detect at least a chord change somewhere.
+        assert len(chords) >= 2
+        labels = [c for _, c in chords]
+        # The set of unique labels should have more than 1 entry.
+        assert len(set(labels)) >= 2
