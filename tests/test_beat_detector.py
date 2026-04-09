@@ -370,9 +370,9 @@ class TestDetectionWorker:
 
 class TestBuildChordTemplates:
     def test_template_count(self):
-        """12 roots x 2 qualities (major + minor) = 24 templates."""
+        """12 roots x 5 qualities = 60 templates."""
         templates = _build_chord_templates()
-        assert len(templates) == 24
+        assert len(templates) == 60
 
     def test_templates_normalised(self):
         """Every template should be unit-normalised."""

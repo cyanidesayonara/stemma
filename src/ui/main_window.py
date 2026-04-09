@@ -510,10 +510,6 @@ class MainWindow(QMainWindow):
                 self._player_controls.beat_sync_nudge_ms,
             )
             self._settings.setValue(
-                f"{prefix}/time_sig",
-                self._player_controls.time_signature,
-            )
-            self._settings.setValue(
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
@@ -670,12 +666,6 @@ class MainWindow(QMainWindow):
                 self._player_controls.set_detected_bpm_text(
                     str(detected_bpm), bpm_conf,
                 )
-            saved_time_sig = str(
-                self._settings.value(f"{prefix}/time_sig", "") or ""
-            )
-            if saved_time_sig:
-                self._player_controls.set_time_signature(saved_time_sig)
-
             # Schema version 3 = beat_this ONNX model + hardened chords.
             # Skip restoring beat/chord data for older sessions so the
             # auto-detect trigger fires once with the new model.
@@ -789,10 +779,6 @@ class MainWindow(QMainWindow):
                     self._player_controls.beat_sync_nudge_ms,
                 )
                 self._settings.setValue(
-                    f"{prefix}/time_sig",
-                    self._player_controls.time_signature,
-                )
-                self._settings.setValue(
                     f"{prefix}/chord_sequence",
                     json.dumps(self._player.chord_sequence),
                 )
@@ -822,11 +808,6 @@ class MainWindow(QMainWindow):
             self._player_controls.set_detected_bpm_text(
                 saved_bpm, saved_bpm_conf,
             )
-            saved_time_sig = str(
-                self._settings.value(f"{prefix}/time_sig", "") or ""
-            )
-            self._player_controls.set_time_signature(saved_time_sig)
-
             # Schema version 3 = beat_this ONNX model + hardened chords.
             # For older sessions, skip restoring beat/chord data so
             # set_stem_names triggers re-detection with the new model.

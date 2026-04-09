@@ -350,11 +350,15 @@ def _detect_time_signature(
 _CHORD_NAMES = ["C", "C#", "D", "Eb", "E", "F",
                 "F#", "G", "Ab", "A", "Bb", "B"]
 
-# Major + minor only — avoids flickering between similar voicings
-# (Am vs Am7 vs Amaj7 etc.) that chroma features cannot distinguish.
+# Chord qualities — major, minor, plus the most chromagram-distinguishable
+# extended chords.  7th chords with tritones (dom7) and wide voicings
+# (maj7, dim) are reliable; m7 is too close to minor in chroma space.
 _QUALITY_INTERVALS: dict[str, list[int]] = {
-    "":  [0, 4, 7],   # major triad
-    "m": [0, 3, 7],   # minor triad
+    "":     [0, 4, 7],       # major triad
+    "m":    [0, 3, 7],       # minor triad
+    "7":    [0, 4, 7, 10],   # dominant 7th (tritone makes it distinct)
+    "maj7": [0, 4, 7, 11],   # major 7th (wide voicing, distinct from major)
+    "dim":  [0, 3, 6],       # diminished (tritone interval, very distinct)
 }
 
 

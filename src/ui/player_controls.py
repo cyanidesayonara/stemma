@@ -501,8 +501,6 @@ class PlayerControls(QWidget):
         self._bpm_conf: str = ""
         self._detected_key_raw: str = ""
         self._detected_bpm_raw: str = ""
-        self._detected_time_sig_raw: str = ""
-
         # Chord display polling timer (~4 Hz).
         self._chord_timer = QTimer(self)
         self._chord_timer.setInterval(250)
@@ -711,12 +709,6 @@ class PlayerControls(QWidget):
         self._key_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._key_label.installEventFilter(self)
         loop_speed_bar.addWidget(self._key_label)
-
-        self._time_sig_label = QLabel("")
-        self._time_sig_label.setTextFormat(Qt.TextFormat.RichText)
-        self._time_sig_label.setToolTip("Detected time signature")
-        self._time_sig_label.setAccessibleName("Detected time signature")
-        loop_speed_bar.addWidget(self._time_sig_label)
 
         self._chord_label = QLabel("")
         self._chord_label.setTextFormat(Qt.TextFormat.RichText)
@@ -941,8 +933,8 @@ class PlayerControls(QWidget):
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
         # Re-apply badge style on detection labels that have content.
         badge = self._badge_style()
-        for lbl in (self._key_label, self._time_sig_label,
-                     self._chord_label, self._detected_bpm_label):
+        for lbl in (self._key_label, self._chord_label,
+                     self._detected_bpm_label):
             if lbl.text():
                 lbl.setStyleSheet(badge)
         self._footer_widget.setStyleSheet(
@@ -1032,6 +1024,7 @@ class PlayerControls(QWidget):
 
     def clear_song(self) -> None:
         """Return to the empty logo state."""
+        self._detach_detection_worker()
         self.set_stem_names([])
         self._waveform.set_loading(False)
         self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
@@ -1043,16 +1036,12 @@ class PlayerControls(QWidget):
         self._key_label.setToolTip(
             "Detected musical key (double-click to re-detect)"
         )
-        self._time_sig_label.setText("")
-        self._time_sig_label.setStyleSheet("")
-        self._time_sig_label.setToolTip("Detected time signature")
         self._chord_label.setText("")
         self._chord_label.setStyleSheet("")
         self._chord_label.setToolTip("Detected chord (suggestion)")
         self._chord_timer.stop()
         self._detected_key_raw = ""
         self._detected_bpm_raw = ""
-        self._detected_time_sig_raw = ""
         self._detected_bpm_label.setText("")
         self._detected_bpm_label.setStyleSheet("")
         self._bpm_conf = ""
@@ -1428,7 +1417,7 @@ class PlayerControls(QWidget):
             f"background: {dim['surface0']}; "
             f"border: 1px solid {dim['surface1']}; "
             f"border-radius: 4px; "
-            f"padding: 1px 6px; color: {dim['surface2']};"
+            f"padding: 1px 6px; color: {dim['text']};"
         )
         self._detected_bpm_label.setStyleSheet(dim_style)
         self._detected_bpm_label.setText("downloading model...")
@@ -1467,7 +1456,7 @@ class PlayerControls(QWidget):
             f"background: {dim['surface0']}; "
             f"border: 1px solid {dim['surface1']}; "
             f"border-radius: 4px; "
-            f"padding: 1px 6px; color: {dim['surface2']};"
+            f"padding: 1px 6px; color: {dim['text']};"
         )
         self._detected_bpm_label.setStyleSheet(dim_style)
         self._detected_bpm_label.setText("detecting...")
@@ -1506,6 +1495,7 @@ class PlayerControls(QWidget):
         colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         return (
             f"background: {colors['surface0']}; "
+            f"color: {colors['text']}; "
             f"border: 1px solid {colors['surface1']}; "
             f"border-radius: 4px; "
             f"padding: 1px 6px; "
@@ -1586,21 +1576,6 @@ class PlayerControls(QWidget):
             self._key_conf = ""
             self._detected_key_raw = ""
 
-        # Update time signature label.
-        if result.time_signature:
-            self._detected_time_sig_raw = result.time_signature
-            self._time_sig_label.setStyleSheet(badge)
-            self._time_sig_label.setText(
-                self._badge_html("", result.time_signature)
-            )
-            self._time_sig_label.setToolTip(
-                f"Detected time signature: {result.time_signature}"
-            )
-        else:
-            self._time_sig_label.setText("")
-            self._time_sig_label.setStyleSheet("")
-            self._detected_time_sig_raw = ""
-
         # Store chord sequence and start polling timer.
         if result.chord_sequence:
             self._player.set_chord_sequence(result.chord_sequence)
@@ -1614,16 +1589,18 @@ class PlayerControls(QWidget):
 
     def _on_detect_error(self, msg: str) -> None:
         for lbl in (self._key_label, self._detected_bpm_label,
-                     self._time_sig_label, self._chord_label):
+                     self._chord_label):
             lbl.setText("")
             lbl.setStyleSheet("")
         self._detected_key_raw = ""
         self._detected_bpm_raw = ""
-        self._detected_time_sig_raw = ""
         self._chord_timer.stop()
 
     def _on_detect_finished(self) -> None:
-        self._detection_worker = None
+        # Only clear the reference if the sender is the active worker;
+        # orphaned workers must not null out a newer worker's reference.
+        if self.sender() is self._detection_worker:
+            self._detection_worker = None
 
     def _redetect_key_only(self) -> None:
         """Re-run detection but only update the key label."""
@@ -1634,7 +1611,7 @@ class PlayerControls(QWidget):
             f"background: {dim['surface0']}; "
             f"border: 1px solid {dim['surface1']}; "
             f"border-radius: 4px; "
-            f"padding: 1px 6px; color: {dim['surface2']};"
+            f"padding: 1px 6px; color: {dim['text']};"
         )
         self._key_label.setText("detecting...")
 
@@ -1676,7 +1653,7 @@ class PlayerControls(QWidget):
             f"background: {dim['surface0']}; "
             f"border: 1px solid {dim['surface1']}; "
             f"border-radius: 4px; "
-            f"padding: 1px 6px; color: {dim['surface2']};"
+            f"padding: 1px 6px; color: {dim['text']};"
         )
         self._detected_bpm_label.setText("detecting...")
 
@@ -1733,27 +1710,6 @@ class PlayerControls(QWidget):
     def bpm_confidence(self) -> str:
         """Return the last BPM confidence level, or empty string."""
         return self._bpm_conf
-
-    @property
-    def time_signature(self) -> str:
-        """Return the detected time signature (e.g. '4/4'), or empty."""
-        return self._detected_time_sig_raw
-
-    def set_time_signature(self, sig: str) -> None:
-        """Restore a previously detected time signature label."""
-        if sig == "--":
-            sig = ""  # Legacy cached value; treat as unknown.
-        self._detected_time_sig_raw = sig
-        if sig:
-            self._time_sig_label.setStyleSheet(self._badge_style())
-            self._time_sig_label.setText(self._badge_html("", sig))
-            self._time_sig_label.setToolTip(
-                f"Detected time signature: {sig}"
-            )
-        else:
-            self._time_sig_label.setText("")
-            self._time_sig_label.setStyleSheet("")
-            self._time_sig_label.setToolTip("Detected time signature")
 
     def restore_chord_sequence(
         self, chords: list[tuple[float, str]],
