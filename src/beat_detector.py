@@ -39,13 +39,18 @@ class DetectionResult:
 # Beat detection — beat_this ONNX
 # ---------------------------------------------------------------------------
 
-# Preprocessing constants matching the beat_this model.
+# Preprocessing constants matching the beat_this model (CPJKU/beat_this).
 _BT_SR = 22050
 _BT_N_FFT = 1024
 _BT_HOP = 441          # 50 fps at 22050 Hz
 _BT_N_MELS = 128
 _BT_FMIN = 30.0
-_BT_FMAX = 10000.0
+_BT_FMAX = 11000.0     # official: 11 kHz upper band
+_BT_LOG_MUL = 1000.0   # ln(1 + 1000 * mel)
+
+# Chunked inference — rotary embeddings require fixed-size chunks.
+_BT_CHUNK_SIZE = 1500   # frames (30 s at 50 fps)
+_BT_BORDER = 6          # overlap frames discarded at chunk boundaries
 
 # Peak-picking parameters.
 _BEAT_THRESHOLD = 0.3
@@ -99,49 +104,100 @@ def _peak_pick(logits: np.ndarray, threshold: float,
     return peaks
 
 
+def _bt_spectrogram(audio_mono: np.ndarray) -> np.ndarray:
+    """Compute the log-mel spectrogram expected by beat_this.
+
+    Returns array of shape ``(frames, 128)`` in float32.  Matches the
+    official ``LogMelSpect`` preprocessing: magnitude mel spectrogram
+    (power=1), frame-length normalisation, and ``ln(1 + 1000 * x)``.
+    """
+    mel = librosa.feature.melspectrogram(
+        y=audio_mono, sr=_BT_SR,
+        n_fft=_BT_N_FFT, hop_length=_BT_HOP,
+        n_mels=_BT_N_MELS, fmin=_BT_FMIN, fmax=_BT_FMAX,
+        power=1.0,           # magnitude, not power
+    )
+    # Frame-length normalisation (torchaudio normalized="frame_length").
+    mel = mel / math.sqrt(_BT_N_FFT)
+    log_mel = np.log1p(_BT_LOG_MUL * mel).astype(np.float32)
+    return log_mel.T  # (frames, 128)
+
+
+def _bt_chunked_inference(
+    spec: np.ndarray, session,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Run beat_this on *spec* in 1500-frame chunks with border overlap.
+
+    Returns ``(beat_logits, downbeat_logits)`` arrays covering the full
+    spectrogram, or ``(beat_logits, None)`` if the model has only one
+    output.
+    """
+    n_frames = spec.shape[0]
+    input_name = session.get_inputs()[0].name
+    stride = _BT_CHUNK_SIZE - 2 * _BT_BORDER
+
+    beat_parts: list[np.ndarray] = []
+    db_parts: list[np.ndarray] = []
+
+    offset = 0
+    while offset < n_frames:
+        end = min(offset + _BT_CHUNK_SIZE, n_frames)
+        chunk = spec[offset:end]
+
+        # Pad to exactly _BT_CHUNK_SIZE frames.
+        if chunk.shape[0] < _BT_CHUNK_SIZE:
+            pad_width = _BT_CHUNK_SIZE - chunk.shape[0]
+            chunk = np.pad(chunk, ((0, pad_width), (0, 0)))
+
+        outputs = session.run(
+            None, {input_name: chunk[np.newaxis, :, :]},
+        )
+        beat_out = outputs[0][0]  # (chunk_size,)
+        db_out = outputs[1][0] if len(outputs) > 1 else None
+
+        # Trim borders (keep full extent at first/last chunk).
+        actual_len = min(end - offset, _BT_CHUNK_SIZE)
+        lo = 0 if offset == 0 else _BT_BORDER
+        hi = actual_len if end >= n_frames else actual_len - _BT_BORDER
+        beat_parts.append(beat_out[lo:hi])
+        if db_out is not None:
+            db_parts.append(db_out[lo:hi])
+
+        offset += stride
+
+    beat_logits = np.concatenate(beat_parts)[:n_frames]
+    db_logits = np.concatenate(db_parts)[:n_frames] if db_parts else None
+    return beat_logits, db_logits
+
+
 def _detect_beats_onnx(
     audio_mono: np.ndarray, sr: int, model_path: str,
 ) -> tuple[list[float], list[float], float]:
     """Run beat_this ONNX model and return (beat_times, downbeat_times, bpm).
 
-    The model expects a log-mel spectrogram at 22050 Hz with the parameters
-    defined by the ``_BT_*`` constants above.
+    Uses chunked inference (1500-frame segments with 6-frame overlap) to
+    match the official beat_this inference pipeline and avoid shape errors
+    in the rotary-embedding attention layers.
     """
     # Resample to model sample rate.
     if sr != _BT_SR:
         audio_mono = librosa.resample(audio_mono, orig_sr=sr, target_sr=_BT_SR)
 
-    # Compute mel spectrogram (power → log scale).
-    mel = librosa.feature.melspectrogram(
-        y=audio_mono, sr=_BT_SR,
-        n_fft=_BT_N_FFT, hop_length=_BT_HOP,
-        n_mels=_BT_N_MELS, fmin=_BT_FMIN, fmax=_BT_FMAX,
-    )
-    log_mel = np.log1p(1000.0 * mel).astype(np.float32)  # ln(1 + 1000*x)
-
-    # Model expects (batch, frames, n_mels).
-    spec = log_mel.T[np.newaxis, :, :]  # (1, frames, 128)
-
+    spec = _bt_spectrogram(audio_mono)  # (frames, 128)
     session = _create_onnx_session(model_path)
-    input_name = session.get_inputs()[0].name
-    outputs = session.run(None, {input_name: spec})
+    beat_logits, db_logits = _bt_chunked_inference(spec, session)
 
-    # Outputs: beat_logits (1, frames), downbeat_logits (1, frames).
-    beat_logits = _sigmoid(outputs[0][0])
-    downbeat_logits = _sigmoid(outputs[1][0]) if len(outputs) > 1 else None
-
-    # Peak-pick beats.
-    beat_frames = _peak_pick(beat_logits, _BEAT_THRESHOLD, _BEAT_MIN_DIST)
+    beat_probs = _sigmoid(beat_logits)
+    beat_frames = _peak_pick(beat_probs, _BEAT_THRESHOLD, _BEAT_MIN_DIST)
     fps = _BT_SR / _BT_HOP
     beat_times = [f / fps for f in beat_frames]
 
-    # Peak-pick downbeats.
     downbeat_times: list[float] = []
-    if downbeat_logits is not None:
-        db_frames = _peak_pick(downbeat_logits, _DOWNBEAT_THRESHOLD, _BEAT_MIN_DIST)
+    if db_logits is not None:
+        db_probs = _sigmoid(db_logits)
+        db_frames = _peak_pick(db_probs, _DOWNBEAT_THRESHOLD, _BEAT_MIN_DIST)
         downbeat_times = [f / fps for f in db_frames]
 
-    # Derive BPM from median inter-beat interval.
     bpm = 0.0
     if len(beat_times) >= 2:
         intervals = np.diff(beat_times)
@@ -485,11 +541,19 @@ def detect_bpm_and_key(
     if duration < _MIN_DURATION:
         return DetectionResult()
 
-    # Beat detection.
+    # Beat detection — try ONNX model, fall back to librosa on any error.
+    beat_times: list[float] = []
+    downbeat_times: list[float] = []
+    bpm = 0.0
     if model_path and os.path.isfile(model_path):
-        beat_times, downbeat_times, bpm = _detect_beats_onnx(
-            mono, sample_rate, model_path,
-        )
+        try:
+            beat_times, downbeat_times, bpm = _detect_beats_onnx(
+                mono, sample_rate, model_path,
+            )
+        except Exception:
+            beat_times, downbeat_times, bpm = _detect_beats_librosa(
+                mono, sample_rate,
+            )
     else:
         beat_times, downbeat_times, bpm = _detect_beats_librosa(
             mono, sample_rate,
