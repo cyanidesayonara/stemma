@@ -1016,3 +1016,55 @@ class TestNudgeStem:
 
         player.remove_recording_stem("take1")
         assert player.get_nudge_ms("take1") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Chord sequence
+# ---------------------------------------------------------------------------
+
+class TestChordSequence:
+    def test_default_empty(self):
+        player = MultiTrackPlayer()
+        assert player.chord_sequence == []
+        assert player.chord_at(0) == ""
+
+    def test_set_chord_sequence(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        chords = [(0.0, "Am"), (2.3, "G"), (3.8, "C")]
+        player.set_chord_sequence(chords)
+        assert len(player.chord_sequence) == 3
+        assert player.chord_sequence[0] == (0.0, "Am")
+
+    def test_chord_at_returns_correct_chord(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        chords = [(0.0, "Am"), (0.5, "G")]
+        player.set_chord_sequence(chords)
+        sr = player.sample_rate
+        # Frame at t=0.25s should be in "Am" region.
+        assert player.chord_at(int(0.25 * sr)) == "Am"
+        # Frame at t=0.75s should be in "G" region.
+        assert player.chord_at(int(0.75 * sr)) == "G"
+
+    def test_chord_at_before_first_onset(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        chords = [(1.0, "Am")]
+        player.set_chord_sequence(chords)
+        # Before the first chord onset, should return empty.
+        assert player.chord_at(0) == ""
+
+    def test_chord_at_empty_sequence(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_chord_sequence([])
+        assert player.chord_at(22050) == ""
+
+    def test_load_stems_clears_chords(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_chord_sequence([(0.0, "Am")])
+        assert len(player.chord_sequence) == 1
+        player.load_stems(mock_stems)
+        assert player.chord_sequence == []

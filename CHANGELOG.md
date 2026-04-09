@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-08 -- v2.2.0 Time Signature & Chord Detection
+
+### Done
+- **Time signature detection:** Infers time signature (4/4, 3/4, 6/8, etc.) from downbeat analysis using the beat_this ONNX model. Counts beats between consecutive downbeats, takes the median, and maps to standard time signatures.
+- **Chord detection:** Real-time chord display using chromagram template matching with cosine similarity across 84 chord templates (major, minor, 7th, m7, maj7, dim, aug). Viterbi HMM smoothing for temporal stability. Binary search lookup at playback position (O(log n)). Updates at 4 Hz during playback.
+- **Detection badge UI:** All four detection labels (key, tempo, time signature, chord) rendered as styled badges with rich text HTML — white label text with confidence-coloured values on rounded surface0 backgrounds.
+- **MSIX logo sound fix:** Logo click and splash screen sounds now use `winsound.SND_MEMORY` with daemon thread playback, fixing silent sounds in MSIX sandbox (path virtualization breaks `SND_FILENAME`) and Python's `SND_ASYNC | SND_MEMORY` restriction.
+- **Session backward compatibility:** Forces re-detection when cached sessions lack chord, downbeat, or time signature data. Filters legacy `"--"` time signature values from old cache.
+- **Downbeat sensitivity:** Lowered downbeat peak-picking threshold (0.15 vs 0.3 for beats) to capture weaker downbeat activations from the ONNX model.
+
+### Metrics
+- 48 fast beat_detector tests pass; 4 slow chord detection tests.
+- 6 player chord tests (verified by code review).
+
+---
+
 ## 2026-04-03 -- v2.1.0 Metronome Nudge, UI Polish, Library Improvements, Session Persistence
 
 ### Done

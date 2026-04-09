@@ -177,8 +177,7 @@ class MainWindow(QMainWindow):
         """Build the main window layout."""
         self._library_panel = LibraryPanel(self._library)
         self._player_controls = PlayerControls(self._player)
-        beat_model = os.path.join(self._model_manager.models_dir, "beat_this.onnx")
-        self._player_controls.set_beat_model_path(beat_model)
+        self._player_controls.set_model_manager(self._model_manager)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._library_panel)
@@ -510,6 +509,11 @@ class MainWindow(QMainWindow):
                 f"{prefix}/beat_nudge_ms",
                 self._player_controls.beat_sync_nudge_ms,
             )
+            self._settings.setValue(
+                f"{prefix}/chord_sequence",
+                json.dumps(self._player.chord_sequence),
+            )
+            self._settings.setValue(f"{prefix}/det_ver", 3)
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -662,6 +666,23 @@ class MainWindow(QMainWindow):
                 self._player_controls.set_detected_bpm_text(
                     str(detected_bpm), bpm_conf,
                 )
+            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # Skip restoring beat/chord data for older sessions so the
+            # auto-detect trigger fires once with the new model.
+            det_ver = int(
+                self._settings.value(f"{prefix}/det_ver", 0) or 0
+            )
+            if det_ver >= 3:
+                try:
+                    cs_str = self._settings.value(
+                        f"{prefix}/chord_sequence", "[]",
+                    )
+                    chords = json.loads(str(cs_str)) if cs_str else []
+                    chords = [(float(t), str(c)) for t, c in chords]
+                    if chords:
+                        self._player_controls.restore_chord_sequence(chords)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
 
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
@@ -757,6 +778,11 @@ class MainWindow(QMainWindow):
                     f"{prefix}/beat_nudge_ms",
                     self._player_controls.beat_sync_nudge_ms,
                 )
+                self._settings.setValue(
+                    f"{prefix}/chord_sequence",
+                    json.dumps(self._player.chord_sequence),
+                )
+                self._settings.setValue(f"{prefix}/det_ver", 3)
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -782,18 +808,37 @@ class MainWindow(QMainWindow):
             self._player_controls.set_detected_bpm_text(
                 saved_bpm, saved_bpm_conf,
             )
-
+            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # For older sessions, skip restoring beat/chord data so
+            # set_stem_names triggers re-detection with the new model.
+            det_ver = int(
+                self._settings.value(f"{prefix}/det_ver", 0) or 0
+            )
             try:
                 nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
                 nudge = float(nudge_str) if nudge_str else 0.0
                 self._player_controls.set_beat_sync_nudge(nudge)
 
-                bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
-                dt_str = self._settings.value(f"{prefix}/downbeat_times", "[]")
-                b_times = json.loads(str(bt_str)) if bt_str else []
-                d_times = json.loads(str(dt_str)) if dt_str else []
-                if b_times:
-                    self._player_controls.restore_beat_times(b_times, d_times)
+                if det_ver >= 3:
+                    bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
+                    dt_str = self._settings.value(
+                        f"{prefix}/downbeat_times", "[]",
+                    )
+                    b_times = json.loads(str(bt_str)) if bt_str else []
+                    d_times = json.loads(str(dt_str)) if dt_str else []
+                    if b_times:
+                        self._player_controls.restore_beat_times(
+                            b_times, d_times,
+                        )
+
+                    cs_str = self._settings.value(
+                        f"{prefix}/chord_sequence", "[]",
+                    )
+                    chords = json.loads(str(cs_str)) if cs_str else []
+                    chords = [(float(t), str(c)) for t, c in chords]
+                    # Restore even when empty: signals detection ran but
+                    # found no chords (prevents spurious re-detection).
+                    self._player_controls.restore_chord_sequence(chords)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 

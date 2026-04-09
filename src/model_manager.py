@@ -1,12 +1,14 @@
 """ONNX model download and cache management.
 
 Manages the HTDemucs v4 ONNX model files that are required for stem
-separation. Models are downloaded from HuggingFace on first run and
-cached locally in the data/models/ directory.
+separation and the beat_this model for beat/downbeat tracking. Models
+are downloaded on first use and cached locally in the data/models/
+directory.
 
-Supported models (each is ``*.onnx`` plus ``*.onnx.data`` from HuggingFace):
-    - htdemucs (4-stem): vocals, drums, bass, other
-    - htdemucs_6s (6-stem): adds guitar + piano
+Supported models:
+    - htdemucs (4-stem): vocals, drums, bass, other (HuggingFace)
+    - htdemucs_6s (6-stem): adds guitar + piano (HuggingFace)
+    - beat_this: beat + downbeat detection (GitHub, MIT license)
 """
 
 import os
@@ -24,6 +26,13 @@ _MODEL_FILES = {
     "htdemucs_6s": ("htdemucs_6s.onnx", "htdemucs_6s.onnx.data"),
 }
 
+# beat_this ONNX model for beat + downbeat tracking (ISMIR 2024, MIT license).
+# Pre-exported by https://github.com/mosynthkey/beat_this_cpp
+_BEAT_THIS_URL = (
+    "https://github.com/mosynthkey/beat_this_cpp/raw/refs/heads/main/onnx/beat_this.onnx"
+)
+_BEAT_THIS_FILE = "beat_this.onnx"
+
 
 class ModelDownloader(QThread):
     """Background thread for downloading an ONNX model file.
@@ -40,11 +49,20 @@ class ModelDownloader(QThread):
     download_complete = Signal(str)
     error = Signal(str)
 
-    def __init__(self, model_name: str, models_dir: str) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        models_dir: str,
+        *,
+        url: str | None = None,
+        file_name: str | None = None,
+    ) -> None:
         super().__init__()
         self.model_name = model_name
         self.models_dir = models_dir
         self._is_cancelled = False
+        self._url = url
+        self._file_name = file_name
 
     def cancel(self) -> None:
         """Request cancellation of the active download."""
@@ -63,6 +81,29 @@ class ModelDownloader(QThread):
     def _download(self) -> None:
         """Core download logic."""
         os.makedirs(self.models_dir, exist_ok=True)
+
+        # Single-file direct-URL mode (used for beat_this.onnx).
+        if self._url and self._file_name:
+            dest = os.path.join(self.models_dir, self._file_name)
+            if os.path.exists(dest):
+                self.progress.emit(100, f"{self._file_name} already cached.")
+                self.download_complete.emit(dest)
+                return
+            self._current_dest_path = dest
+            self.progress.emit(0, f"Downloading {self._file_name}...")
+
+            def _hook(block: int, block_size: int, total: int) -> None:
+                if self._is_cancelled:
+                    raise InterruptedError("Download cancelled by user.")
+                if total > 0:
+                    pct = min(99, int(block * block_size * 100.0 / total))
+                    self.progress.emit(pct, f"Downloading {self._file_name}... {pct}%")
+
+            urllib.request.urlretrieve(self._url, dest, reporthook=_hook)
+            self._current_dest_path = None
+            self.progress.emit(100, "Download complete.")
+            self.download_complete.emit(dest)
+            return
 
         artifacts = _MODEL_FILES[self.model_name]
         n = len(artifacts)
@@ -159,4 +200,20 @@ class ModelManager(QObject):
         """
         name = "htdemucs_6s" if is_6_stem else "htdemucs"
         self._active_downloader = ModelDownloader(name, self.models_dir)
+        return self._active_downloader
+
+    def beat_model_path(self) -> str:
+        """Return the expected local path to the beat_this ONNX model."""
+        return os.path.join(self.models_dir, _BEAT_THIS_FILE)
+
+    def is_beat_model_downloaded(self) -> bool:
+        """Check whether the beat_this ONNX model exists on disk."""
+        return os.path.isfile(self.beat_model_path())
+
+    def download_beat_model(self) -> ModelDownloader:
+        """Create a downloader for the beat_this ONNX model (not started)."""
+        self._active_downloader = ModelDownloader(
+            "beat_this", self.models_dir,
+            url=_BEAT_THIS_URL, file_name=_BEAT_THIS_FILE,
+        )
         return self._active_downloader

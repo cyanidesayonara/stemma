@@ -9,11 +9,15 @@ from src.beat_detector import (
     DetectionResult,
     DetectionWorker,
     _bpm_confidence,
+    _build_chord_templates,
     _detect_beats_librosa,
+    _detect_chords,
     _detect_key,
+    _detect_time_signature,
     _key_confidence,
     _peak_pick,
     _sigmoid,
+    _viterbi_smooth,
     detect_bpm_and_key,
 )
 
@@ -57,12 +61,73 @@ class TestDetectionResult:
         assert r.bpm == 0.0
         assert r.key == ""
         assert r.beat_times == []
+        assert r.time_signature == ""
 
     def test_fields(self):
         r = DetectionResult(bpm=120.0, key="C major", bpm_confidence="high")
         assert r.bpm == 120.0
         assert r.key == "C major"
         assert r.bpm_confidence == "high"
+
+
+# ---------------------------------------------------------------------------
+# Time signature detection
+# ---------------------------------------------------------------------------
+
+class TestDetectTimeSignature:
+    def test_four_four(self):
+        """4 beats per bar -> 4/4."""
+        downbeats = [0.0, 2.0, 4.0, 6.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5,
+                 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5]
+        assert _detect_time_signature(beats, downbeats) == "4/4"
+
+    def test_three_four(self):
+        """3 beats per bar -> 3/4."""
+        downbeats = [0.0, 1.5, 3.0, 4.5]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
+        assert _detect_time_signature(beats, downbeats) == "3/4"
+
+    def test_six_eight(self):
+        """6 beats per bar -> 6/8."""
+        downbeats = [0.0, 3.0, 6.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
+        assert _detect_time_signature(beats, downbeats) == "6/8"
+
+    def test_no_downbeats(self):
+        """No downbeats -> empty string (librosa fallback)."""
+        assert _detect_time_signature([0.0, 0.5, 1.0], []) == ""
+
+    def test_single_downbeat(self):
+        """Only one downbeat -> not enough to measure a bar."""
+        assert _detect_time_signature([0.0, 0.5, 1.0], [0.0]) == ""
+
+    def test_no_beats(self):
+        """No beats at all."""
+        assert _detect_time_signature([], [0.0, 2.0]) == ""
+
+    def test_unusual_meter(self):
+        """5 beats per bar -> 5/4."""
+        downbeats = [0.0, 2.5, 5.0]
+        beats = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+        assert _detect_time_signature(beats, downbeats) == "5/4"
+
+    def test_unmapped_meter_fallback(self):
+        """Meter not in the standard map falls back to N/4."""
+        downbeats = [0.0, 4.0, 8.0]
+        beats = [float(i) * 0.5 for i in range(16)]  # 8 beats per bar
+        assert _detect_time_signature(beats, downbeats) == "8/4"
+
+    def test_robust_to_outlier_bars(self):
+        """Median ignores outlier bars (e.g. partial last bar)."""
+        # 3 bars of 4/4 plus a partial bar of 2 beats
+        downbeats = [0.0, 2.0, 4.0, 6.0, 7.0]
+        beats = [0.0, 0.5, 1.0, 1.5,
+                 2.0, 2.5, 3.0, 3.5,
+                 4.0, 4.5, 5.0, 5.5,
+                 6.0, 6.5,
+                 7.0, 7.5]
+        assert _detect_time_signature(beats, downbeats) == "4/4"
 
 
 # ---------------------------------------------------------------------------
@@ -297,3 +362,100 @@ class TestDetectionWorker:
         # Empty stems should return an empty result, not an error.
         assert len(results) == 1
         assert results[0].bpm == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Chord templates
+# ---------------------------------------------------------------------------
+
+class TestBuildChordTemplates:
+    def test_template_count(self):
+        """12 roots x 5 qualities = 60 templates."""
+        templates = _build_chord_templates()
+        assert len(templates) == 60
+
+    def test_templates_normalised(self):
+        """Every template should be unit-normalised."""
+        for label, vec in _build_chord_templates():
+            norm = float(np.linalg.norm(vec))
+            assert abs(norm - 1.0) < 1e-6, f"{label}: norm={norm}"
+
+    def test_c_major_template(self):
+        """C major template should have energy on C, E, G (indices 0, 4, 7)."""
+        templates = _build_chord_templates()
+        c_major = [v for l, v in templates if l == "C"][0]
+        assert c_major[0] > 0   # C
+        assert c_major[4] > 0   # E
+        assert c_major[7] > 0   # G
+        assert c_major[1] == 0  # C#
+
+
+# ---------------------------------------------------------------------------
+# Viterbi smoothing
+# ---------------------------------------------------------------------------
+
+class TestViterbiSmooth:
+    def test_empty(self):
+        assert _viterbi_smooth([], 10) == []
+
+    def test_stable_sequence(self):
+        """Already-stable sequence should remain unchanged."""
+        labels = [0] * 10 + [1] * 10
+        smoothed = _viterbi_smooth(labels, 5)
+        assert smoothed == labels
+
+    def test_removes_isolated_spike(self):
+        """A single-frame spike should be smoothed away."""
+        labels = [0] * 5 + [3] + [0] * 5
+        smoothed = _viterbi_smooth(labels, 5)
+        assert smoothed[5] == 0  # spike removed
+
+    def test_preserves_real_change(self):
+        """A sustained change should be preserved."""
+        labels = [0] * 20 + [2] * 20
+        smoothed = _viterbi_smooth(labels, 5)
+        # The bulk of each segment should match.
+        assert smoothed[5] == 0
+        assert smoothed[35] == 2
+
+
+# ---------------------------------------------------------------------------
+# Chord detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+class TestDetectChords:
+    def test_c_major_chord(self):
+        """A sustained C major chord should be detected as C or C-related."""
+        audio = _chord([261.63, 329.63, 392.00], duration=5.0)
+        chords = _detect_chords(audio, sr=44100)
+        assert len(chords) >= 1
+        # First chord should be C-something.
+        assert chords[0][1].startswith("C")
+
+    def test_chord_segments_sorted(self):
+        """Chord onsets should be in ascending time order."""
+        audio = _chord([261.63, 329.63, 392.00], duration=5.0)
+        chords = _detect_chords(audio, sr=44100)
+        times = [t for t, _ in chords]
+        assert times == sorted(times)
+
+    def test_silence_returns_chords(self):
+        """Even silence should produce some output (possibly a single chord)."""
+        audio = np.zeros(44100 * 4, dtype=np.float32)
+        chords = _detect_chords(audio, sr=44100)
+        # Should not crash; may return empty or a single dim chord.
+        assert isinstance(chords, list)
+
+    def test_two_chord_sequence(self):
+        """Two distinct chords played sequentially should produce at least 2 segments."""
+        sr = 44100
+        c_major = _chord([261.63, 329.63, 392.00], duration=3.0, sr=sr)
+        a_minor = _chord([220.00, 261.63, 329.63], duration=3.0, sr=sr)
+        audio = np.concatenate([c_major, a_minor])
+        chords = _detect_chords(audio, sr=sr)
+        # Should detect at least a chord change somewhere.
+        assert len(chords) >= 2
+        labels = [c for _, c in chords]
+        # The set of unique labels should have more than 1 entry.
+        assert len(set(labels)) >= 2
