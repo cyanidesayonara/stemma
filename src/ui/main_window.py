@@ -177,8 +177,7 @@ class MainWindow(QMainWindow):
         """Build the main window layout."""
         self._library_panel = LibraryPanel(self._library)
         self._player_controls = PlayerControls(self._player)
-        beat_model = os.path.join(self._model_manager.models_dir, "beat_this.onnx")
-        self._player_controls.set_beat_model_path(beat_model)
+        self._player_controls.set_model_manager(self._model_manager)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._library_panel)
@@ -518,7 +517,7 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
-            self._settings.setValue(f"{prefix}/det_ver", 2)
+            self._settings.setValue(f"{prefix}/det_ver", 3)
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -677,13 +676,13 @@ class MainWindow(QMainWindow):
             if saved_time_sig:
                 self._player_controls.set_time_signature(saved_time_sig)
 
-            # Schema version 2 = chord + downbeat detection with lower
-            # downbeat threshold.  Skip restoring beat/chord data for
-            # older sessions so the auto-detect trigger fires once.
+            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # Skip restoring beat/chord data for older sessions so the
+            # auto-detect trigger fires once with the new model.
             det_ver = int(
                 self._settings.value(f"{prefix}/det_ver", 0) or 0
             )
-            if det_ver >= 2:
+            if det_ver >= 3:
                 try:
                     cs_str = self._settings.value(
                         f"{prefix}/chord_sequence", "[]",
@@ -797,7 +796,7 @@ class MainWindow(QMainWindow):
                     f"{prefix}/chord_sequence",
                     json.dumps(self._player.chord_sequence),
                 )
-                self._settings.setValue(f"{prefix}/det_ver", 2)
+                self._settings.setValue(f"{prefix}/det_ver", 3)
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -828,9 +827,9 @@ class MainWindow(QMainWindow):
             )
             self._player_controls.set_time_signature(saved_time_sig)
 
-            # Schema version 2 = chord + downbeat detection with lower
-            # downbeat threshold.  For older sessions, skip restoring
-            # beat/chord data so set_stem_names triggers re-detection.
+            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # For older sessions, skip restoring beat/chord data so
+            # set_stem_names triggers re-detection with the new model.
             det_ver = int(
                 self._settings.value(f"{prefix}/det_ver", 0) or 0
             )
@@ -839,7 +838,7 @@ class MainWindow(QMainWindow):
                 nudge = float(nudge_str) if nudge_str else 0.0
                 self._player_controls.set_beat_sync_nudge(nudge)
 
-                if det_ver >= 2:
+                if det_ver >= 3:
                     bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
                     dt_str = self._settings.value(
                         f"{prefix}/downbeat_times", "[]",

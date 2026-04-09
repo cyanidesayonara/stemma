@@ -493,7 +493,10 @@ class PlayerControls(QWidget):
         # Keep Python refs to old workers until their OS threads finish;
         # prevents "QThread: Destroyed while thread is still running".
         self._orphaned_workers: list[DetectionWorker] = []
+        self._model_manager = None  # set via set_model_manager()
         self._beat_model_path: str | None = None
+        self._beat_model_downloader = None
+        self._pending_detect_args: tuple | None = None
         self._key_conf: str = ""
         self._bpm_conf: str = ""
         self._detected_key_raw: str = ""
@@ -1363,9 +1366,10 @@ class PlayerControls(QWidget):
                 return True
         return super().eventFilter(obj, event)
 
-    def set_beat_model_path(self, path: str) -> None:
-        """Set the path to the beat_this ONNX model file."""
-        self._beat_model_path = path
+    def set_model_manager(self, manager) -> None:
+        """Store the ModelManager and derive the beat model path."""
+        self._model_manager = manager
+        self._beat_model_path = manager.beat_model_path()
 
     def start_detection(
         self,
@@ -1377,33 +1381,87 @@ class PlayerControls(QWidget):
         Called automatically when stems load and when A-B loop points
         change.  Results are shown as suggestions only — the metronome
         BPM spinbox is *not* modified.
+
+        If the beat_this ONNX model has not been downloaded yet, it is
+        fetched first and detection resumes on completion.
         """
         if not self._player.stems:
             return
-        if self._detection_worker is not None:
-            old = self._detection_worker
-            # Disconnect our callbacks so stale results are silently
-            # ignored.  Disconnect each signal individually to avoid
-            # RuntimeError if a slot was never connected.
-            for sig, slot in [
-                (old.completed, self._on_detect_completed),
-                (old.error, self._on_detect_error),
-                (old.finished, self._on_detect_finished),
-            ]:
-                try:
-                    sig.disconnect(slot)
-                except RuntimeError:
-                    pass
-            # Store a reference so Python's GC cannot destroy the
-            # QThread wrapper while the OS thread is still running.
-            # The lambda removes it once the thread exits cleanly.
-            self._orphaned_workers.append(old)
-            old.finished.connect(
-                lambda w=old: self._orphaned_workers.remove(w)
-                if w in self._orphaned_workers else None
-            )
-            self._detection_worker = None
+        self._detach_detection_worker()
 
+        # Ensure beat_this model is available.
+        if (self._model_manager
+                and not self._model_manager.is_beat_model_downloaded()):
+            self._pending_detect_args = (start_sec, end_sec)
+            self._start_beat_model_download()
+            return
+
+        self._run_detection(start_sec, end_sec)
+
+    def _detach_detection_worker(self) -> None:
+        """Disconnect and orphan the current detection worker, if any."""
+        if self._detection_worker is None:
+            return
+        old = self._detection_worker
+        for sig, slot in [
+            (old.completed, self._on_detect_completed),
+            (old.error, self._on_detect_error),
+            (old.finished, self._on_detect_finished),
+        ]:
+            try:
+                sig.disconnect(slot)
+            except RuntimeError:
+                pass
+        self._orphaned_workers.append(old)
+        old.finished.connect(
+            lambda w=old: self._orphaned_workers.remove(w)
+            if w in self._orphaned_workers else None
+        )
+        self._detection_worker = None
+
+    def _start_beat_model_download(self) -> None:
+        """Download beat_this.onnx, then resume detection."""
+        if self._beat_model_downloader is not None:
+            return  # already downloading
+        dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
+        dim_style = (
+            f"background: {dim['surface0']}; "
+            f"border: 1px solid {dim['surface1']}; "
+            f"border-radius: 4px; "
+            f"padding: 1px 6px; color: {dim['surface2']};"
+        )
+        self._detected_bpm_label.setStyleSheet(dim_style)
+        self._detected_bpm_label.setText("downloading model...")
+        self._key_label.setStyleSheet(dim_style)
+        self._key_label.setText("downloading model...")
+
+        dl = self._model_manager.download_beat_model()
+        dl.download_complete.connect(self._on_beat_model_ready)
+        dl.error.connect(self._on_beat_model_error)
+        self._beat_model_downloader = dl
+        dl.start()
+
+    def _on_beat_model_ready(self, path: str) -> None:
+        self._beat_model_downloader = None
+        self._beat_model_path = path
+        args = self._pending_detect_args or (None, None)
+        self._pending_detect_args = None
+        self._run_detection(*args)
+
+    def _on_beat_model_error(self, msg: str) -> None:
+        self._beat_model_downloader = None
+        # Fall through without the model — librosa fallback.
+        self._beat_model_path = None
+        args = self._pending_detect_args or (None, None)
+        self._pending_detect_args = None
+        self._run_detection(*args)
+
+    def _run_detection(
+        self,
+        start_sec: float | None = None,
+        end_sec: float | None = None,
+    ) -> None:
+        """Launch the DetectionWorker with the current model path."""
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         dim_style = (
             f"background: {dim['surface0']}; "

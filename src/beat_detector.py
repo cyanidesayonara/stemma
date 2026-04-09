@@ -117,7 +117,7 @@ def _detect_beats_onnx(
         n_fft=_BT_N_FFT, hop_length=_BT_HOP,
         n_mels=_BT_N_MELS, fmin=_BT_FMIN, fmax=_BT_FMAX,
     )
-    log_mel = np.log1p(mel).astype(np.float32)  # (n_mels, frames)
+    log_mel = np.log1p(1000.0 * mel).astype(np.float32)  # ln(1 + 1000*x)
 
     # Model expects (batch, frames, n_mels).
     spec = log_mel.T[np.newaxis, :, :]  # (1, frames, 128)
@@ -287,62 +287,6 @@ def _detect_time_signature(
     return _TIME_SIG_MAP.get(median_bpb, f"{median_bpb}/4")
 
 
-def _infer_time_signature_from_beats(
-    beat_times: list[float],
-    audio_mono: np.ndarray,
-    sample_rate: int,
-) -> str:
-    """Estimate meter from beat-strength autocorrelation when downbeats unavailable.
-
-    Samples onset strength at each beat position, mean-subtracts, then
-    computes the full autocorrelation and finds the lag in [2..6] with the
-    highest positive value.  That lag gives the number of beats per bar.
-
-    Returns ``""`` when no clear periodicity is found (ambient / atonal
-    material or fewer than 8 beats detected).
-    """
-    if len(beat_times) < 8:
-        return ""
-
-    hop = 512
-    onset_env = librosa.onset.onset_strength(
-        y=audio_mono, sr=sample_rate, hop_length=hop,
-    )
-    n_frames = len(onset_env)
-    raw_frames = librosa.time_to_frames(
-        np.asarray(beat_times), sr=sample_rate, hop_length=hop,
-    ).astype(int)
-    # Peak in a ±3-frame window to handle spectrogram-window latency.
-    window = 3
-    strengths = np.array([
-        onset_env[max(0, f - window): min(n_frames, f + window + 1)].max()
-        for f in raw_frames
-    ], dtype=np.float64)
-
-    # Mean-subtract so autocorrelation measures periodic variation, not
-    # overall level, then compute full autocorrelation.
-    s = strengths - strengths.mean()
-    autocorr = np.correlate(s, s, mode="full")
-    ac = autocorr[len(autocorr) // 2:]   # positive lags: ac[0] = zero-lag energy
-
-    if ac[0] <= 0:
-        return ""
-
-    # Pick the lag in [2..6] with the highest positive autocorrelation.
-    # Lag k means the beat-strength pattern repeats every k beats (bar length).
-    best_lag = max(range(2, 7), key=lambda k: ac[k] if k < len(ac) else -np.inf)
-
-    if ac[best_lag] <= 0:
-        return ""
-
-    # Require the periodic component to be at least 10 % of zero-lag energy.
-    confidence = ac[best_lag] / (ac[0] + 1e-6)
-    if confidence < 0.10:
-        return ""
-
-    return _TIME_SIG_MAP.get(best_lag, f"{best_lag}/4")
-
-
 # ---------------------------------------------------------------------------
 # Chord detection — chromagram template matching + HMM smoothing
 # ---------------------------------------------------------------------------
@@ -350,15 +294,11 @@ def _infer_time_signature_from_beats(
 _CHORD_NAMES = ["C", "C#", "D", "Eb", "E", "F",
                 "F#", "G", "Ab", "A", "Bb", "B"]
 
-# Interval patterns relative to root (semitones from root).
+# Major + minor only — avoids flickering between similar voicings
+# (Am vs Am7 vs Amaj7 etc.) that chroma features cannot distinguish.
 _QUALITY_INTERVALS: dict[str, list[int]] = {
-    "":     [0, 4, 7],           # major
-    "m":    [0, 3, 7],           # minor
-    "7":    [0, 4, 7, 10],       # dominant 7th
-    "maj7": [0, 4, 7, 11],       # major 7th
-    "m7":   [0, 3, 7, 10],       # minor 7th
-    "dim":  [0, 3, 6],           # diminished
-    "aug":  [0, 4, 8],           # augmented
+    "":  [0, 4, 7],   # major triad
+    "m": [0, 3, 7],   # minor triad
 }
 
 
@@ -445,7 +385,7 @@ def _viterbi_smooth(
 
 def _detect_chords(
     audio_mono: np.ndarray, sr: int,
-    hop_length: int = 2048,
+    hop_length: int = 4096,
 ) -> list[tuple[float, str]]:
     """Detect chords using chromagram template matching + HMM smoothing.
 
@@ -462,6 +402,11 @@ def _detect_chords(
     templates = _build_chord_templates()
     template_matrix = np.array([t[1] for t in templates])  # (n_templates, 12)
 
+    # Per-frame energy for silence gating.
+    frame_energy = np.sum(chroma, axis=0)  # (n_frames,)
+    nonzero = frame_energy[frame_energy > 0]
+    energy_thresh = float(np.percentile(nonzero, 10)) * 0.5 if len(nonzero) else 0.0
+
     # Normalise each chroma frame.
     norms = np.linalg.norm(chroma, axis=0, keepdims=True)
     norms = np.where(norms < 1e-9, 1.0, norms)
@@ -471,15 +416,17 @@ def _detect_chords(
     similarities = template_matrix @ chroma_norm
     frame_labels = np.argmax(similarities, axis=0).tolist()
 
-    # HMM smoothing.
+    # HMM smoothing — high self-transition to reduce flickering.
     n_states = len(templates)
-    smoothed = _viterbi_smooth(frame_labels, n_states)
+    smoothed = _viterbi_smooth(frame_labels, n_states, self_prob=0.99)
 
-    # Merge consecutive same-chord frames into segments.
+    # Merge consecutive same-chord frames, holding previous chord in silence.
     fps = sr / hop_length
     segments: list[tuple[float, str]] = []
     prev_label = -1
     for i, label in enumerate(smoothed):
+        if frame_energy[i] < energy_thresh:
+            continue  # hold previous chord during silence
         if label != prev_label:
             segments.append((i / fps, templates[label][0]))
             prev_label = label
@@ -555,14 +502,9 @@ def detect_bpm_and_key(
     if bpm > 0:
         bpm = max(20.0, min(300.0, bpm))
 
-    # Time signature: prefer beat_this downbeats; fall back to onset
-    # periodicity heuristic when the ONNX model is absent or produces
-    # no downbeats (e.g. single-output export).
+    # Time signature from beat_this downbeats (empty when using librosa
+    # fallback, which does not produce downbeats).
     time_sig = _detect_time_signature(beat_times, downbeat_times)
-    if not time_sig and beat_times:
-        time_sig = _infer_time_signature_from_beats(
-            beat_times, mono, sample_rate,
-        )
 
     # Chord detection.
     chord_sequence = _detect_chords(mono, sample_rate)
