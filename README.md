@@ -4,36 +4,40 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
+## Download
+
+**Microsoft Store (recommended):** [stemma on the Microsoft Store](https://apps.microsoft.com/detail/9p2w12l8f381)
+
+**Portable .exe:** Grab **stemma.exe** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest). No installation required. ONNX models download automatically on first import.
+
+> Windows SmartScreen may show a warning for unsigned executables. Click **More info** then **Run anyway**.
+
+### Requirements
+
+- Windows 10/11
+- NVIDIA GPU recommended (DirectML, falls back to CPU)
+
 ## Features
 
 - AI-powered stem separation using HTDemucs v4 (4-stem and 6-stem models)
 - GPU-accelerated inference via ONNX Runtime + DirectML
 - Multi-track player with per-stem mute/solo/volume controls
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
+- Real-time chord detection (major/minor) with Viterbi smoothing, updated 4×/s during playback
+- Automatic tempo and key detection; beat-synced metronome mode
+- High-accuracy beat/downbeat tracking via beat_this ONNX model (auto-downloaded)
 - Import from YouTube URL (bundled ffmpeg when available; otherwise ffmpeg on PATH)
 - Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
 - A-B loop for practice sections (Stop returns to loop A while looping; seek stays inside the loop); pitch-preserving playback speed presets
-- Metronome with BPM entry, tap tempo, mute/solo-friendly click track; automatic tempo/key detection with beat-synced mode
-- Beat-sync nudge: shift metronome clicks ±500ms relative to detected beat positions to align the click with any song
+- Metronome with BPM entry, tap tempo, and beat-sync nudge (±500ms)
 - Optional count-in beats before playback (and optionally before each loop repeat)
 - Session persistence: restore last song, position, mixer, loop, speed, metronome, count-in, and recording take state after restart
 - Library panel shows artist and title on separate lines with teal selection highlight
 - Keyboard shortcuts for transport, stems, loop, speed, metronome, and count-in; full list under **Help > Keyboard Shortcuts**
 - Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
-
-## Download
-
-Grab **stemma.exe** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest). No installation required -- just run the .exe. ONNX models download automatically on first import.
-
-Windows SmartScreen may show a warning for unsigned executables. Click **More info** then **Run anyway**.
-
-### Requirements
-
-- Windows 10/11
-- NVIDIA GPU recommended (DirectML, falls back to CPU)
 
 ## Development Setup
 
@@ -54,7 +58,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~10 seconds, ~360 tests)
+# Fast tests (~25 seconds, ~625 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)

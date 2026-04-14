@@ -200,10 +200,17 @@ All core functionality implemented and tested:
 - [x] Library two-row display with separator lines and teal selection
 - [x] Recording session persistence (nudge/mute/solo/volume per take)
 
+### v2.2.0 Release -- Shipped
+- [x] Real-time chord detection (major/minor, Viterbi HMM smoothing, silence gate) (#118)
+- [x] beat_this ONNX model auto-download + chunked inference for beat/downbeat tracking (#118)
+- [x] QThread crash fix: worker orphaning pattern with identity-checked finished callback (#118)
+- [x] Badge HTML regeneration on theme switch; light mode readability fixes (#118)
+- [x] "Chord: --" placeholder when stopped or during silence (#118)
+
 ## Test Suite
 
 ```
-pytest                                    # ~600 fast tests (~17s)
+pytest                                    # ~625 fast tests (~25s)
 pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
 pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
