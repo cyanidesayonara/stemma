@@ -931,12 +931,33 @@ class PlayerControls(QWidget):
         )
         self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
         self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
-        # Re-apply badge style on detection labels that have content.
+        # Re-apply badge style and regenerate inline HTML colours for
+        # detection labels — the old Rich Text contains hardcoded colour
+        # spans from the previous theme.
         badge = self._badge_style()
-        for lbl in (self._key_label, self._chord_label,
-                     self._detected_bpm_label):
-            if lbl.text():
-                lbl.setStyleSheet(badge)
+        if self._detected_key_raw:
+            key_c = self._conf_color(self._key_conf) if self._key_conf else ""
+            self._key_label.setStyleSheet(badge)
+            self._key_label.setText(
+                self._badge_html("Key:", self._detected_key_raw, key_c)
+            )
+        if self._detected_bpm_raw:
+            bpm_c = self._conf_color(self._bpm_conf) if self._bpm_conf else ""
+            self._detected_bpm_label.setStyleSheet(badge)
+            self._detected_bpm_label.setText(
+                self._badge_html("Tempo:", self._detected_bpm_raw, bpm_c)
+            )
+        if self._player.chord_sequence:
+            self._chord_label.setStyleSheet(badge)
+            # Refresh the chord text with current theme colours.
+            frame = int(
+                self._player.current_seconds * self._player.sample_rate
+            )
+            chord = self._player.chord_at(frame)
+            if chord:
+                self._chord_label.setText(
+                    self._badge_html("Chord:", chord)
+                )
         self._footer_widget.setStyleSheet(
             f"border-top: 1px solid {colors['surface0']};"
         )
@@ -1135,10 +1156,9 @@ class PlayerControls(QWidget):
             return
         frame = int(self._player.current_seconds * self._player.sample_rate)
         chord = self._player.chord_at(frame)
-        if chord:
-            self._chord_label.setText(self._badge_html("Chord:", chord))
-        else:
-            self._chord_label.setText("")
+        self._chord_label.setText(
+            self._badge_html("Chord:", chord if chord else "--")
+        )
 
     def _on_state_changed(self, playing: bool) -> None:
         self._play_btn.setIcon(self._pause_icon if playing else self._play_icon)
@@ -1146,6 +1166,9 @@ class PlayerControls(QWidget):
         if not playing:
             self._count_in_label.setText("")
             self._chord_timer.stop()
+            # Show placeholder instead of the last detected chord.
+            if self._player.chord_sequence:
+                self._chord_label.setText(self._badge_html("Chord:", "--"))
             if not self._player.recording_armed:
                 self._record_btn.blockSignals(True)
                 self._record_btn.setChecked(False)
@@ -1156,6 +1179,8 @@ class PlayerControls(QWidget):
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
         self._play_btn.setAccessibleName("Play")
+        if self._player.chord_sequence:
+            self._chord_label.setText(self._badge_html("Chord:", "--"))
         total = self._player.total_seconds
         if total > 0:
             self._waveform.set_position(
@@ -1580,7 +1605,9 @@ class PlayerControls(QWidget):
         if result.chord_sequence:
             self._player.set_chord_sequence(result.chord_sequence)
             self._chord_label.setStyleSheet(badge)
-            self._chord_timer.start()
+            self._chord_label.setText(self._badge_html("Chord:", "--"))
+            if self._player.is_playing:
+                self._chord_timer.start()
         else:
             self._player.set_chord_sequence([])
             self._chord_label.setText("")
@@ -1716,9 +1743,13 @@ class PlayerControls(QWidget):
     ) -> None:
         """Restore a previously detected chord sequence from QSettings."""
         self._player.set_chord_sequence(chords)
-        if chords and self._player.is_playing:
+        if chords:
+            # Always apply badge style so the outline is visible even
+            # before playback starts (fixes missing badge on app launch).
             self._chord_label.setStyleSheet(self._badge_style())
-            self._chord_timer.start()
+            self._chord_label.setText(self._badge_html("Chord:", "--"))
+            if self._player.is_playing:
+                self._chord_timer.start()
 
     def set_detected_key(self, key: str, confidence: str = "") -> None:
         """Restore a previously detected key label with colour and tooltip."""

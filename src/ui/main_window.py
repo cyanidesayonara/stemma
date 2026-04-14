@@ -513,7 +513,7 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
-            self._settings.setValue(f"{prefix}/det_ver", 3)
+            self._settings.setValue(f"{prefix}/det_ver", 4)
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -666,13 +666,13 @@ class MainWindow(QMainWindow):
                 self._player_controls.set_detected_bpm_text(
                     str(detected_bpm), bpm_conf,
                 )
-            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # Schema version 4 = major/minor-only chords (no false 7ths).
             # Skip restoring beat/chord data for older sessions so the
-            # auto-detect trigger fires once with the new model.
+            # auto-detect trigger fires once with the new algorithm.
             det_ver = int(
                 self._settings.value(f"{prefix}/det_ver", 0) or 0
             )
-            if det_ver >= 3:
+            if det_ver >= 4:
                 try:
                     cs_str = self._settings.value(
                         f"{prefix}/chord_sequence", "[]",
@@ -782,7 +782,7 @@ class MainWindow(QMainWindow):
                     f"{prefix}/chord_sequence",
                     json.dumps(self._player.chord_sequence),
                 )
-                self._settings.setValue(f"{prefix}/det_ver", 3)
+                self._settings.setValue(f"{prefix}/det_ver", 4)
 
             self._player.stop()
             self._player.load_stems(stem_paths)
@@ -808,9 +808,9 @@ class MainWindow(QMainWindow):
             self._player_controls.set_detected_bpm_text(
                 saved_bpm, saved_bpm_conf,
             )
-            # Schema version 3 = beat_this ONNX model + hardened chords.
+            # Schema version 4 = major/minor-only chords (no false 7ths).
             # For older sessions, skip restoring beat/chord data so
-            # set_stem_names triggers re-detection with the new model.
+            # set_stem_names triggers re-detection with the new algorithm.
             det_ver = int(
                 self._settings.value(f"{prefix}/det_ver", 0) or 0
             )
@@ -819,7 +819,7 @@ class MainWindow(QMainWindow):
                 nudge = float(nudge_str) if nudge_str else 0.0
                 self._player_controls.set_beat_sync_nudge(nudge)
 
-                if det_ver >= 3:
+                if det_ver >= 4:
                     bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
                     dt_str = self._settings.value(
                         f"{prefix}/downbeat_times", "[]",

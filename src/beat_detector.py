@@ -350,15 +350,12 @@ def _detect_time_signature(
 _CHORD_NAMES = ["C", "C#", "D", "Eb", "E", "F",
                 "F#", "G", "Ab", "A", "Bb", "B"]
 
-# Chord qualities — major, minor, plus the most chromagram-distinguishable
-# extended chords.  7th chords with tritones (dom7) and wide voicings
-# (maj7, dim) are reliable; m7 is too close to minor in chroma space.
+# Chord qualities — major and minor triads only.  Extended chords (7ths,
+# dim) produce too many false positives in real-world mixes where bass
+# and guitar overtones overlap in chroma space.
 _QUALITY_INTERVALS: dict[str, list[int]] = {
     "":     [0, 4, 7],       # major triad
     "m":    [0, 3, 7],       # minor triad
-    "7":    [0, 4, 7, 10],   # dominant 7th (tritone makes it distinct)
-    "maj7": [0, 4, 7, 11],   # major 7th (wide voicing, distinct from major)
-    "dim":  [0, 3, 6],       # diminished (tritone interval, very distinct)
 }
 
 
@@ -382,7 +379,7 @@ def _build_chord_templates() -> tuple[tuple[str, np.ndarray], ...]:
     return tuple(templates)
 
 
-# Built eagerly at import time — 84 templates, ~8 KB, thread-safe.
+# Built eagerly at import time — 24 templates (12 roots × 2 qualities).
 _CHORD_TEMPLATES = _build_chord_templates()
 
 
