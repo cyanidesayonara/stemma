@@ -93,21 +93,27 @@ class TestLetterAlpha:
 
 
 class TestSplashScreenStart:
-    def test_start_makes_visible(self, app):
+    # processEvents triggers a paint which can access-violation on headless
+    # CI runners (no display driver).  Mock it out so we test the Python
+    # logic without touching Qt's rendering pipeline.
+    @patch("src.ui.splash_screen.QApplication.processEvents")
+    def test_start_makes_visible(self, _pe, app):
         splash = SplashScreen(theme="dark", play_sound=False)
         splash.start()
         assert splash.isVisible()
         splash.close()
 
-    def test_start_begins_timer(self, app):
+    @patch("src.ui.splash_screen.QApplication.processEvents")
+    def test_start_begins_timer(self, _pe, app):
         splash = SplashScreen(theme="dark", play_sound=False)
         splash.start()
         assert splash._timer.isActive()
         assert splash._clock.isValid()
         splash.close()
 
+    @patch("src.ui.splash_screen.QApplication.processEvents")
     @patch("src.ui.splash_screen._HAS_WINSOUND", False)
-    def test_no_sound_when_winsound_unavailable(self, app):
+    def test_no_sound_when_winsound_unavailable(self, _pe, app):
         splash = SplashScreen(
             theme="dark", play_sound=True, audio_path="fake.wav"
         )
