@@ -954,10 +954,9 @@ class PlayerControls(QWidget):
                 self._player.current_seconds * self._player.sample_rate
             )
             chord = self._player.chord_at(frame)
-            if chord:
-                self._chord_label.setText(
-                    self._badge_html("Chord:", chord)
-                )
+            self._chord_label.setText(
+                self._badge_html("Chord:", chord if chord else "--")
+            )
         self._footer_widget.setStyleSheet(
             f"border-top: 1px solid {colors['surface0']};"
         )
@@ -1029,7 +1028,7 @@ class PlayerControls(QWidget):
 
         # Auto-detect if no beat grid has been loaded yet.
         # Old sessions are handled by the det_ver gate in main_window:
-        # if det_ver < 2, beat_times are not restored, so this fires.
+        # if det_ver < 4, beat_times are not restored, so this fires.
         if has_stems and not self._player.beat_times:
             self.start_detection()
 
@@ -1179,6 +1178,7 @@ class PlayerControls(QWidget):
     def _on_play_finished(self) -> None:
         self._play_btn.setIcon(self._play_icon)
         self._play_btn.setAccessibleName("Play")
+        self._chord_timer.stop()
         if self._player.chord_sequence:
             self._chord_label.setText(self._badge_html("Chord:", "--"))
         total = self._player.total_seconds

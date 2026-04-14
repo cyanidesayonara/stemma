@@ -456,7 +456,7 @@ def _detect_chords(
     if n_frames == 0:
         return []
 
-    templates = _build_chord_templates()
+    templates = _CHORD_TEMPLATES
     template_matrix = np.array([t[1] for t in templates])  # (n_templates, 12)
 
     # Per-frame energy for silence gating.
