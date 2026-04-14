@@ -8,7 +8,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 
 **Microsoft Store (recommended):** [stemma on the Microsoft Store](https://apps.microsoft.com/detail/9p2w12l8f381)
 
-**Portable .exe:** Grab **stemma.exe** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest). No installation required. ONNX models download automatically on first import.
+**Portable zip:** Download **stemma.zip** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest), extract anywhere, and run `stemma.exe`. No installation required. ONNX models download automatically on first import.
 
 > Windows SmartScreen may show a warning for unsigned executables. Click **More info** then **Run anyway**.
 
