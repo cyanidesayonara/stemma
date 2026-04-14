@@ -49,6 +49,27 @@ class TestModelManager:
         downloader = manager.download_model(is_6_stem=False)
         assert isinstance(downloader, ModelDownloader)
 
+    def test_beat_model_path(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        assert manager.beat_model_path().endswith("beat_this.onnx")
+
+    def test_is_beat_model_downloaded_false(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        assert not manager.is_beat_model_downloaded()
+
+    def test_is_beat_model_downloaded_true(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        models_dir = os.path.join(tmp_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
+        with open(os.path.join(models_dir, "beat_this.onnx"), "wb") as f:
+            f.write(b"dummy")
+        assert manager.is_beat_model_downloaded()
+
+    def test_download_beat_model_returns_downloader(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        downloader = manager.download_beat_model()
+        assert isinstance(downloader, ModelDownloader)
+
 
 class TestModelDownloader:
     """Verify ModelDownloader initialization and cancellation."""

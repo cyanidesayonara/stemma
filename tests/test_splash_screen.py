@@ -1,6 +1,6 @@
 """Tests for the animated splash screen."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from PySide6.QtCore import QSettings
@@ -279,6 +279,7 @@ class TestSoundSync:
         splash.close()
 
     @patch("src.ui.splash_screen.os.path.isfile", return_value=True)
+    @patch("builtins.open", mock_open(read_data=b"RIFF...."))
     @patch("src.ui.splash_screen.winsound.PlaySound")
     def test_sound_plays_when_frame2_is_prompt(self, mock_play, _isfile, app):
         splash = SplashScreen(

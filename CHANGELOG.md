@@ -4,6 +4,23 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-14 -- v2.2.0 Chord Detection & beat_this ONNX Model
+
+### Done
+- **Chord detection:** Real-time chord display using chromagram template matching with cosine similarity across 24 chord templates (major, minor). Viterbi HMM smoothing (self_prob=0.99) for temporal stability. Silence gating prevents stale chords. Binary search lookup at playback position (O(log n)). Updates at 4 Hz during playback. Shows "Chord: --" placeholder when stopped or during silence.
+- **beat_this ONNX model:** Auto-downloads the beat_this model (MIT license, ISMIR 2024) for high-accuracy beat/downbeat tracking. Chunked inference with 1500-frame segments and 6-frame border overlap to satisfy rotary position embedding constraints. Falls back to librosa when unavailable.
+- **Detection badge UI:** Three detection labels (key, tempo, chord) rendered as styled badges with rich text HTML — label text with confidence-coloured values on rounded surface0 backgrounds. Theme switching regenerates badge HTML with new theme colours.
+- **QThread crash fix:** Worker orphaning pattern with identity-checked `finished` callback prevents "QThread: Destroyed while thread is still running" crashes when switching songs during detection.
+- **Light mode readability:** Badge labels include explicit `color:` property; dim text uses theme text color for proper contrast in both dark and light modes.
+- **MSIX logo sound fix:** Logo click and splash screen sounds now use `winsound.SND_MEMORY` with daemon thread playback, fixing silent sounds in MSIX sandbox (path virtualization breaks `SND_FILENAME`) and Python's `SND_ASYNC | SND_MEMORY` restriction.
+- **Session backward compatibility:** Schema version 4 forces re-detection when cached sessions have older chord data.
+- **Downbeat sensitivity:** Lowered downbeat peak-picking threshold (0.15 vs 0.3 for beats) to capture weaker downbeat activations from the ONNX model.
+
+### Metrics
+- 625 tests pass, 5 skipped (slow ONNX/hardware).
+
+---
+
 ## 2026-04-03 -- v2.1.0 Metronome Nudge, UI Polish, Library Improvements, Session Persistence
 
 ### Done
