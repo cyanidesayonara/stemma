@@ -27,6 +27,11 @@ STEM_COLORS = STEM_COLORS_DARK
 
 RECORDING_COLOR = "#d4849a"  # Brand rose -- used for recording stem rows
 
+CONFIDENCE_COLORS = {
+    "dark": {"high": "#a6e3a1", "medium": "#f9e2af", "low": "#f38ba8"},
+    "light": {"high": "#40a02b", "medium": "#df8e1d", "low": "#d20f39"},
+}
+
 DARK_COLORS = {
     "base": "#1e1e2e",
     "mantle": "#181825",
@@ -364,6 +369,40 @@ QToolTip {{
     border-radius: 4px;
     padding: 4px 8px;
     font-size: 9pt;
+}}
+
+QFrame#card-frame {{
+    background-color: {c["mantle"]};
+    border: 1px solid {c["surface0"]};
+    border-radius: 6px;
+}}
+
+QSpinBox {{
+    background-color: {c["surface0"]};
+    color: {c["text"]};
+    border: 1px solid {c["surface1"]};
+    border-radius: 4px;
+    padding: 2px 4px;
+    min-height: 24px;
+}}
+
+QSpinBox:focus {{
+    border: 1px solid {c["accent"]};
+}}
+
+QSpinBox::up-button, QSpinBox::down-button {{
+    border: none;
+    width: 16px;
+}}
+
+QWidget#footer {{
+    border-top: 1px solid {c["surface0"]};
+}}
+
+QLabel#copyright {{
+    color: {c["surface1"]};
+    font-size: 9pt;
+    border: none;
 }}
 """
 

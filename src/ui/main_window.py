@@ -8,6 +8,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 import glob
 import json
 import os
+import random
 
 import soundfile as sf
 from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
@@ -49,7 +50,7 @@ from src.library import SongLibrary
 from src.model_manager import ModelManager
 from src.player import MultiTrackPlayer
 from src.ui.animated_logo import AnimatedLogoWidget
-from src.ui.library_panel import LibraryPanel
+from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import PlayerControls, _format_time
 from src.ui.styles import get_colors, get_stylesheet
 from src.version import __version__
@@ -111,6 +112,7 @@ class MainWindow(QMainWindow):
         self._model_manager = model_manager
         self._current_song_id: str | None = None
         self._export_worker: ExportWorker | None = None
+        self._shuffle_queue: list[str] = []
 
         self._settings = QSettings("stemma", "stemma")
         self._theme = self._settings.value("theme", "dark")
@@ -238,13 +240,20 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._on_about)
 
     def _setup_shortcuts(self) -> None:
-        """Register global keyboard shortcuts."""
+        """Register global keyboard shortcuts (layout-independent).
+
+        All shortcuts use letters, numbers, arrows, modifiers, or F-keys
+        only — no symbol keys that vary across keyboard layouts.
+        """
+        # -- Playback --
         QShortcut(QKeySequence(Qt.Key.Key_Space), self).activated.connect(
             self._on_shortcut_play_pause
         )
         QShortcut(QKeySequence(Qt.Key.Key_S), self).activated.connect(
             self._player.stop
         )
+
+        # -- Navigation --
         QShortcut(QKeySequence(Qt.Key.Key_Left), self).activated.connect(
             lambda: self._player.seek(
                 max(0.0, self._player.current_seconds - 5.0)
@@ -253,7 +262,45 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Right), self).activated.connect(
             lambda: self._player.seek(self._player.current_seconds + 5.0)
         )
+        QShortcut(QKeySequence(Qt.Key.Key_Home), self).activated.connect(
+            lambda: self._player.seek(0.0)
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_End), self).activated.connect(
+            lambda: self._player.seek(self._player.total_seconds)
+        )
 
+        # 0-9: Jump to percentage position (YouTube-style).
+        for digit, key in enumerate([
+            Qt.Key.Key_0, Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
+            Qt.Key.Key_4, Qt.Key.Key_5, Qt.Key.Key_6, Qt.Key.Key_7,
+            Qt.Key.Key_8, Qt.Key.Key_9,
+        ]):
+            frac = digit / 10.0
+            QShortcut(QKeySequence(key), self).activated.connect(
+                self._make_position_jumper(frac)
+            )
+
+        # -- Volume --
+        QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(
+            lambda: self._adjust_master_volume(0.05)
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(
+            lambda: self._adjust_master_volume(-0.05)
+        )
+
+        # -- Speed (Shift+Up/Down) --
+        QShortcut(
+            QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_Up), self
+        ).activated.connect(
+            lambda: self._player_controls.cycle_speed(1)
+        )
+        QShortcut(
+            QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_Down), self
+        ).activated.connect(
+            lambda: self._player_controls.cycle_speed(-1)
+        )
+
+        # -- Loop --
         QShortcut(QKeySequence(Qt.Key.Key_A), self).activated.connect(
             self._player_controls.set_loop_a
         )
@@ -264,13 +311,7 @@ class MainWindow(QMainWindow):
             self._player_controls.toggle_looping
         )
 
-        QShortcut(QKeySequence(Qt.Key.Key_BracketRight), self).activated.connect(
-            lambda: self._player_controls.cycle_speed(1)
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_BracketLeft), self).activated.connect(
-            lambda: self._player_controls.cycle_speed(-1)
-        )
-
+        # -- Metronome / Count-in / Recording --
         QShortcut(QKeySequence(Qt.Key.Key_M), self).activated.connect(
             self._player_controls.toggle_metronome
         )
@@ -281,21 +322,48 @@ class MainWindow(QMainWindow):
             self._player_controls.toggle_record
         )
 
+        # -- Stems (Ctrl+1-6) --
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
             Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
             Qt.Key.Key_4, Qt.Key.Key_5, Qt.Key.Key_6,
         ]):
             stem_name = stem_order[i]
-            QShortcut(QKeySequence(key), self).activated.connect(
+            QShortcut(
+                QKeySequence(Qt.Modifier.CTRL | key), self
+            ).activated.connect(
                 self._make_mute_toggler(stem_name)
             )
+
+        # -- Library navigation --
+        QShortcut(QKeySequence(Qt.Key.Key_N), self).activated.connect(
+            lambda: self._advance_song(1)
+        )
+        QShortcut(QKeySequence(Qt.Key.Key_P), self).activated.connect(
+            lambda: self._advance_song(-1)
+        )
+
+        # -- Help --
+        QShortcut(QKeySequence(Qt.Key.Key_F1), self).activated.connect(
+            self._on_keyboard_shortcuts
+        )
 
     def _make_mute_toggler(self, stem_name: str):
         """Return a callable that toggles mute for a stem and updates the UI."""
         def toggle():
             self._player_controls.toggle_stem_mute(stem_name)
         return toggle
+
+    def _make_position_jumper(self, fraction: float):
+        """Return a callable that seeks to *fraction* (0.0–0.9) of the song."""
+        def jump():
+            self._player.seek(self._player.total_seconds * fraction)
+        return jump
+
+    def _adjust_master_volume(self, delta: float) -> None:
+        """Adjust master volume by *delta* (clamped 0.0–2.0)."""
+        new_vol = max(0.0, min(2.0, self._player.master_volume + delta))
+        self._player.set_master_volume(new_vol)
 
     def _on_shortcut_play_pause(self) -> None:
         """Toggle play/pause via keyboard shortcut."""
@@ -354,24 +422,38 @@ class MainWindow(QMainWindow):
         """Show a dialog listing all keyboard shortcuts."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Keyboard Shortcuts")
-        dlg.setMinimumWidth(340)
+        dlg.setMinimumWidth(400)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(20, 20, 20, 20)
 
         shortcuts_text = (
             "<table cellspacing='6'>"
+            "<tr><td colspan='2'><b>Playback</b></td></tr>"
             "<tr><td><b>Space</b></td><td>Play / Pause</td></tr>"
             "<tr><td><b>S</b></td><td>Stop</td></tr>"
+            "<tr><td colspan='2'><b>Navigation</b></td></tr>"
+            "<tr><td><b>0-9</b></td><td>Jump to 0%-90% position</td></tr>"
             "<tr><td><b>Left / Right</b></td><td>Seek -5s / +5s</td></tr>"
+            "<tr><td><b>Home / End</b></td><td>Jump to start / end</td></tr>"
+            "<tr><td colspan='2'><b>Volume &amp; Speed</b></td></tr>"
+            "<tr><td><b>Up / Down</b></td><td>Master volume</td></tr>"
+            "<tr><td><b>Shift+Up / Down</b></td><td>Speed up / down</td></tr>"
+            "<tr><td colspan='2'><b>Stems</b></td></tr>"
+            "<tr><td><b>Ctrl+1-6</b></td><td>Mute/unmute stem</td></tr>"
+            "<tr><td colspan='2'><b>Loop</b></td></tr>"
             "<tr><td><b>A</b></td><td>Set loop point A</td></tr>"
             "<tr><td><b>B</b></td><td>Set loop point B</td></tr>"
             "<tr><td><b>L</b></td><td>Toggle A-B loop</td></tr>"
-            "<tr><td><b>] / [</b></td><td>Speed up / down</td></tr>"
+            "<tr><td colspan='2'><b>Metronome &amp; Recording</b></td></tr>"
             "<tr><td><b>M</b></td><td>Toggle metronome</td></tr>"
             "<tr><td><b>C</b></td><td>Toggle count-in</td></tr>"
             "<tr><td><b>R</b></td><td>Arm/disarm recording</td></tr>"
-            "<tr><td><b>1-6</b></td><td>Mute/unmute stem</td></tr>"
+            "<tr><td colspan='2'><b>Library</b></td></tr>"
+            "<tr><td><b>N</b></td><td>Next song</td></tr>"
+            "<tr><td><b>P</b></td><td>Previous song</td></tr>"
+            "<tr><td colspan='2'><b>Help</b></td></tr>"
+            "<tr><td><b>F1</b></td><td>This dialog</td></tr>"
             "</table>"
         )
         label = QLabel(shortcuts_text)
@@ -514,9 +596,24 @@ class MainWindow(QMainWindow):
                 json.dumps(self._player.chord_sequence),
             )
             self._settings.setValue(f"{prefix}/det_ver", 4)
+        # Library playback mode.
+        self._settings.setValue(
+            "session/repeat_mode", self._library_panel.repeat_mode
+        )
+        self._settings.setValue(
+            "session/shuffle_enabled", self._library_panel.shuffle_enabled
+        )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
+        # Library playback mode.
+        repeat = str(self._settings.value("session/repeat_mode", REPEAT_OFF) or REPEAT_OFF)
+        self._library_panel.set_repeat_mode(repeat)
+        shuffle = self._settings.value("session/shuffle_enabled", False)
+        if isinstance(shuffle, str):
+            shuffle = shuffle.lower() == "true"
+        self._library_panel.set_shuffle_enabled(bool(shuffle))
+
         song_id = self._settings.value("session/song_id", "")
         if not song_id:
             return
@@ -710,6 +807,14 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.previous_requested.connect(
+            lambda: self._advance_song(-1)
+        )
+        self._library_panel.next_requested.connect(
+            lambda: self._advance_song(1)
+        )
+        self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
+        self._player.play_finished.connect(self._on_play_finished)
         self._player.playback_failed.connect(self._on_playback_failed)
         self._player.recording_saved.connect(self._on_recording_saved)
 
@@ -787,6 +892,7 @@ class MainWindow(QMainWindow):
             self._player.stop()
             self._player.load_stems(stem_paths)
             self._current_song_id = song_id
+            self._library_panel.set_playing_song(song_id)
 
             # Restore previously detected values for this song (if any).
             prefix = f"detection/{song_id}"
@@ -894,6 +1000,78 @@ class MainWindow(QMainWindow):
                 row.set_volume_slider(int(volumes[name] * 100))
             if name in nudges:
                 row._nudge_spin.setValue(int(nudges[name]))
+
+    # ------------------------------------------------------------------
+    # Autoplay / Next / Previous
+    # ------------------------------------------------------------------
+
+    def _on_play_finished(self) -> None:
+        """Handle end-of-song: advance based on repeat mode."""
+        mode = self._library_panel.repeat_mode
+        if mode == REPEAT_ONE:
+            self._player.seek(0)
+            self._player.play()
+            return
+        if mode == REPEAT_OFF:
+            return  # Stop — current behaviour.
+        # REPEAT_ALL → advance to the next song.
+        self._advance_song(1, auto=True)
+
+    def _advance_song(self, direction: int = 1, auto: bool = False) -> None:
+        """Move to the next or previous song in the library.
+
+        *direction*: +1 for next, -1 for previous.
+        *auto*: True when triggered by autoplay (obeys repeat boundary rules).
+        """
+        next_id = self._get_next_song_id(direction)
+        if next_id is None:
+            return
+        self._library_panel.select_song(next_id)
+        # select_song triggers _on_song_selected → loads stems.
+        # Delay play() slightly so stems finish loading.
+        QTimer.singleShot(100, self._player.play)
+
+    def _get_next_song_id(self, direction: int = 1) -> str | None:
+        """Resolve the next song ID respecting shuffle and repeat."""
+        songs = self._library_panel.song_ids_in_order()
+        if not songs:
+            return None
+
+        # Shuffle: return from the shuffled queue (forward only).
+        if self._library_panel.shuffle_enabled and direction == 1:
+            return self._pop_shuffle_queue(songs)
+
+        # Sequential: find current index and step.
+        if self._current_song_id not in songs:
+            return songs[0] if songs else None
+        idx = songs.index(self._current_song_id)
+        next_idx = idx + direction
+        if self._library_panel.repeat_mode == REPEAT_ALL:
+            next_idx = next_idx % len(songs)
+        if 0 <= next_idx < len(songs):
+            return songs[next_idx]
+        return None
+
+    def _pop_shuffle_queue(self, songs: list[str]) -> str | None:
+        """Pop the next song from the shuffle queue, regenerating if needed."""
+        # Filter out stale IDs and the current song.
+        song_set = set(songs)
+        self._shuffle_queue = [
+            sid for sid in self._shuffle_queue
+            if sid in song_set and sid != self._current_song_id
+        ]
+        if not self._shuffle_queue:
+            candidates = [sid for sid in songs if sid != self._current_song_id]
+            if not candidates:
+                return None
+            random.shuffle(candidates)
+            self._shuffle_queue = candidates
+        return self._shuffle_queue.pop(0)
+
+    def _on_shuffle_toggled(self, enabled: bool) -> None:
+        """Reset the shuffle queue when shuffle is toggled."""
+        if not enabled:
+            self._shuffle_queue.clear()
 
     def _on_recording_saved(self, path: str) -> None:
         """Handle a newly saved recording: load it and add a UI row."""

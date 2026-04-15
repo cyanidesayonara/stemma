@@ -32,6 +32,7 @@ from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import (
+    CONFIDENCE_COLORS,
     DARK_COLORS,
     LIGHT_COLORS,
     RECORDING_COLOR,
@@ -535,10 +536,8 @@ class PlayerControls(QWidget):
         empty_layout.addWidget(self._empty_logo, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._hint_label = QLabel("Drop an audio file or use File > Import")
+        self._hint_label.setObjectName("subtle-label")
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hint_label.setStyleSheet(
-            f"color: {colors['surface2']}; margin-top: 0px;"
-        )
         empty_layout.addWidget(self._hint_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         empty_layout.addStretch(1)
@@ -559,6 +558,7 @@ class PlayerControls(QWidget):
         self._stop_icon = _make_icon(_draw_stop, icon_color)
 
         self._play_btn = QPushButton()
+        self._play_btn.setObjectName("icon-btn")
         self._play_btn.setIcon(self._play_icon)
         self._play_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._play_btn.setFixedSize(36, 36)
@@ -568,6 +568,7 @@ class PlayerControls(QWidget):
         transport.addWidget(self._play_btn)
 
         self._stop_btn = QPushButton()
+        self._stop_btn.setObjectName("icon-btn")
         self._stop_btn.setIcon(self._stop_icon)
         self._stop_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._stop_btn.setFixedSize(36, 36)
@@ -580,6 +581,7 @@ class PlayerControls(QWidget):
             _draw_record, QColor(RECORDING_COLOR)
         )
         self._record_btn = QPushButton()
+        self._record_btn.setObjectName("icon-btn")
         self._record_btn.setIcon(self._record_icon)
         self._record_btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._record_btn.setFixedSize(36, 36)
@@ -651,12 +653,8 @@ class PlayerControls(QWidget):
 
         # -- Waveform display --
         self._waveform_frame = QFrame()
+        self._waveform_frame.setObjectName("card-frame")
         self._waveform_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._waveform_frame.setStyleSheet(
-            f"QFrame {{ background-color: {colors['mantle']}; "
-            f"border: 1px solid {colors['surface0']}; "
-            f"border-radius: 6px; }}"
-        )
         wf_layout = QVBoxLayout(self._waveform_frame)
         wf_layout.setContentsMargins(4, 4, 4, 4)
 
@@ -699,13 +697,14 @@ class PlayerControls(QWidget):
         loop_speed_bar.addWidget(self._loop_clear_btn)
 
         self._loop_label = QLabel("")
-        self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
+        self._loop_label.setObjectName("subtle-label")
         loop_speed_bar.addWidget(self._loop_label)
 
         self._key_label = QLabel("")
         self._key_label.setTextFormat(Qt.TextFormat.RichText)
         self._key_label.setToolTip("Detected musical key (double-click to re-detect)")
         self._key_label.setAccessibleName("Detected key")
+        self._key_label.setObjectName("subtle-label")
         self._key_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._key_label.installEventFilter(self)
         loop_speed_bar.addWidget(self._key_label)
@@ -717,7 +716,7 @@ class PlayerControls(QWidget):
         loop_speed_bar.addWidget(self._chord_label)
 
         self._speed_status = QLabel("")
-        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
+        self._speed_status.setObjectName("subtle-label")
         loop_speed_bar.addWidget(self._speed_status)
 
         loop_speed_bar.addStretch()
@@ -830,6 +829,7 @@ class PlayerControls(QWidget):
             "Detected tempo — suggestion only (double-click to re-detect)"
         )
         self._detected_bpm_label.setAccessibleName("Detected BPM")
+        self._detected_bpm_label.setObjectName("subtle-label")
         self._detected_bpm_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._detected_bpm_label.installEventFilter(self)
         metro_ci_bar.addWidget(self._detected_bpm_label)
@@ -843,12 +843,8 @@ class PlayerControls(QWidget):
         controls_layout.addWidget(self._mixer_label)
 
         self._stems_frame = QFrame()
+        self._stems_frame.setObjectName("card-frame")
         self._stems_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._stems_frame.setStyleSheet(
-            f"QFrame {{ background-color: {colors['mantle']}; "
-            f"border: 1px solid {colors['surface0']}; "
-            f"border-radius: 6px; }}"
-        )
         self._stem_container = QVBoxLayout(self._stems_frame)
         self._stem_container.setContentsMargins(6, 4, 6, 4)
         self._stem_container.setSpacing(2)
@@ -860,12 +856,8 @@ class PlayerControls(QWidget):
         controls_layout.addWidget(self._recordings_label)
 
         self._recordings_frame = QFrame()
+        self._recordings_frame.setObjectName("card-frame")
         self._recordings_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._recordings_frame.setStyleSheet(
-            f"QFrame {{ background-color: {colors['mantle']}; "
-            f"border: 1px solid {colors['surface0']}; "
-            f"border-radius: 6px; }}"
-        )
         self._recordings_frame.setVisible(False)
         self._recordings_container = QVBoxLayout(self._recordings_frame)
         self._recordings_container.setContentsMargins(6, 4, 6, 4)
@@ -879,19 +871,15 @@ class PlayerControls(QWidget):
 
         # -- Footer bar --
         self._footer_widget = QWidget()
+        self._footer_widget.setObjectName("footer")
         self._footer_widget.setFixedHeight(44)
-        self._footer_widget.setStyleSheet(
-            f"border-top: 1px solid {colors['surface0']};"
-        )
         footer_layout = QHBoxLayout(self._footer_widget)
         footer_layout.setContentsMargins(0, 5, 0, 2)
 
         self._copyright_label = QLabel("\u00A9 2026 stemma")
+        self._copyright_label.setObjectName("copyright")
         self._copyright_label.setFixedHeight(36)
         self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self._copyright_label.setStyleSheet(
-            f"color: {colors['surface1']}; font-size: 9pt; border: none;"
-        )
         footer_layout.addWidget(self._copyright_label)
 
         footer_layout.addStretch()
@@ -925,12 +913,6 @@ class PlayerControls(QWidget):
         self._count_in_repeats_cb.setIcon(
             _make_toggle_icon(_draw_repeat, icon_color))
 
-        # Inline-styled labels
-        self._hint_label.setStyleSheet(
-            f"color: {colors['surface2']}; margin-top: 0px;"
-        )
-        self._loop_label.setStyleSheet(f"color: {colors['surface2']};")
-        self._speed_status.setStyleSheet(f"color: {colors['surface2']};")
         # Re-apply badge style and regenerate inline HTML colours for
         # detection labels — the old Rich Text contains hardcoded colour
         # spans from the previous theme.
@@ -957,26 +939,12 @@ class PlayerControls(QWidget):
             self._chord_label.setText(
                 self._badge_html("Chord:", chord if chord else "--")
             )
-        self._footer_widget.setStyleSheet(
-            f"border-top: 1px solid {colors['surface0']};"
-        )
-        self._copyright_label.setStyleSheet(
-            f"color: {colors['surface1']}; font-size: 9pt; border: none;"
-        )
 
         # Animated logos
         self._empty_logo.set_theme(theme)
         self._arpeggio_label.set_theme(theme)
 
-        # Waveform frame and colors
-        frame_style = (
-            f"QFrame {{ background-color: {colors['mantle']}; "
-            f"border: 1px solid {colors['surface0']}; "
-            f"border-radius: 6px; }}"
-        )
-        self._waveform_frame.setStyleSheet(frame_style)
-        self._stems_frame.setStyleSheet(frame_style)
-        self._recordings_frame.setStyleSheet(frame_style)
+        # Waveform colors
         self._waveform.set_theme_colors(colors)
 
         for row in self._stem_rows.values():
@@ -1501,19 +1469,9 @@ class PlayerControls(QWidget):
         self._detection_worker = worker
         worker.start()
 
-    # Confidence label colours — Catppuccin Mocha semantic palette.
-    _CONF_COLORS_DARK = {
-        "high": "#a6e3a1", "medium": "#f9e2af", "low": "#f38ba8",
-    }
-    _CONF_COLORS_LIGHT = {
-        "high": "#40a02b", "medium": "#df8e1d", "low": "#d20f39",
-    }
-
     def _conf_color(self, level: str) -> str:
         """Return the themed colour string for a confidence level."""
-        if self._theme == "light":
-            return self._CONF_COLORS_LIGHT.get(level, "")
-        return self._CONF_COLORS_DARK.get(level, "")
+        return CONFIDENCE_COLORS[self._theme].get(level, "")
 
     def _badge_style(self) -> str:
         """Return the CSS stylesheet for a detection badge label."""
