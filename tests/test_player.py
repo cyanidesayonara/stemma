@@ -1068,3 +1068,33 @@ class TestChordSequence:
         assert len(player.chord_sequence) == 1
         player.load_stems(mock_stems)
         assert player.chord_sequence == []
+
+
+class TestMasterVolume:
+    """Master volume multiplier for all stems."""
+
+    def test_default_master_volume_is_unity(self):
+        player = MultiTrackPlayer()
+        assert player.master_volume == 1.0
+
+    def test_set_master_volume(self):
+        player = MultiTrackPlayer()
+        player.set_master_volume(0.5)
+        assert player.master_volume == 0.5
+
+    def test_master_volume_clamps_below_zero(self):
+        player = MultiTrackPlayer()
+        player.set_master_volume(-0.5)
+        assert player.master_volume == 0.0
+
+    def test_master_volume_clamps_above_two(self):
+        player = MultiTrackPlayer()
+        player.set_master_volume(5.0)
+        assert player.master_volume == 2.0
+
+    def test_master_volume_accepts_boundary_values(self):
+        player = MultiTrackPlayer()
+        player.set_master_volume(0.0)
+        assert player.master_volume == 0.0
+        player.set_master_volume(2.0)
+        assert player.master_volume == 2.0

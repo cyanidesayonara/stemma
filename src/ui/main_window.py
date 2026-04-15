@@ -21,13 +21,16 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -113,6 +116,8 @@ class MainWindow(QMainWindow):
         self._current_song_id: str | None = None
         self._export_worker: ExportWorker | None = None
         self._shuffle_queue: list[str] = []
+        self._volume_toast: QLabel | None = None
+        self._volume_toast_timer: QTimer | None = None
 
         self._settings = QSettings("stemma", "stemma")
         self._theme = self._settings.value("theme", "dark")
@@ -244,30 +249,28 @@ class MainWindow(QMainWindow):
 
         All shortcuts use letters, numbers, arrows, modifiers, or F-keys
         only — no symbol keys that vary across keyboard layouts.
+
+        Shortcuts are guarded: they don't fire when the user is typing
+        into a text field, spinbox, or editable combobox. Modifier
+        combos (Ctrl+1-6, Shift+Up/Down) and F-keys bypass the guard
+        since they can't collide with normal text entry.
         """
+        g = self._guarded_shortcut  # Guarded: skipped when text input focused.
+        u = self._unguarded_shortcut  # Unguarded: always fires.
+
         # -- Playback --
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self).activated.connect(
-            self._on_shortcut_play_pause
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_S), self).activated.connect(
-            self._player.stop
-        )
+        g(Qt.Key.Key_Space, self._on_shortcut_play_pause)
+        g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self).activated.connect(
-            lambda: self._player.seek(
-                max(0.0, self._player.current_seconds - 5.0)
-            )
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self).activated.connect(
-            lambda: self._player.seek(self._player.current_seconds + 5.0)
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_Home), self).activated.connect(
-            lambda: self._player.seek(0.0)
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_End), self).activated.connect(
-            lambda: self._player.seek(self._player.total_seconds)
-        )
+        g(Qt.Key.Key_Left, lambda: self._player.seek(
+            max(0.0, self._player.current_seconds - 5.0)
+        ))
+        g(Qt.Key.Key_Right, lambda: self._player.seek(
+            self._player.current_seconds + 5.0
+        ))
+        g(Qt.Key.Key_Home, lambda: self._player.seek(0.0))
+        g(Qt.Key.Key_End, lambda: self._player.seek(self._player.total_seconds))
 
         # 0-9: Jump to percentage position (YouTube-style).
         for digit, key in enumerate([
@@ -275,77 +278,68 @@ class MainWindow(QMainWindow):
             Qt.Key.Key_4, Qt.Key.Key_5, Qt.Key.Key_6, Qt.Key.Key_7,
             Qt.Key.Key_8, Qt.Key.Key_9,
         ]):
-            frac = digit / 10.0
-            QShortcut(QKeySequence(key), self).activated.connect(
-                self._make_position_jumper(frac)
-            )
+            g(key, self._make_position_jumper(digit / 10.0))
 
         # -- Volume --
-        QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(
-            lambda: self._adjust_master_volume(0.05)
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(
-            lambda: self._adjust_master_volume(-0.05)
-        )
+        g(Qt.Key.Key_Up, lambda: self._adjust_master_volume(0.05))
+        g(Qt.Key.Key_Down, lambda: self._adjust_master_volume(-0.05))
 
-        # -- Speed (Shift+Up/Down) --
-        QShortcut(
-            QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_Up), self
-        ).activated.connect(
-            lambda: self._player_controls.cycle_speed(1)
-        )
-        QShortcut(
-            QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_Down), self
-        ).activated.connect(
-            lambda: self._player_controls.cycle_speed(-1)
-        )
+        # -- Speed (Shift+Up/Down) -- unguarded: modifier combos can't
+        # collide with text entry.
+        u(Qt.Modifier.SHIFT | Qt.Key.Key_Up,
+          lambda: self._player_controls.cycle_speed(1))
+        u(Qt.Modifier.SHIFT | Qt.Key.Key_Down,
+          lambda: self._player_controls.cycle_speed(-1))
 
         # -- Loop --
-        QShortcut(QKeySequence(Qt.Key.Key_A), self).activated.connect(
-            self._player_controls.set_loop_a
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_B), self).activated.connect(
-            self._player_controls.set_loop_b
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_L), self).activated.connect(
-            self._player_controls.toggle_looping
-        )
+        g(Qt.Key.Key_A, self._player_controls.set_loop_a)
+        g(Qt.Key.Key_B, self._player_controls.set_loop_b)
+        g(Qt.Key.Key_L, self._player_controls.toggle_looping)
 
         # -- Metronome / Count-in / Recording --
-        QShortcut(QKeySequence(Qt.Key.Key_M), self).activated.connect(
-            self._player_controls.toggle_metronome
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_C), self).activated.connect(
-            self._player_controls.toggle_count_in
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_R), self).activated.connect(
-            self._player_controls.toggle_record
-        )
+        g(Qt.Key.Key_M, self._player_controls.toggle_metronome)
+        g(Qt.Key.Key_C, self._player_controls.toggle_count_in)
+        g(Qt.Key.Key_R, self._player_controls.toggle_record)
 
-        # -- Stems (Ctrl+1-6) --
+        # -- Stems (Ctrl+1-6) -- unguarded: Ctrl+digit isn't normal typing.
         stem_order = list(ALL_STEM_NAMES)
         for i, key in enumerate([
             Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3,
             Qt.Key.Key_4, Qt.Key.Key_5, Qt.Key.Key_6,
         ]):
             stem_name = stem_order[i]
-            QShortcut(
-                QKeySequence(Qt.Modifier.CTRL | key), self
-            ).activated.connect(
-                self._make_mute_toggler(stem_name)
-            )
+            u(Qt.Modifier.CTRL | key, self._make_mute_toggler(stem_name))
 
         # -- Library navigation --
-        QShortcut(QKeySequence(Qt.Key.Key_N), self).activated.connect(
-            lambda: self._advance_song(1)
-        )
-        QShortcut(QKeySequence(Qt.Key.Key_P), self).activated.connect(
-            lambda: self._advance_song(-1)
-        )
+        g(Qt.Key.Key_N, lambda: self._advance_song(1))
+        g(Qt.Key.Key_P, lambda: self._advance_song(-1))
 
-        # -- Help --
-        QShortcut(QKeySequence(Qt.Key.Key_F1), self).activated.connect(
-            self._on_keyboard_shortcuts
+        # -- Help -- unguarded: F-keys don't collide with text entry.
+        u(Qt.Key.Key_F1, self._on_keyboard_shortcuts)
+
+    def _guarded_shortcut(self, key, handler) -> None:
+        """Register *handler* for *key*, skipped when a text input is focused.
+
+        Prevents single-letter/digit shortcuts from stealing keystrokes
+        meant for the library search box, spinboxes, or editable combos.
+        """
+        def wrapped():
+            if self._text_input_has_focus():
+                return
+            handler()
+        QShortcut(QKeySequence(key), self).activated.connect(wrapped)
+
+    def _unguarded_shortcut(self, key, handler) -> None:
+        """Register *handler* for *key*. Fires regardless of focus."""
+        QShortcut(QKeySequence(key), self).activated.connect(handler)
+
+    def _text_input_has_focus(self) -> bool:
+        """True when focus is on a widget that should absorb key input."""
+        w = QApplication.focusWidget()
+        if w is None:
+            return False
+        return isinstance(w, (QLineEdit, QAbstractSpinBox)) or (
+            isinstance(w, QComboBox) and w.isEditable()
         )
 
     def _make_mute_toggler(self, stem_name: str):
@@ -364,6 +358,44 @@ class MainWindow(QMainWindow):
         """Adjust master volume by *delta* (clamped 0.0–2.0)."""
         new_vol = max(0.0, min(2.0, self._player.master_volume + delta))
         self._player.set_master_volume(new_vol)
+        self._show_volume_toast(new_vol)
+
+    def _show_volume_toast(self, volume: float) -> None:
+        """Show a transient overlay with the current master volume."""
+        if self._volume_toast is None:
+            toast = QLabel(self)
+            toast.setObjectName("volume-toast")
+            toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            toast.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            # Catppuccin mocha crust with bright text — readable on both
+            # themes without extra theme plumbing.
+            toast.setStyleSheet(
+                "background-color: rgba(17, 17, 27, 220);"
+                "color: #cdd6f4;"
+                "padding: 6px 14px;"
+                "border-radius: 6px;"
+                "font-size: 11pt;"
+            )
+            self._volume_toast = toast
+
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(1500)
+            timer.timeout.connect(self._volume_toast.hide)
+            self._volume_toast_timer = timer
+
+        pct = int(round(volume * 100))
+        self._volume_toast.setText(f"Volume: {pct}%")
+        self._volume_toast.adjustSize()
+        # Top-center of the main window.
+        x = (self.width() - self._volume_toast.width()) // 2
+        y = 24
+        self._volume_toast.move(x, y)
+        self._volume_toast.show()
+        self._volume_toast.raise_()
+        self._volume_toast_timer.start()
 
     def _on_shortcut_play_pause(self) -> None:
         """Toggle play/pause via keyboard shortcut."""
@@ -530,6 +562,9 @@ class MainWindow(QMainWindow):
             "session/volumes", json.dumps(self._player.volumes)
         )
         self._settings.setValue(
+            "session/master_volume", self._player.master_volume
+        )
+        self._settings.setValue(
             "session/nudge_offsets",
             json.dumps(self._player.nudge_offsets),
         )
@@ -646,6 +681,15 @@ class MainWindow(QMainWindow):
             nudge_offsets = {}
 
         self._player_controls.restore_stem_state(muted, soloed, volumes)
+
+        # Master volume
+        try:
+            master_vol = float(
+                self._settings.value("session/master_volume", 1.0)
+            )
+        except (TypeError, ValueError):
+            master_vol = 1.0
+        self._player.set_master_volume(master_vol)
 
         # Loop points
         try:
@@ -1015,24 +1059,30 @@ class MainWindow(QMainWindow):
         if mode == REPEAT_OFF:
             return  # Stop — current behaviour.
         # REPEAT_ALL → advance to the next song.
-        self._advance_song(1, auto=True)
+        self._advance_song(1)
 
-    def _advance_song(self, direction: int = 1, auto: bool = False) -> None:
-        """Move to the next or previous song in the library.
+    def _advance_song(self, direction: int = 1) -> None:
+        """Move to the next or previous song in the library and play it.
 
         *direction*: +1 for next, -1 for previous.
-        *auto*: True when triggered by autoplay (obeys repeat boundary rules).
+
+        Stem loading (via `_on_song_selected`) is synchronous, so by the
+        time `select_song` returns the player is ready to start.
         """
         next_id = self._get_next_song_id(direction)
         if next_id is None:
             return
         self._library_panel.select_song(next_id)
-        # select_song triggers _on_song_selected → loads stems.
-        # Delay play() slightly so stems finish loading.
-        QTimer.singleShot(100, self._player.play)
+        self._player.play()
 
     def _get_next_song_id(self, direction: int = 1) -> str | None:
-        """Resolve the next song ID respecting shuffle and repeat."""
+        """Resolve the next song ID respecting shuffle and repeat.
+
+        Shuffle only affects *forward* navigation (direction == 1).
+        Pressing Previous during shuffle falls through to sequential
+        behaviour — matching YouTube / Spotify semantics where "back"
+        means "the song I was just on", not "back in shuffle order".
+        """
         songs = self._library_panel.song_ids_in_order()
         if not songs:
             return None

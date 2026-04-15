@@ -276,3 +276,180 @@ class TestNextSongResolution:
         for _ in range(10):
             result = MainWindow._pop_shuffle_queue(stub, [s.id for s in songs])
             assert result != "2"
+
+    def test_previous_falls_through_to_sequential_during_shuffle(self, app):
+        """Pressing Previous during shuffle uses sequential order (YouTube-style)."""
+        from src.ui.main_window import MainWindow
+
+        songs = _make_songs(3)
+        stub = self._make_main_window_stub(songs, "2", REPEAT_ALL, True)
+        # direction=-1 should NOT hit the shuffle queue.
+        result = MainWindow._get_next_song_id(stub, direction=-1)
+        assert result == "1"
+
+    def test_shuffle_toggle_off_clears_queue(self, app):
+        """Disabling shuffle on MainWindow clears the pending queue."""
+        from src.ui.main_window import MainWindow
+
+        songs = _make_songs(3)
+        stub = self._make_main_window_stub(songs, "1", REPEAT_ALL, True)
+        # Prime the queue.
+        MainWindow._pop_shuffle_queue(stub, [s.id for s in songs])
+        assert stub._shuffle_queue  # non-empty after first pop
+        # Toggle off — should clear.
+        MainWindow._on_shuffle_toggled(stub, False)
+        assert stub._shuffle_queue == []
+
+
+# ------------------------------------------------------------------
+# Master volume via shortcut
+# ------------------------------------------------------------------
+
+
+class TestMasterVolumeAdjust:
+    """_adjust_master_volume delegates to the player and clamps correctly."""
+
+    def test_adjust_adds_delta(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.master_volume = 1.0
+        MainWindow._adjust_master_volume(stub, 0.1)
+        stub._player.set_master_volume.assert_called_once_with(
+            pytest.approx(1.1)
+        )
+
+    def test_adjust_clamps_upper(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.master_volume = 1.95
+        MainWindow._adjust_master_volume(stub, 0.1)
+        # Caller clamps to 2.0 before calling set_master_volume.
+        stub._player.set_master_volume.assert_called_once_with(2.0)
+
+    def test_adjust_clamps_lower(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.master_volume = 0.02
+        MainWindow._adjust_master_volume(stub, -0.1)
+        stub._player.set_master_volume.assert_called_once_with(0.0)
+
+    def test_adjust_shows_toast(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.master_volume = 0.5
+        MainWindow._adjust_master_volume(stub, 0.1)
+        stub._show_volume_toast.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# Autoplay on play_finished
+# ------------------------------------------------------------------
+
+
+class TestOnPlayFinished:
+    """Autoplay behaviour depends on the current repeat mode."""
+
+    def _make_stub(self, mode):
+        panel = LibraryPanel(_make_library(_make_songs(3)))
+        panel.set_repeat_mode(mode)
+        stub = MagicMock()
+        stub._library_panel = panel
+        stub._player = MagicMock()
+        return stub
+
+    def test_repeat_one_seeks_and_plays(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = self._make_stub(REPEAT_ONE)
+        MainWindow._on_play_finished(stub)
+        stub._player.seek.assert_called_once_with(0)
+        stub._player.play.assert_called_once()
+        stub._advance_song.assert_not_called()
+
+    def test_repeat_off_is_noop(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = self._make_stub(REPEAT_OFF)
+        MainWindow._on_play_finished(stub)
+        stub._player.seek.assert_not_called()
+        stub._player.play.assert_not_called()
+        stub._advance_song.assert_not_called()
+
+    def test_repeat_all_advances_forward(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = self._make_stub(REPEAT_ALL)
+        MainWindow._on_play_finished(stub)
+        stub._advance_song.assert_called_once_with(1)
+
+
+# ------------------------------------------------------------------
+# Shortcut focus guard
+# ------------------------------------------------------------------
+
+
+class TestShortcutFocusGuard:
+    """_text_input_has_focus returns True only for text-entry widgets."""
+
+    def test_no_focus_returns_false(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        with patch(
+            "src.ui.main_window.QApplication.focusWidget", return_value=None
+        ):
+            assert MainWindow._text_input_has_focus(stub) is False
+
+    def test_line_edit_focus_returns_true(self, app):
+        from PySide6.QtWidgets import QLineEdit
+
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        w = QLineEdit()
+        with patch(
+            "src.ui.main_window.QApplication.focusWidget", return_value=w
+        ):
+            assert MainWindow._text_input_has_focus(stub) is True
+
+    def test_spinbox_focus_returns_true(self, app):
+        from PySide6.QtWidgets import QSpinBox
+
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        w = QSpinBox()
+        with patch(
+            "src.ui.main_window.QApplication.focusWidget", return_value=w
+        ):
+            assert MainWindow._text_input_has_focus(stub) is True
+
+    def test_non_editable_combo_returns_false(self, app):
+        from PySide6.QtWidgets import QComboBox
+
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        w = QComboBox()
+        w.setEditable(False)
+        with patch(
+            "src.ui.main_window.QApplication.focusWidget", return_value=w
+        ):
+            assert MainWindow._text_input_has_focus(stub) is False
+
+    def test_editable_combo_returns_true(self, app):
+        from PySide6.QtWidgets import QComboBox
+
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        w = QComboBox()
+        w.setEditable(True)
+        with patch(
+            "src.ui.main_window.QApplication.focusWidget", return_value=w
+        ):
+            assert MainWindow._text_input_has_focus(stub) is True

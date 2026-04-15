@@ -65,9 +65,15 @@ def _make_icon(draw_fn, color: QColor, size: int = _CTRL_ICON) -> QIcon:
 
 
 def _make_toggle_icon(draw_fn, normal_color: QColor,
+                      checked_color: QColor | None = None,
                       size: int = _CTRL_ICON) -> QIcon:
-    """Icon with distinct normal and checked pixmaps."""
-    checked_color = QColor("#1e1e2e")
+    """Icon with distinct normal and checked pixmaps.
+
+    *checked_color*: color used when the button is in checked state.
+    Defaults to the theme base color (dark text on the accent fill).
+    """
+    if checked_color is None:
+        checked_color = QColor(DARK_COLORS["base"])
     icon = QIcon()
     for color, state in [
         (normal_color, QIcon.State.Off),
@@ -198,10 +204,12 @@ class _SongDelegate(QStyledItemDelegate):
     def __init__(
         self, parent=None, separator_color: str = DARK_COLORS["surface1"],
         accent_color: str = DARK_COLORS["accent"],
+        selected_text_color: str = DARK_COLORS["base"],
     ):
         super().__init__(parent)
         self._separator_color = QColor(separator_color)
         self._accent_color = QColor(accent_color)
+        self._selected_text_color = QColor(selected_text_color)
         self._playing_song_id: str | None = None
 
     def set_separator_color(self, color: str) -> None:
@@ -209,6 +217,9 @@ class _SongDelegate(QStyledItemDelegate):
 
     def set_accent_color(self, color: str) -> None:
         self._accent_color = QColor(color)
+
+    def set_selected_text_color(self, color: str) -> None:
+        self._selected_text_color = QColor(color)
 
     def set_playing_song(self, song_id: str | None) -> None:
         """Set the currently playing song ID for the 'now playing' indicator."""
@@ -225,7 +236,7 @@ class _SongDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if selected:
             painter.fillRect(option.rect, self._accent_color)
-            text_color = QColor("#1e1e2e")  # Dark text on accent.
+            text_color = QColor(self._selected_text_color)
             sub_color = QColor(text_color)
             sub_color.setAlphaF(0.7)
         else:
@@ -335,7 +346,7 @@ class EditSongDialog(QDialog):
 REPEAT_OFF = "off"
 REPEAT_ALL = "all"
 REPEAT_ONE = "one"
-_REPEAT_CYCLE = [REPEAT_OFF, REPEAT_ALL, REPEAT_ONE]
+_REPEAT_CYCLE = (REPEAT_OFF, REPEAT_ALL, REPEAT_ONE)
 
 
 class LibraryPanel(QWidget):
@@ -395,6 +406,7 @@ class LibraryPanel(QWidget):
         ctrl_bar.setSpacing(4)
 
         icon_color = QColor(DARK_COLORS["text"])
+        checked_icon_color = QColor(DARK_COLORS["base"])
 
         # Repeat (cycles: off → all → one)
         self._repeat_btn = QPushButton()
@@ -420,7 +432,7 @@ class LibraryPanel(QWidget):
         self._shuffle_btn.setToolTip("Shuffle: off")
         self._shuffle_btn.setAccessibleName("Shuffle")
         self._shuffle_btn.setIcon(
-            _make_toggle_icon(_draw_shuffle, icon_color)
+            _make_toggle_icon(_draw_shuffle, icon_color, checked_icon_color)
         )
         self._shuffle_btn.setIconSize(QSize(_CTRL_ICON, _CTRL_ICON))
         self._shuffle_btn.toggled.connect(self._on_shuffle_toggled)
@@ -500,16 +512,13 @@ class LibraryPanel(QWidget):
     def _update_repeat_ui(self) -> None:
         self._repeat_btn.setIcon(self._repeat_icons[self._repeat_mode])
         labels = {REPEAT_OFF: "off", REPEAT_ALL: "all", REPEAT_ONE: "one"}
-        tip = f"Repeat: {labels[self._repeat_mode]}"
-        self._repeat_btn.setToolTip(tip)
-        # Visual: when active (all/one), show as "checked" style.
-        self._repeat_btn.setStyleSheet(
-            "" if self._repeat_mode == REPEAT_OFF else ""
-        )
-        # Use the checked property to style active state via QSS.
+        self._repeat_btn.setToolTip(f"Repeat: {labels[self._repeat_mode]}")
+        # Use the checked property to style active state via QSS, but
+        # keep the button non-checkable so each click cycles modes
+        # instead of toggling.
         self._repeat_btn.setCheckable(True)
         self._repeat_btn.setChecked(self._repeat_mode != REPEAT_OFF)
-        self._repeat_btn.setCheckable(False)  # Prevent toggle on next click.
+        self._repeat_btn.setCheckable(False)
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"
@@ -532,8 +541,10 @@ class LibraryPanel(QWidget):
         """Update delegate colors and control icons for the current theme."""
         self._song_delegate.set_separator_color(colors["surface1"])
         self._song_delegate.set_accent_color(colors["accent"])
+        self._song_delegate.set_selected_text_color(colors["base"])
 
         icon_color = QColor(colors["text"])
+        checked_icon_color = QColor(colors["base"])
         self._repeat_icons = {
             REPEAT_OFF: _make_icon(_draw_repeat, icon_color),
             REPEAT_ALL: _make_icon(_draw_repeat, icon_color),
@@ -541,7 +552,7 @@ class LibraryPanel(QWidget):
         }
         self._update_repeat_ui()
         self._shuffle_btn.setIcon(
-            _make_toggle_icon(_draw_shuffle, icon_color)
+            _make_toggle_icon(_draw_shuffle, icon_color, checked_icon_color)
         )
         self._prev_btn.setIcon(_make_icon(_draw_prev, icon_color))
         self._next_btn.setIcon(_make_icon(_draw_next, icon_color))
