@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-17 -- v2.3.0 Library, Polish & Shortcuts
+
+### Done
+- **Library playback controls:** Repeat (off / all / one), shuffle with randomized queue, previous/next buttons. Autoplay on track end respects the repeat mode. Now-playing indicator (accent bar) on the currently loaded song in the list.
+- **Keyboard shortcuts overhaul (#119):** YouTube-style controls, layout-independent. Zero symbol keys — works on Nordic/Finnish and all layouts. `0-9` jumps to 0%-90% position, `Left/Right` seek ±5s, `Home/End` start/end, `Up/Down` master volume ±5%, `Shift+Up/Down` speed cycle (replaces `[`/`]`), `Ctrl+1-6` stem mute toggle (replaces bare `1-6`), `N/P` next/previous song, `F1` shortcuts dialog. Focus guard prevents shortcuts firing while typing in the search box or spinboxes.
+- **Master volume:** New gain multiplier on `MultiTrackPlayer`, applied in the audio callback alongside per-stem volumes. Persisted in session. Changes show a toast overlay.
+- **UI polish pass:** Centralised styling via QSS objectName selectors (`card-frame`, `icon-btn`, `subtle-label`, `footer`, `copyright`, `QSpinBox`). Removed ~20 hardcoded `setStyleSheet` calls. Transport buttons (play/stop/record) share `icon-btn` styling with stem buttons. Confidence colours and delegate defaults moved to `styles.py`.
+- **Teal contrast fix:** Introduced `styles.ON_ACCENT = "#11111b"` (near-black) as the foreground token for anything on the teal accent fill. Fixes poor contrast in light mode (previously used theme.base, which is near-white in light mode). Applied to checked toggle buttons, selected library rows, repeat/shuffle icons on teal, and stem mute/solo icons.
+- **Shortcuts dialog refresh:** Grouped by category with accent-coloured section headers and hairline dividers.
+- **Session persistence:** `repeat_mode`, `shuffle_enabled`, and `master_volume` save and restore across app restarts.
+
+### Metrics
+- 670 tests pass, 5 skipped (slow ONNX/hardware).
+
+---
+
 ## 2026-04-14 -- v2.2.0 Chord Detection & beat_this ONNX Model
 
 ### Done

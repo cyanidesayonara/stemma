@@ -124,6 +124,7 @@ class MultiTrackPlayer(QObject):
         self._muted_stems: set[str] = set()
         self._soloed_stems: set[str] = set()
         self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
+        self._master_volume: float = 1.0     # Master gain, 0.0–2.0
         self._applied_gains: dict[str, float] = {}  # Last gain per stem (for ramping)
         self._active_stems_cache: list[str] | None = None
 
@@ -804,6 +805,19 @@ class MultiTrackPlayer(QObject):
         """Return the sample rate of loaded audio."""
         return self._sample_rate
 
+    @property
+    def master_volume(self) -> float:
+        """Return the master volume (0.0–2.0)."""
+        return self._master_volume
+
+    def set_master_volume(self, volume: float) -> None:
+        """Set the master volume (gain multiplier for all stems).
+
+        Args:
+            volume: Gain from 0.0 (silent) to 2.0 (double). Clamped.
+        """
+        self._master_volume = max(0.0, min(volume, 2.0))
+
     def set_volume(self, stem_name: str, volume: float) -> None:
         """Set the volume (gain) for a stem.
 
@@ -1213,7 +1227,7 @@ class MultiTrackPlayer(QObject):
 
                 active_set = set(active_stems)
                 for name, stem_data in self._stems.items():
-                    target = (self._volumes.get(name, 1.0)
+                    target = (self._volumes.get(name, 1.0) * self._master_volume
                               if name in active_set else 0.0)
                     prev = self._applied_gains.get(name, target)
                     if target == 0.0 and prev == 0.0:
