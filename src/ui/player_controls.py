@@ -26,9 +26,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.beat_detector import DetectionResult, DetectionWorker
+from src.beat_detector import DetectionResult, DetectionWorker, transpose_key
 from src.metronome import tap_tempo
-from src.player import SPEED_PRESETS, MultiTrackPlayer
+from src.player import (
+    PITCH_MAX_SEMITONES,
+    PITCH_MIN_SEMITONES,
+    SPEED_PRESETS,
+    MultiTrackPlayer,
+)
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import (
@@ -739,6 +744,21 @@ class PlayerControls(QWidget):
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
         loop_speed_bar.addWidget(self._speed_combo)
 
+        self._pitch_label = QLabel("Pitch:")
+        loop_speed_bar.addWidget(self._pitch_label)
+
+        self._pitch_spin = QSpinBox()
+        self._pitch_spin.setRange(PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES)
+        self._pitch_spin.setValue(0)
+        self._pitch_spin.setSuffix(" st")
+        self._pitch_spin.setFixedWidth(70)
+        self._pitch_spin.setToolTip(
+            "Transpose in semitones (Shift+Left / Shift+Right)"
+        )
+        self._pitch_spin.setAccessibleName("Pitch semitones")
+        self._pitch_spin.valueChanged.connect(self._on_pitch_changed)
+        loop_speed_bar.addWidget(self._pitch_spin)
+
         controls_layout.addLayout(loop_speed_bar)
 
         # -- Metronome bar --
@@ -923,11 +943,7 @@ class PlayerControls(QWidget):
         # spans from the previous theme.
         badge = self._badge_style()
         if self._detected_key_raw:
-            key_c = self._conf_color(self._key_conf) if self._key_conf else ""
-            self._key_label.setStyleSheet(badge)
-            self._key_label.setText(
-                self._badge_html("Key:", self._detected_key_raw, key_c)
-            )
+            self._refresh_key_label()
         if self._detected_bpm_raw:
             bpm_c = self._conf_color(self._bpm_conf) if self._bpm_conf else ""
             self._detected_bpm_label.setStyleSheet(badge)
@@ -966,6 +982,7 @@ class PlayerControls(QWidget):
         self._player.state_changed.connect(self._on_state_changed)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.speed_changed.connect(self._on_speed_applied)
+        self._player.pitch_changed.connect(self._on_pitch_applied)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
@@ -993,6 +1010,10 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
+
+        self._pitch_spin.blockSignals(True)
+        self._pitch_spin.setValue(0)
+        self._pitch_spin.blockSignals(False)
 
         self._record_btn.blockSignals(True)
         self._record_btn.setChecked(False)
@@ -1322,6 +1343,33 @@ class PlayerControls(QWidget):
         idx = max(0, min(idx, self._speed_combo.count() - 1))
         self._speed_combo.setCurrentIndex(idx)
 
+    # -- Pitch control slots --
+
+    def _on_pitch_changed(self, semitones: int) -> None:
+        """User adjusted the pitch spinbox."""
+        self._speed_status.setText("Stretching..." if semitones != 0 else "")
+        self._player.set_pitch(int(semitones))
+
+    def _on_pitch_applied(self, semitones: int) -> None:
+        """Player finished pitch-shifting; update UI."""
+        self._speed_status.setText("")
+        self._pitch_spin.blockSignals(True)
+        self._pitch_spin.setValue(int(semitones))
+        self._pitch_spin.blockSignals(False)
+        # Refresh peaks (buffers may have new lengths after a combined render)
+        self._do_recompute_peaks()
+        # Refresh the detected-key label to show the transposed key.
+        self._refresh_key_label()
+        self.update_record_button_state()
+
+    def bump_pitch(self, direction: int) -> None:
+        """Nudge the pitch spinbox by one semitone.
+
+        Args:
+            direction: +1 for up, -1 for down. Clamped by the spinbox range.
+        """
+        self._pitch_spin.setValue(self._pitch_spin.value() + direction)
+
     # -- Metronome handlers --
 
     def _on_bpm_changed(self, value: int) -> None:
@@ -1502,6 +1550,33 @@ class PlayerControls(QWidget):
             )
         return f'<span style="color:{val_c};">{value}</span>'
 
+    def _refresh_key_label(self) -> None:
+        """Re-render the key badge, showing ``detected → effective`` when pitch != 0."""
+        if not self._detected_key_raw:
+            return
+        pitch = self._player.pitch_semitones
+        key_c = self._conf_color(self._key_conf) if self._key_conf else ""
+        self._key_label.setStyleSheet(self._badge_style())
+        if pitch == 0:
+            self._key_label.setText(
+                self._badge_html("Key:", self._detected_key_raw, key_c)
+            )
+            self._key_label.setToolTip(
+                f"Detected key: {self._detected_key_raw}\n"
+                f"Confidence: {self._key_conf}\n"
+                f"Double-click to re-detect"
+            )
+            return
+        effective = transpose_key(self._detected_key_raw, pitch)
+        shown = f"{self._detected_key_raw} \u2192 {effective}"
+        self._key_label.setText(self._badge_html("Key:", shown, key_c))
+        self._key_label.setToolTip(
+            f"Detected key: {self._detected_key_raw}\n"
+            f"Transposed by {pitch:+d} st: {effective}\n"
+            f"Confidence: {self._key_conf}\n"
+            f"Double-click to re-detect"
+        )
+
     def _update_sync_btn_state(self, has_beats: bool) -> None:
         """Update beat-sync button enabled state."""
         self._beat_sync_btn.setEnabled(has_beats)
@@ -1548,16 +1623,7 @@ class PlayerControls(QWidget):
         if result.key:
             self._key_conf = result.key_confidence
             self._detected_key_raw = result.key
-            key_c = self._conf_color(result.key_confidence)
-            self._key_label.setStyleSheet(badge)
-            self._key_label.setText(
-                self._badge_html("Key:", result.key, key_c)
-            )
-            self._key_label.setToolTip(
-                f"Detected key: {result.key}\n"
-                f"Confidence: {result.key_confidence}\n"
-                f"Double-click to re-detect"
-            )
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")
@@ -1620,14 +1686,7 @@ class PlayerControls(QWidget):
         if result.key:
             self._key_conf = result.key_confidence
             self._detected_key_raw = result.key
-            key_c = self._conf_color(result.key_confidence)
-            self._key_label.setStyleSheet(self._badge_style())
-            self._key_label.setText(self._badge_html("Key:", result.key, key_c))
-            self._key_label.setToolTip(
-                f"Detected key: {result.key}\n"
-                f"Confidence: {result.key_confidence}\n"
-                f"Double-click to re-detect"
-            )
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")
@@ -1719,14 +1778,7 @@ class PlayerControls(QWidget):
         self._detected_key_raw = key
         if key:
             self._key_conf = confidence
-            c = self._conf_color(confidence) if confidence else ""
-            self._key_label.setStyleSheet(self._badge_style())
-            self._key_label.setText(self._badge_html("Key:", key, c))
-            parts = [f"Detected key: {key}"]
-            if confidence:
-                parts.append(f"Confidence: {confidence}")
-            parts.append("Double-click to re-detect")
-            self._key_label.setToolTip("\n".join(parts))
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")

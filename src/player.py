@@ -27,33 +27,67 @@ from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
 
+# Bounds for pitch transposition, in semitones. librosa's pitch_shift
+# quality degrades noticeably beyond ±7 (it chains resample+time_stretch
+# internally); this range covers the practical use cases (vocal range
+# adjustment, capo equivalents) without exposing the quality cliff.
+PITCH_MIN_SEMITONES = -7
+PITCH_MAX_SEMITONES = 7
+
+# Prefix used for recording-take stem names (e.g. "recording_take1").
+# Used to distinguish user recordings from source stems when deciding
+# whether to apply pitch transposition.
+RECORDING_STEM_PREFIX = "recording_take"
+
 
 def next_take_number(song_dir: str) -> int:
     """Return the next recording take number for *song_dir*."""
-    existing = glob.glob(os.path.join(song_dir, "recording_take*.wav"))
+    existing = glob.glob(os.path.join(song_dir, f"{RECORDING_STEM_PREFIX}*.wav"))
     nums: list[int] = []
     for p in existing:
         base = os.path.basename(p)
         try:
-            n = int(base.replace("recording_take", "").replace(".wav", ""))
+            n = int(base.replace(RECORDING_STEM_PREFIX, "").replace(".wav", ""))
             nums.append(n)
         except ValueError:
             continue
     return max(nums, default=0) + 1
 
 
-class SpeedWorker(QThread):
-    """Background thread for pitch-preserving time-stretch of all stems."""
+class StretchWorker(QThread):
+    """Background thread for pitch-preserving time-stretch and/or pitch
+    shift of all stems.
+
+    Both transforms are applied in a single pass per stem so artifacts do
+    not compound. Pitch shift runs first (it internally resamples then
+    time-stretches back to the original length), then the requested
+    playback-speed stretch is applied.
+
+    Recording-take stems are only pitch-shifted when
+    ``sync_recording_pitch`` is True. Speed is always applied to every
+    stem (speed changes affect all audible audio; recordings must stay in
+    sync with the backing track).
+    """
 
     completed = Signal(dict)  # {name: stretched_ndarray}
     progress = Signal(int, int)  # (current_stem, total_stems)
     error = Signal(str)
 
-    def __init__(self, stems: dict[str, np.ndarray], speed: float,
-                 parent=None) -> None:
+    def __init__(
+        self,
+        stems: dict[str, np.ndarray],
+        sample_rate: int,
+        speed: float,
+        pitch_semitones: int,
+        sync_recording_pitch: bool = False,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._stems = stems
-        self._speed = speed
+        self._sample_rate = int(sample_rate)
+        self._speed = float(speed)
+        self._pitch_semitones = int(pitch_semitones)
+        self._sync_recording_pitch = bool(sync_recording_pitch)
 
     def run(self) -> None:
         try:
@@ -63,19 +97,38 @@ class SpeedWorker(QThread):
 
     def _stretch(self) -> None:
         total = len(self._stems)
-        stretched = {}
+        out: dict[str, np.ndarray] = {}
+        apply_speed = self._speed != 1.0
+        apply_pitch = self._pitch_semitones != 0
         for i, (name, data) in enumerate(self._stems.items()):
-            # Preserve the peak amplitude after phase-vocoder stretch.
+            is_recording = name.startswith(RECORDING_STEM_PREFIX)
+            stem_apply_pitch = apply_pitch and (
+                not is_recording or self._sync_recording_pitch
+            )
+            if not apply_speed and not stem_apply_pitch:
+                # Nothing to do for this stem -- reuse the original buffer.
+                out[name] = data
+                self.progress.emit(i + 1, total)
+                continue
+
+            # Preserve the peak amplitude after phase-vocoder processing.
             original_peak = np.max(np.abs(data))
 
-            # librosa.effects.time_stretch works on mono; process each channel.
+            # librosa effects work on mono; process each channel.
             channels = []
             for ch_idx in range(data.shape[1]):
                 mono = data[:, ch_idx].astype(np.float32)
-                stretched_ch = librosa.effects.time_stretch(
-                    mono, rate=self._speed
-                )
-                channels.append(stretched_ch)
+                if stem_apply_pitch:
+                    mono = librosa.effects.pitch_shift(
+                        mono,
+                        sr=self._sample_rate,
+                        n_steps=self._pitch_semitones,
+                    )
+                if apply_speed:
+                    mono = librosa.effects.time_stretch(
+                        mono, rate=self._speed
+                    )
+                channels.append(mono)
             # Recombine to stereo, matching shortest channel.
             min_len = min(c.shape[0] for c in channels)
             stereo = np.column_stack([c[:min_len] for c in channels])
@@ -87,9 +140,9 @@ class SpeedWorker(QThread):
             if stretched_peak > 0 and original_peak > 0:
                 stereo *= original_peak / stretched_peak
 
-            stretched[name] = stereo
+            out[name] = stereo
             self.progress.emit(i + 1, total)
-        self.completed.emit(stretched)
+        self.completed.emit(out)
 
 
 class MultiTrackPlayer(QObject):
@@ -107,6 +160,7 @@ class MultiTrackPlayer(QObject):
     state_changed = Signal(bool)
     play_finished = Signal()
     speed_changed = Signal(float)
+    pitch_changed = Signal(int)  # emitted with semitones (-N..+N)
     playback_failed = Signal(str)
     recording_saved = Signal(str)  # emitted with the saved WAV path
 
@@ -133,10 +187,12 @@ class MultiTrackPlayer(QObject):
         self._loop_b_frame: int | None = None
         self._looping: bool = False
 
-        # Speed / time-stretch state.
+        # Speed / time-stretch / pitch state.
         self._playback_speed: float = 1.0
+        self._pitch_semitones: int = 0
+        self._sync_recording_pitch: bool = False
         self._original_stems: dict[str, np.ndarray] = {}
-        self._speed_worker: SpeedWorker | None = None
+        self._stretch_worker: StretchWorker | None = None
 
         # Metronome state.
         self._metronome_enabled: bool = False
@@ -435,11 +491,16 @@ class MultiTrackPlayer(QObject):
     def arm_recording(self, armed: bool) -> None:
         """Arm or disarm recording.
 
-        Recording cannot be armed when playback speed is not 1.0x or when
-        no stems are loaded.  Arming while already recording is a no-op.
+        Recording requires the backing track at its original tempo and
+        pitch (speed=1.0, pitch=0). Recording against time-stretched or
+        transposed audio would capture performance that can't be cleanly
+        mixed with the source stems later. Also requires stems to be
+        loaded. Arming while already recording is a no-op.
         """
         if armed:
             if self._playback_speed != 1.0:
+                return
+            if self._pitch_semitones != 0:
                 return
             if not self._stems:
                 return
@@ -573,7 +634,7 @@ class MultiTrackPlayer(QObject):
             stem_paths: Dictionary mapping stem names to file paths.
         """
         self.stop()
-        self._detach_speed_worker()
+        self._detach_stretch_worker()
         self._stems.clear()
         self._original_stems.clear()
         self._muted_stems.clear()
@@ -592,6 +653,7 @@ class MultiTrackPlayer(QObject):
         self._loop_b_frame = None
         self._looping = False
         self._playback_speed = 1.0
+        self._pitch_semitones = 0
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
@@ -914,13 +976,28 @@ class MultiTrackPlayer(QObject):
         self._looping = False
 
     # ------------------------------------------------------------------
-    # Speed / Time-Stretch
+    # Speed / Pitch / Time-Stretch
     # ------------------------------------------------------------------
+    #
+    # Speed (time-stretch) and pitch (transposition) are both pre-rendered
+    # from ``_original_stems`` in a single ``StretchWorker`` pass so their
+    # artifacts do not compound. The fast path (speed=1.0 AND pitch=0)
+    # skips the worker entirely and swaps originals in directly.
 
     @property
     def speed(self) -> float:
         """Return the current playback speed multiplier."""
         return self._playback_speed
+
+    @property
+    def pitch_semitones(self) -> int:
+        """Return the current pitch transposition in semitones."""
+        return self._pitch_semitones
+
+    @property
+    def sync_recording_pitch(self) -> bool:
+        """Return True if recording stems are pitch-shifted with the backing track."""
+        return self._sync_recording_pitch
 
     def set_speed(self, speed: float) -> None:
         """Set the playback speed with pitch-preserving time-stretch.
@@ -930,57 +1007,127 @@ class MultiTrackPlayer(QObject):
         audio is ready.
         """
         speed = max(0.5, min(speed, 2.0))
-
         if speed == self._playback_speed:
             return
-
         self._playback_speed = speed
+        self._render_stretch(emit=("speed",))
+
+    def set_pitch(self, semitones: int) -> None:
+        """Set pitch transposition in semitones.
+
+        Clamps to [PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES]. Rendering
+        runs in a background thread; ``pitch_changed`` fires when the
+        transposed audio is ready (or immediately, on the fast path).
+        """
+        try:
+            semitones = int(semitones)
+        except (TypeError, ValueError):
+            return
+        semitones = max(PITCH_MIN_SEMITONES,
+                        min(PITCH_MAX_SEMITONES, semitones))
+        if semitones == self._pitch_semitones:
+            return
+        self._pitch_semitones = semitones
+        self._render_stretch(emit=("pitch",))
+
+    def set_sync_recording_pitch(self, sync: bool) -> None:
+        """Enable or disable pitch-shifting of recording-take stems.
+
+        When False (default), recordings keep their source pitch even when
+        the backing track is transposed. When True, recordings are shifted
+        alongside the source stems. Takes effect on the next render.
+        """
+        sync = bool(sync)
+        if sync == self._sync_recording_pitch:
+            return
+        self._sync_recording_pitch = sync
+        # Only re-render if a pitch shift is actually active -- otherwise
+        # the setting has no audible effect and we can skip the work.
+        if self._pitch_semitones != 0 and self._original_stems:
+            self._render_stretch(emit=("pitch",))
+
+    def _render_stretch(self, emit: tuple[str, ...] = ()) -> None:
+        """Render stems for the current speed + pitch state.
+
+        Detaches any in-flight worker first. Uses the fast path when both
+        transforms are identity. Otherwise spawns a new ``StretchWorker``.
+
+        *emit* is a tuple of signal names ("speed", "pitch") to fire after
+        the render completes; the caller uses this to indicate which knob
+        the user just turned so the UI can react appropriately.
+        """
+        self._detach_stretch_worker()
 
         if not self._original_stems:
+            self._emit_stretch_signals(emit)
             return
 
-        # Detach any in-flight worker so its signals don't fire stale data.
-        self._detach_speed_worker()
+        speed = self._playback_speed
+        pitch = self._pitch_semitones
 
-        if speed == 1.0:
+        if speed == 1.0 and pitch == 0:
+            # Fast path: no transform at all, swap originals in directly.
             self._apply_stretched_stems(dict(self._original_stems))
             self._recompute_beat_frames()
-            self.speed_changed.emit(speed)
+            self._emit_stretch_signals(emit)
             return
 
-        self._speed_worker = SpeedWorker(
-            self._original_stems, speed, parent=self
+        self._stretch_worker = StretchWorker(
+            self._original_stems,
+            self._sample_rate,
+            speed,
+            pitch,
+            sync_recording_pitch=self._sync_recording_pitch,
+            parent=self,
         )
-        self._speed_worker.completed.connect(self._on_speed_ready)
-        self._speed_worker.error.connect(self._on_speed_error)
-        self._speed_worker.start()
+        self._stretch_worker.completed.connect(
+            lambda stems: self._on_stretch_ready(stems, emit)
+        )
+        self._stretch_worker.error.connect(
+            lambda msg: self._on_stretch_error(msg, emit)
+        )
+        self._stretch_worker.start()
 
-    def _detach_speed_worker(self) -> None:
-        """Disconnect and release the current speed worker, if any."""
-        if self._speed_worker is not None:
-            _safe_disconnect(self._speed_worker.completed)
-            _safe_disconnect(self._speed_worker.error)
-            _safe_disconnect(self._speed_worker.progress)
+    def _detach_stretch_worker(self) -> None:
+        """Disconnect and release the current stretch worker, if any."""
+        if self._stretch_worker is not None:
+            _safe_disconnect(self._stretch_worker.completed)
+            _safe_disconnect(self._stretch_worker.error)
+            _safe_disconnect(self._stretch_worker.progress)
             # Let it finish in the background; don't block the UI.
-            worker = self._speed_worker
-            self._speed_worker = None
+            worker = self._stretch_worker
+            self._stretch_worker = None
             worker.setParent(None)
             if worker.isRunning():
                 worker.finished.connect(worker.deleteLater)
             else:
                 worker.deleteLater()
 
-    def _on_speed_ready(self, stretched: dict) -> None:
-        """Swap in stretched stems and adjust frame indices."""
-        self._apply_stretched_stems(stretched)
+    def _on_stretch_ready(
+        self, stems: dict, emit: tuple[str, ...],
+    ) -> None:
+        """Swap in rendered stems and adjust frame indices."""
+        self._apply_stretched_stems(stems)
         self._recompute_beat_frames()
-        self.speed_changed.emit(self._playback_speed)
+        self._emit_stretch_signals(emit)
 
-    def _on_speed_error(self, message: str) -> None:
-        """Handle stretch failure by restoring original speed."""
+    def _on_stretch_error(
+        self, message: str, emit: tuple[str, ...],
+    ) -> None:
+        """Handle stretch failure by restoring originals at identity state."""
         self._playback_speed = 1.0
+        self._pitch_semitones = 0
         self._apply_stretched_stems(dict(self._original_stems))
+        # Emit both signals so any UI bound to either knob resets.
         self.speed_changed.emit(1.0)
+        self.pitch_changed.emit(0)
+
+    def _emit_stretch_signals(self, emit: tuple[str, ...]) -> None:
+        """Fire speed_changed / pitch_changed signals per *emit* contents."""
+        if "speed" in emit:
+            self.speed_changed.emit(self._playback_speed)
+        if "pitch" in emit:
+            self.pitch_changed.emit(self._pitch_semitones)
 
     def _apply_stretched_stems(self, stems: dict) -> None:
         """Replace current stems with *stems* and adjust frame indices."""

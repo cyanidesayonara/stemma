@@ -4,6 +4,22 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-04-18 -- v2.4.0 Pitch Shift / Transposition
+
+### Done
+- **Pitch transposition:** New Pitch spinbox in the transport bar (±7 semitones). Uses `librosa.effects.pitch_shift` for pitch-preserving transposition. `Shift+Left`/`Shift+Right` shortcuts nudge by one semitone. Layout-safe (no symbol keys).
+- **Unified stretch worker:** `SpeedWorker` replaced by `StretchWorker`, which applies pitch shift and time stretch in a single pass per channel, from the original buffers — avoids artefact compounding across chained renders. Peak amplitude preserved after phase-vocoder processing. Identity state (speed=1.0 ∧ pitch=0) is a fast-path no-op that reuses the original buffers.
+- **Effective key display:** When pitch ≠ 0, the Key badge shows `<detected> → <transposed>` (e.g. `A minor → B minor`). Tooltip includes the shift amount. `transpose_key()` helper in `beat_detector.py` handles sharp/flat alias parsing and wrap-around.
+- **Recording guard:** Recording cannot be armed while pitch ≠ 0. Recording takes are not pitch-shifted by default so playback matches what was actually performed.
+- **Sync-recording-pitch preference:** New "Pitch-shift recording takes with the stems" checkbox in the Playback group of Preferences. Toggling with an active pitch re-renders stems in place.
+- **Per-song session persistence:** Pitch value saves/restores alongside speed. Single combined stretch pass at restore when both speed and pitch are non-identity.
+- **Auto-reset on song switch:** Loading a new song resets pitch to 0 (before the saved pitch for that song restores, if any).
+
+### Metrics
+- 708 tests pass, 1 skipped. +34 new tests covering pitch clamping/signals/fast-path, combined render ordering, recording-take handling, and the `transpose_key` helper.
+
+---
+
 ## 2026-04-17 -- v2.3.0 Library, Polish & Shortcuts
 
 ### Done

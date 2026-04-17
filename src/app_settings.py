@@ -151,3 +151,14 @@ def read_latency_offset_ms(settings: QSettings) -> float:
 def read_startup_play_sound(settings: QSettings) -> bool:
     """Return True if the startup arpeggio sound should play (default True)."""
     return bool(settings.value("startup/play_sound", True, type=bool))
+
+
+def read_sync_recording_pitch(settings: QSettings) -> bool:
+    """Return True if recording takes should follow the stems' pitch shift.
+
+    Default is False — recording stems are left un-pitched so practice
+    playback matches what was actually sung/played.
+    """
+    return bool(
+        settings.value("playback/sync_recording_pitch", False, type=bool)
+    )

@@ -5,7 +5,7 @@ import pytest
 
 from PySide6.QtWidgets import QApplication
 
-from src.player import MultiTrackPlayer, SpeedWorker
+from src.player import MultiTrackPlayer, StretchWorker
 
 
 @pytest.fixture(scope="module")
@@ -24,16 +24,16 @@ def player(app):
 
 
 # -----------------------------------------------------------------------
-# SpeedWorker
+# StretchWorker -- time-stretch only (pitch=0)
 # -----------------------------------------------------------------------
 
-class TestSpeedWorker:
-    """SpeedWorker stretches stems via librosa in a background thread."""
+class TestStretchWorkerSpeed:
+    """StretchWorker time-stretches stems via librosa in a background thread."""
 
     def test_stretch_produces_different_frame_count(self, app):
         """Stretching at 0.5x should roughly double the frame count."""
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
-        worker = SpeedWorker(stems, 0.5)
+        worker = StretchWorker(stems, 44100, 0.5, 0)
         results = {}
         worker.completed.connect(lambda d: results.update(d))
         worker.run()  # Run synchronously for testing.
@@ -42,20 +42,20 @@ class TestSpeedWorker:
         assert results["vocals"].shape[0] > 4410 * 1.5
         assert results["vocals"].shape[1] == 2
 
-    def test_stretch_at_1x_returns_same_length(self, app):
-        """Stretching at 1.0x should return approximately the same length."""
+    def test_stretch_at_1x_returns_same_buffer(self, app):
+        """Stretching at 1.0x with pitch=0 is the fast path -- buffer reused."""
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
-        worker = SpeedWorker(stems, 1.0)
+        worker = StretchWorker(stems, 44100, 1.0, 0)
         results = {}
         worker.completed.connect(lambda d: results.update(d))
         worker.run()
-        # Should be very close to original length.
-        assert abs(results["vocals"].shape[0] - 4410) < 100
+        # Identity transform: worker should reuse the original buffer.
+        assert results["vocals"] is stems["vocals"]
 
     def test_stretch_at_2x_halves_frames(self, app):
         """Stretching at 2.0x should roughly halve the frame count."""
         stems = {"vocals": np.random.randn(8820, 2).astype(np.float32)}
-        worker = SpeedWorker(stems, 2.0)
+        worker = StretchWorker(stems, 44100, 2.0, 0)
         results = {}
         worker.completed.connect(lambda d: results.update(d))
         worker.run()
@@ -67,7 +67,7 @@ class TestSpeedWorker:
             "vocals": np.random.randn(4410, 2).astype(np.float32),
             "drums": np.random.randn(4410, 2).astype(np.float32),
         }
-        worker = SpeedWorker(stems, 0.75)
+        worker = StretchWorker(stems, 44100, 0.75, 0)
         results = {}
         worker.completed.connect(lambda d: results.update(d))
         worker.run()
@@ -80,7 +80,7 @@ class TestSpeedWorker:
             "vocals": np.random.randn(4410, 2).astype(np.float32),
             "drums": np.random.randn(4410, 2).astype(np.float32),
         }
-        worker = SpeedWorker(stems, 0.75)
+        worker = StretchWorker(stems, 44100, 0.75, 0)
         progress = []
         worker.progress.connect(lambda cur, tot: progress.append((cur, tot)))
         worker.run()

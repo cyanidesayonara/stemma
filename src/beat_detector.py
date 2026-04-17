@@ -253,6 +253,35 @@ _MINOR_PROFILE = np.array([
 _KEY_NAMES = ["C", "C#", "D", "Eb", "E", "F",
               "F#", "G", "Ab", "A", "Bb", "B"]
 
+# Alias table for parsing: accept both sharp and flat spellings back to index.
+_TONIC_TO_INDEX: dict[str, int] = {name: i for i, name in enumerate(_KEY_NAMES)}
+_TONIC_TO_INDEX.update({
+    "Db": 1, "D#": 3, "Gb": 6, "G#": 8, "A#": 10,
+    "Cb": 11, "E#": 5, "Fb": 4, "B#": 0,
+})
+
+
+def transpose_key(key_str: str, n_steps: int) -> str:
+    """Transpose a key label (e.g. ``"A minor"``) by ``n_steps`` semitones.
+
+    Returns the input unchanged when it cannot be parsed. Uses the canonical
+    sharp/flat spelling defined by ``_KEY_NAMES`` (matches the detector's
+    output).
+    """
+    if not key_str or n_steps == 0:
+        return key_str
+    parts = key_str.strip().split()
+    if len(parts) != 2:
+        return key_str
+    tonic, mode = parts[0], parts[1].lower()
+    if mode not in ("major", "minor"):
+        return key_str
+    idx = _TONIC_TO_INDEX.get(tonic)
+    if idx is None:
+        return key_str
+    new_idx = (idx + int(n_steps)) % 12
+    return f"{_KEY_NAMES[new_idx]} {mode}"
+
 
 def _detect_key(
     audio_mono: np.ndarray, sr: int,
