@@ -371,6 +371,7 @@ class LibraryPanel(QWidget):
         self._library = library
         self._repeat_mode: str = REPEAT_OFF
         self._shuffle_enabled: bool = False
+        self._ctrl_accent: str = DARK_COLORS["accent"]
 
         self._setup_ui()
         self.refresh()
@@ -513,12 +514,18 @@ class LibraryPanel(QWidget):
         self._repeat_btn.setIcon(self._repeat_icons[self._repeat_mode])
         labels = {REPEAT_OFF: "off", REPEAT_ALL: "all", REPEAT_ONE: "one"}
         self._repeat_btn.setToolTip(f"Repeat: {labels[self._repeat_mode]}")
-        # Use the checked property to style active state via QSS, but
-        # keep the button non-checkable so each click cycles modes
-        # instead of toggling.
-        self._repeat_btn.setCheckable(True)
-        self._repeat_btn.setChecked(self._repeat_mode != REPEAT_OFF)
-        self._repeat_btn.setCheckable(False)
+        # Apply teal background when active. The :checked pseudo-class is
+        # unreliable here because setCheckable(False) resets the checked
+        # state before Qt renders it, so we set the style directly.
+        if self._repeat_mode != REPEAT_OFF:
+            self._repeat_btn.setStyleSheet(
+                f"QPushButton#icon-btn {{"
+                f"background-color: {self._ctrl_accent};"
+                f"border: 1px solid {self._ctrl_accent};"
+                f"}}"
+            )
+        else:
+            self._repeat_btn.setStyleSheet("")
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"
@@ -542,6 +549,8 @@ class LibraryPanel(QWidget):
         self._song_delegate.set_separator_color(colors["surface1"])
         self._song_delegate.set_accent_color(colors["accent"])
         self._song_delegate.set_selected_text_color(colors["base"])
+        self._ctrl_accent = colors["accent"]
+        self._update_repeat_ui()  # Refresh button color with new accent.
 
         icon_color = QColor(colors["text"])
         checked_icon_color = QColor(colors["base"])

@@ -459,37 +459,61 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(20, 20, 20, 20)
 
+        colors = get_colors(self._theme)
+        accent = colors["accent"]
+        surface1 = colors["surface1"]
+
+        def section(title: str, first: bool = False) -> str:
+            spacer = "" if first else (
+                f"<tr><td colspan='2' style='padding-top:10px;"
+                f"border-top:1px solid {surface1};'></td></tr>"
+            )
+            return (
+                spacer
+                + f"<tr><td colspan='2' style='padding-top:4px;padding-bottom:2px;'>"
+                f"<span style='color:{accent};font-weight:600;'>{title}</span>"
+                f"</td></tr>"
+            )
+
+        def row(key: str, desc: str) -> str:
+            return (
+                f"<tr>"
+                f"<td style='padding:2px 16px 2px 8px;white-space:nowrap;'><b>{key}</b></td>"
+                f"<td style='padding:2px 8px 2px 0;'>{desc}</td>"
+                f"</tr>"
+            )
+
         shortcuts_text = (
-            "<table cellspacing='6'>"
-            "<tr><td colspan='2'><b>Playback</b></td></tr>"
-            "<tr><td><b>Space</b></td><td>Play / Pause</td></tr>"
-            "<tr><td><b>S</b></td><td>Stop</td></tr>"
-            "<tr><td colspan='2'><b>Navigation</b></td></tr>"
-            "<tr><td><b>0-9</b></td><td>Jump to 0%-90% position</td></tr>"
-            "<tr><td><b>Left / Right</b></td><td>Seek -5s / +5s</td></tr>"
-            "<tr><td><b>Home / End</b></td><td>Jump to start / end</td></tr>"
-            "<tr><td colspan='2'><b>Volume &amp; Speed</b></td></tr>"
-            "<tr><td><b>Up / Down</b></td><td>Master volume</td></tr>"
-            "<tr><td><b>Shift+Up / Down</b></td><td>Speed up / down</td></tr>"
-            "<tr><td colspan='2'><b>Stems</b></td></tr>"
-            "<tr><td><b>Ctrl+1-6</b></td><td>Mute/unmute stem</td></tr>"
-            "<tr><td colspan='2'><b>Loop</b></td></tr>"
-            "<tr><td><b>A</b></td><td>Set loop point A</td></tr>"
-            "<tr><td><b>B</b></td><td>Set loop point B</td></tr>"
-            "<tr><td><b>L</b></td><td>Toggle A-B loop</td></tr>"
-            "<tr><td colspan='2'><b>Metronome &amp; Recording</b></td></tr>"
-            "<tr><td><b>M</b></td><td>Toggle metronome</td></tr>"
-            "<tr><td><b>C</b></td><td>Toggle count-in</td></tr>"
-            "<tr><td><b>R</b></td><td>Arm/disarm recording</td></tr>"
-            "<tr><td colspan='2'><b>Library</b></td></tr>"
-            "<tr><td><b>N</b></td><td>Next song</td></tr>"
-            "<tr><td><b>P</b></td><td>Previous song</td></tr>"
-            "<tr><td colspan='2'><b>Help</b></td></tr>"
-            "<tr><td><b>F1</b></td><td>This dialog</td></tr>"
-            "</table>"
+            "<table cellspacing='0' cellpadding='0'>"
+            + section("Playback", first=True)
+            + row("Space", "Play / Pause")
+            + row("S", "Stop")
+            + section("Navigation")
+            + row("0-9", "Jump to 0%–90% position")
+            + row("Left / Right", "Seek −5s / +5s")
+            + row("Home / End", "Jump to start / end")
+            + section("Volume &amp; Speed")
+            + row("Up / Down", "Master volume")
+            + row("Shift+Up / Down", "Speed up / down")
+            + section("Stems")
+            + row("Ctrl+1-6", "Mute/unmute stem")
+            + section("Loop")
+            + row("A", "Set loop point A")
+            + row("B", "Set loop point B")
+            + row("L", "Toggle A-B loop")
+            + section("Metronome &amp; Recording")
+            + row("M", "Toggle metronome")
+            + row("C", "Toggle count-in")
+            + row("R", "Arm/disarm recording")
+            + section("Library")
+            + row("N", "Next song")
+            + row("P", "Previous song")
+            + section("Help")
+            + row("F1", "This dialog")
+            + "</table>"
         )
         label = QLabel(shortcuts_text)
-        label.setWordWrap(True)
+        label.setWordWrap(False)
         layout.addWidget(label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
