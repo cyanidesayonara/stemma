@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.library import Song, SongLibrary
-from src.ui.styles import DARK_COLORS
+from src.ui.styles import DARK_COLORS, ON_ACCENT
 
 # Custom data roles for two-line display.
 _ARTIST_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -70,10 +70,11 @@ def _make_toggle_icon(draw_fn, normal_color: QColor,
     """Icon with distinct normal and checked pixmaps.
 
     *checked_color*: color used when the button is in checked state.
-    Defaults to the theme base color (dark text on the accent fill).
+    Defaults to ON_ACCENT (near-black) for readability on the teal accent
+    fill — works in both dark and light themes.
     """
     if checked_color is None:
-        checked_color = QColor(DARK_COLORS["base"])
+        checked_color = QColor(ON_ACCENT)
     icon = QIcon()
     for color, state in [
         (normal_color, QIcon.State.Off),
@@ -204,7 +205,7 @@ class _SongDelegate(QStyledItemDelegate):
     def __init__(
         self, parent=None, separator_color: str = DARK_COLORS["surface1"],
         accent_color: str = DARK_COLORS["accent"],
-        selected_text_color: str = DARK_COLORS["base"],
+        selected_text_color: str = ON_ACCENT,
     ):
         super().__init__(parent)
         self._separator_color = QColor(separator_color)
@@ -548,20 +549,26 @@ class LibraryPanel(QWidget):
         """Update delegate colors and control icons for the current theme."""
         self._song_delegate.set_separator_color(colors["surface1"])
         self._song_delegate.set_accent_color(colors["accent"])
-        self._song_delegate.set_selected_text_color(colors["base"])
+        # Selected rows use the teal accent fill, so the text must be
+        # readable on teal in BOTH themes -- use ON_ACCENT (near-black).
+        self._song_delegate.set_selected_text_color(ON_ACCENT)
         self._ctrl_accent = colors["accent"]
         self._update_repeat_ui()  # Refresh button color with new accent.
 
         icon_color = QColor(colors["text"])
-        checked_icon_color = QColor(colors["base"])
+        # When a button sits on the teal accent fill, use ON_ACCENT (fixed
+        # near-black) so the icon stays readable in both themes.
+        on_accent_color = QColor(ON_ACCENT)
         self._repeat_icons = {
+            # REPEAT_OFF has a neutral (grey) background — use theme text color.
             REPEAT_OFF: _make_icon(_draw_repeat, icon_color),
-            REPEAT_ALL: _make_icon(_draw_repeat, icon_color),
-            REPEAT_ONE: _make_icon(_draw_repeat_one, icon_color),
+            # REPEAT_ALL / REPEAT_ONE paint on the teal background — use on-accent.
+            REPEAT_ALL: _make_icon(_draw_repeat, on_accent_color),
+            REPEAT_ONE: _make_icon(_draw_repeat_one, on_accent_color),
         }
         self._update_repeat_ui()
         self._shuffle_btn.setIcon(
-            _make_toggle_icon(_draw_shuffle, icon_color, checked_icon_color)
+            _make_toggle_icon(_draw_shuffle, icon_color, on_accent_color)
         )
         self._prev_btn.setIcon(_make_icon(_draw_prev, icon_color))
         self._next_btn.setIcon(_make_icon(_draw_next, icon_color))

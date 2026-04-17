@@ -27,6 +27,12 @@ STEM_COLORS = STEM_COLORS_DARK
 
 RECORDING_COLOR = "#d4849a"  # Brand rose -- used for recording stem rows
 
+# Foreground color to use on top of the teal accent fill. Fixed near-black
+# (Catppuccin Mocha "crust") — readable on #4fb8b8 in both dark and light
+# themes. Do NOT bind this to theme.base: in light mode base is near-white
+# and becomes invisible on teal.
+ON_ACCENT = "#11111b"
+
 CONFIDENCE_COLORS = {
     "dark": {"high": "#a6e3a1", "medium": "#f9e2af", "low": "#f38ba8"},
     "light": {"high": "#40a02b", "medium": "#df8e1d", "low": "#d20f39"},
@@ -40,6 +46,7 @@ DARK_COLORS = {
     "surface2": "#585b70",
     "text": "#cdd6f4",
     "accent": "#4fb8b8",
+    "on_accent": ON_ACCENT,
     "red": "#f38ba8",
     "item_hover": "#252536",
 }
@@ -52,6 +59,7 @@ LIGHT_COLORS = {
     "surface2": "#9ca0b0",
     "text": "#4c4f69",
     "accent": "#4fb8b8",
+    "on_accent": ON_ACCENT,
     "red": "#d20f39",
     "item_hover": "#dce0e8",
 }
@@ -149,14 +157,14 @@ QPushButton:pressed {{
 
 QPushButton:checked {{
     background-color: {c["accent"]};
-    color: {c["base"]};
+    color: {c["on_accent"]};
     border: 1px solid {c["accent"]};
 }}
 
 QPushButton:checked:hover {{
     background-color: {c["accent"]};
-    color: {c["base"]};
-    border: 1px solid {c["text"]};
+    color: {c["on_accent"]};
+    border: 1px solid {c["on_accent"]};
 }}
 
 QPushButton:disabled {{
@@ -174,11 +182,12 @@ QPushButton#icon-btn {{
 
 QPushButton#icon-btn:checked {{
     background-color: {c["accent"]};
+    color: {c["on_accent"]};
     border: 1px solid {c["accent"]};
 }}
 
 QPushButton#icon-btn:checked:hover {{
-    border: 1px solid {c["text"]};
+    border: 1px solid {c["on_accent"]};
 }}
 
 QSlider::groove:horizontal {{

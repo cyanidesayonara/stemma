@@ -35,6 +35,7 @@ from src.ui.styles import (
     CONFIDENCE_COLORS,
     DARK_COLORS,
     LIGHT_COLORS,
+    ON_ACCENT,
     RECORDING_COLOR,
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
@@ -242,12 +243,16 @@ def _draw_repeat(p: QPainter, s: int) -> None:
 
 _STEM_ICON_SIZE = 18
 
-_CHECKED_ICON_COLOR = QColor("#ffffff")
+_CHECKED_ICON_COLOR = QColor(ON_ACCENT)
 
 
 def _make_toggle_icon(draw_fn, normal_color: QColor,
                       size: int = _ICON_SIZE) -> QIcon:
-    """Create an icon with distinct normal (theme text) and checked (white) pixmaps."""
+    """Create an icon with distinct normal (theme text) and checked (on-accent) pixmaps.
+
+    The checked pixmap uses a fixed near-black (styles.ON_ACCENT) so the icon
+    stays readable against the teal accent fill in both dark and light themes.
+    """
     icon = QIcon()
     for color, state in [
         (normal_color, QIcon.State.Off),
