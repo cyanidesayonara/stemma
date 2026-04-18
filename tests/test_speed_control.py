@@ -84,7 +84,9 @@ class TestStretchWorkerSpeed:
         progress = []
         worker.progress.connect(lambda cur, tot: progress.append((cur, tot)))
         worker.run()
-        assert len(progress) == 2
+        # Expect: initial (0, 2) + one tick per completed stem → 3 total.
+        assert len(progress) == 3
+        assert progress[0] == (0, 2)   # immediate "started" tick
         assert progress[-1] == (2, 2)
 
 

@@ -173,8 +173,9 @@ class TestStretchWorkerCombined:
         ts.assert_not_called()
 
     def test_pitch_uses_fast_res_type(self, app):
-        """The worker passes a fast resample kernel to librosa so renders
-        complete in a usable time during interactive use."""
+        """The worker passes the fast resample kernel and a tuned hop_length
+        to librosa so renders complete in a usable time during interactive
+        use."""
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
         worker = StretchWorker(stems, 44100, 1.0, 2)
         with patch(
@@ -182,18 +183,18 @@ class TestStretchWorkerCombined:
             side_effect=lambda y, sr, n_steps, **kw: y,
         ) as ps:
             worker.run()
-        # All calls must have passed res_type.  soxr_mq is ~3-4x faster
-        # than the default soxr_hq and sounds identical on music.
+        # All calls must have passed res_type=soxr_mq (~3-4x faster than
+        # soxr_hq) and hop_length=_HOP_LENGTH (~2-3x faster per benchmark).
         for call in ps.call_args_list:
-            assert "res_type" in call.kwargs
-            assert call.kwargs["res_type"] == "soxr_mq"
+            assert call.kwargs.get("res_type") == "soxr_mq"
+            assert call.kwargs.get("hop_length") == StretchWorker._HOP_LENGTH
 
     def test_speed_only_calls_time_stretch(self, app):
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
         worker = StretchWorker(stems, 44100, 0.75, 0)
         with patch("src.player.librosa.effects.pitch_shift") as ps, \
              patch("src.player.librosa.effects.time_stretch",
-                   side_effect=lambda y, rate: y) as ts:
+                   side_effect=lambda y, rate, **kw: y) as ts:
             worker.run()
         ps.assert_not_called()
         assert ts.call_count == 2
@@ -208,7 +209,7 @@ class TestStretchWorkerCombined:
             call_order.append("pitch")
             return y
 
-        def fake_ts(y, rate):
+        def fake_ts(y, rate, **kw):
             call_order.append("speed")
             return y
 
@@ -284,7 +285,7 @@ class TestRecordingPitchSync:
         worker = StretchWorker(stems, 44100, 0.5, 0, sync_recording_pitch=False)
         stretches: list[int] = []
 
-        def fake_ts(y, rate):
+        def fake_ts(y, rate, **kw):
             stretches.append(1)
             return y
 
