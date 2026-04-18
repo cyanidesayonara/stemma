@@ -10,6 +10,7 @@ Covers:
   - Recording cannot be armed when pitch != 0
   - Stretch lifecycle signals (started / progress / finished) emit correctly
   - Detached workers are kept alive on ``_detached_workers`` until finished
+  - ``_on_stretch_error`` recomputes beat frames after restoring originals
 """
 
 from unittest.mock import MagicMock, patch
@@ -605,3 +606,52 @@ class TestCancelStretch:
         # Non-running worker is not "rendering", so no finished signal.
         assert finished == []
         assert loaded_player._stretch_worker is None
+
+
+# -----------------------------------------------------------------------
+# Regression: _on_stretch_error must recompute beat frames
+# -----------------------------------------------------------------------
+
+class TestStretchErrorBeatsReset:
+    """After a render error, beat frames must reflect the restored (original-
+    length) stems — not the stretched indices that were active before the
+    error."""
+
+    def test_error_recomputes_beat_frames(self, loaded_player):
+        """beat_frames are recalculated after an error restores identity.
+
+        _recompute_beat_frames() uses _playback_speed as a divisor.  If
+        speed was 0.5x before the error, beat_frames hold 2× the 1.0x
+        frame indices.  The error handler resets _playback_speed to 1.0
+        but, without the _recompute_beat_frames() call, the stale indices
+        remain -- making the metronome click in the wrong places.
+        """
+        sr = loaded_player._sample_rate
+
+        # Set up a beat grid at 0.5x speed (indices are 2× the 1.0x values).
+        loaded_player._beat_times = [0.5, 1.0]
+        loaded_player._playback_speed = 0.5
+        loaded_player._recompute_beat_frames()
+        slow_beat_frames = list(loaded_player._beat_frames)  # e.g. [44100, 88200]
+
+        # Sanity: at 1.0x the indices should be half as large.
+        loaded_player._playback_speed = 1.0
+        loaded_player._recompute_beat_frames()
+        normal_beat_frames = list(loaded_player._beat_frames)  # e.g. [22050, 44100]
+        assert slow_beat_frames != normal_beat_frames, (
+            "sanity: beat frames at 0.5x vs 1.0x must differ"
+        )
+
+        # Restore slow-speed indices (as they would be when a render is in
+        # flight and _playback_speed is still 0.5).
+        loaded_player._playback_speed = 0.5
+        loaded_player._recompute_beat_frames()
+        assert list(loaded_player._beat_frames) == slow_beat_frames
+
+        # Trigger error recovery — should reset speed AND recompute frames.
+        loaded_player._on_stretch_error("boom", ("speed",))
+
+        assert loaded_player._playback_speed == 1.0
+        assert np.array_equal(
+            loaded_player._beat_frames, normal_beat_frames
+        ), "_beat_frames not recomputed after error; metronome would misfire"

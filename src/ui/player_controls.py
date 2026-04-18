@@ -1027,6 +1027,11 @@ class PlayerControls(QWidget):
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
 
+        # Kill any in-flight debounce from the previous song so a pending
+        # scroll doesn't fire set_pitch against the freshly loaded stems.
+        self._pitch_debounce.stop()
+        self._pending_pitch = None
+
         self._pitch_spin.blockSignals(True)
         self._pitch_spin.setValue(0)
         self._pitch_spin.blockSignals(False)
@@ -2132,12 +2137,20 @@ class PlayerControls(QWidget):
         return len(self._recording_rows) >= _MAX_RECORDING_TAKES
 
     def update_record_button_state(self) -> None:
-        """Sync Record button enabled state with current speed."""
-        at_1x = self._player.speed == 1.0
-        self._record_btn.setEnabled(at_1x and self._player.has_stems)
-        if not at_1x:
+        """Sync Record button enabled state with current speed and pitch."""
+        at_identity = (
+            self._player.speed == 1.0
+            and self._player.pitch_semitones == 0
+        )
+        self._record_btn.setEnabled(at_identity and self._player.has_stems)
+        if not at_identity:
+            reasons = []
+            if self._player.speed != 1.0:
+                reasons.append("1.0x speed")
+            if self._player.pitch_semitones != 0:
+                reasons.append("0 st pitch")
             self._record_btn.setToolTip(
-                "Recording requires 1.0x speed"
+                "Recording requires " + " and ".join(reasons)
             )
             if self._record_btn.isChecked():
                 self._record_btn.blockSignals(True)

@@ -1272,6 +1272,10 @@ class MultiTrackPlayer(QObject):
         self._playback_speed = 1.0
         self._pitch_semitones = 0
         self._apply_stretched_stems(dict(self._original_stems))
+        # Beat frames must be recomputed after the stem swap: if speed was
+        # non-identity before the error, _beat_frames still held stretched
+        # indices that no longer match the restored (original-length) stems.
+        self._recompute_beat_frames()
         # Emit both signals so any UI bound to either knob resets.
         self.speed_changed.emit(1.0)
         self.pitch_changed.emit(0)

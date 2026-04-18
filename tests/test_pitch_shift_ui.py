@@ -216,3 +216,87 @@ class TestRenderStatusLabel:
         player._pitch_semitones = 3
         label = controls._render_status_label(0, 0)
         assert "(" not in label
+
+
+# -----------------------------------------------------------------------
+# Record button guard includes pitch (regression: was speed-only)
+# -----------------------------------------------------------------------
+
+class TestRecordButtonPitchGuard:
+    """Record button must be disabled (and auto-unarm) whenever pitch ≠ 0,
+    mirroring the player-level guard in arm_recording()."""
+
+    def test_record_button_disabled_at_nonzero_pitch(self, controls, player):
+        """Button must be disabled when pitch is non-zero."""
+        player._stems = {"vocals": None}  # make has_stems True
+        player._pitch_semitones = 2
+        player._playback_speed = 1.0
+        controls.update_record_button_state()
+        assert not controls._record_btn.isEnabled()
+
+    def test_record_button_enabled_at_identity(self, controls, player):
+        """Button must be enabled at speed=1.0 AND pitch=0."""
+        player._stems = {"vocals": None}
+        player._pitch_semitones = 0
+        player._playback_speed = 1.0
+        controls.update_record_button_state()
+        assert controls._record_btn.isEnabled()
+
+    def test_record_button_tooltip_mentions_pitch(self, controls, player):
+        """Tooltip must explain why recording is disabled when pitch != 0."""
+        player._stems = {"vocals": None}
+        player._pitch_semitones = 3
+        player._playback_speed = 1.0
+        controls.update_record_button_state()
+        assert "pitch" in controls._record_btn.toolTip().lower()
+
+    def test_record_button_unarms_on_pitch_change(self, controls, player):
+        """If the button was checked (armed) and pitch changes, it must
+        uncheck automatically so the UI stays consistent."""
+        player._stems = {"vocals": None}
+        player._pitch_semitones = 0
+        player._playback_speed = 1.0
+        controls.update_record_button_state()
+
+        # Arm it manually (bypass player so we can isolate the UI logic).
+        controls._record_btn.blockSignals(True)
+        controls._record_btn.setChecked(True)
+        controls._record_btn.blockSignals(False)
+
+        # Now pitch changes.
+        player._pitch_semitones = 1
+        with patch.object(player, "arm_recording") as mock_arm:
+            controls.update_record_button_state()
+        assert not controls._record_btn.isChecked()
+        mock_arm.assert_called_once_with(False)
+
+
+# -----------------------------------------------------------------------
+# Debounce state cleared when loading a new song (regression)
+# -----------------------------------------------------------------------
+
+class TestDebounceResetOnSongLoad:
+    """Pending pitch scroll must not carry over to the next loaded song."""
+
+    def test_pending_pitch_cleared_on_set_stem_names(self, controls):
+        """set_stem_names must discard any pending pitch value."""
+        controls._on_pitch_changed(5)
+        assert controls._pending_pitch == 5
+        controls.set_stem_names([])
+        assert controls._pending_pitch is None
+
+    def test_debounce_timer_stopped_on_set_stem_names(self, controls):
+        """set_stem_names must stop the debounce timer."""
+        controls._on_pitch_changed(3)
+        assert controls._pitch_debounce.isActive()
+        controls.set_stem_names([])
+        assert not controls._pitch_debounce.isActive()
+
+    def test_no_spurious_set_pitch_after_song_load(self, controls, player):
+        """Timer firing after set_stem_names must not call set_pitch."""
+        controls._on_pitch_changed(4)
+        controls.set_stem_names([])
+        with patch.object(player, "set_pitch") as mock_set_pitch:
+            # Manually flush as if the timer fired.
+            controls._flush_pending_pitch()
+            mock_set_pitch.assert_not_called()
