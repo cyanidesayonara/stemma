@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -291,7 +293,43 @@ class PitchSpinBox(QSpinBox):
     QSpinBox always renders ``prefix + textFromValue(value) + suffix``,
     so ``suffix`` is used exclusively for the live render-progress tail
     (e.g. ``" (processing 2/4)"``) and kept empty when idle.
+
+    The default ``QSpinBox.sizeHint`` is based on the widest possible
+    value ("+12 semitones"), which isn't enough during rendering
+    ("+12 semitones (processing 10/10)") and wastes space when idle
+    ("original").  We override ``sizeHint`` and ``minimumSizeHint``
+    to fit the *current* displayed text instead, and call
+    ``updateGeometry`` when the text changes so the parent layout
+    shrink-wraps immediately.
     """
+
+    def setSuffix(self, suffix: str) -> None:  # noqa: D401 (Qt API)
+        super().setSuffix(suffix)
+        self.updateGeometry()
+
+    def _hint_for_text(self, text: str) -> QSize:
+        """Compute the spinbox sizeHint that fits ``text`` exactly.
+
+        Uses QStyle.sizeFromContents so button/frame padding matches
+        whatever the active style (native or stylesheet) would apply.
+        """
+        fm = self.fontMetrics()
+        text_w = fm.horizontalAdvance(text)
+        text_h = fm.height()
+        # A few pixels of slack so the cursor doesn't butt up against
+        # the frame on focus.
+        content = QSize(text_w + 6, text_h)
+        opt = QStyleOptionSpinBox()
+        self.initStyleOption(opt)
+        return self.style().sizeFromContents(
+            QStyle.ContentsType.CT_SpinBox, opt, content, self,
+        )
+
+    def sizeHint(self) -> QSize:  # noqa: D401 (Qt API)
+        return self._hint_for_text(self.text())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: D401 (Qt API)
+        return self._hint_for_text(self.text())
 
     def textFromValue(self, value: int) -> str:  # noqa: D401 (Qt API)
         if value == 0:
@@ -482,7 +520,7 @@ class RecordingStemRow(StemRow):
         self._nudge_spin.setRange(-200, 200)
         self._nudge_spin.setValue(0)
         self._nudge_spin.setSuffix(" ms")
-        self._nudge_spin.setFixedWidth(104)
+        # Default sizeHint fits "-200 ms" -- no fixed width needed.
         self._nudge_spin.setToolTip(
             f"Nudge {display_name} alignment (-200 to +200 ms)"
         )
@@ -668,7 +706,8 @@ class PlayerControls(QWidget):
         self._count_in_beats_spin.setRange(1, 8)
         self._count_in_beats_spin.setValue(4)
         self._count_in_beats_spin.setSuffix(" beats")
-        self._count_in_beats_spin.setFixedWidth(96)
+        # No setFixedWidth -- QSpinBox.sizeHint fits the widest value
+        # ("8 beats") plus frame + buttons, which is what we want.
         self._count_in_beats_spin.setToolTip("Number of count-in beats")
         self._count_in_beats_spin.setAccessibleName("Count-in beats")
         self._count_in_beats_spin.valueChanged.connect(
@@ -713,14 +752,12 @@ class PlayerControls(QWidget):
         loop_speed_bar = QHBoxLayout()
 
         self._loop_a_btn = QPushButton("Set A")
-        self._loop_a_btn.setFixedWidth(50)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
         self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_speed_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
-        self._loop_b_btn.setFixedWidth(50)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
         self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
@@ -728,14 +765,12 @@ class PlayerControls(QWidget):
 
         self._loop_toggle_btn = QPushButton("Loop")
         self._loop_toggle_btn.setCheckable(True)
-        self._loop_toggle_btn.setFixedWidth(48)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
         loop_speed_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
-        self._loop_clear_btn.setFixedWidth(48)
         self._loop_clear_btn.setToolTip("Clear loop points")
         self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
@@ -773,7 +808,9 @@ class PlayerControls(QWidget):
         for preset in SPEED_PRESETS:
             self._speed_combo.addItem(f"{preset}x", preset)
         self._speed_combo.setCurrentText("1.0x")
-        self._speed_combo.setFixedWidth(66)
+        self._speed_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
         self._speed_combo.setToolTip("Playback speed ([ / ])")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
@@ -785,10 +822,7 @@ class PlayerControls(QWidget):
         self._pitch_spin = PitchSpinBox()
         self._pitch_spin.setRange(PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES)
         self._pitch_spin.setValue(0)
-        # The display ("+2 semitones") plus the processing suffix
-        # ("(processing 2/4)") need room without clipping; pick a width
-        # that fits "+12 semitones (processing 10/10)" comfortably.
-        self._pitch_spin.setFixedWidth(230)
+        # PitchSpinBox self-sizes via AdjustToContents; no fixed width.
         self._pitch_spin.setToolTip(
             "Transpose in semitones (Shift+Left / Shift+Right)"
         )
@@ -832,7 +866,7 @@ class PlayerControls(QWidget):
         self._bpm_spin.setRange(20, 300)
         self._bpm_spin.setValue(120)
         self._bpm_spin.setSuffix(" BPM")
-        self._bpm_spin.setFixedWidth(105)
+        # Default sizeHint fits "300 BPM" -- no fixed width needed.
         self._bpm_spin.setToolTip("Metronome tempo")
         self._bpm_spin.setAccessibleName("Metronome BPM")
         self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
@@ -840,7 +874,6 @@ class PlayerControls(QWidget):
 
         self._tap_times: list[float] = []
         self._tap_btn = QPushButton("Tap")
-        self._tap_btn.setFixedWidth(46)
         self._tap_btn.setToolTip("Tap to set tempo")
         self._tap_btn.setAccessibleName("Tap tempo")
         self._tap_btn.clicked.connect(self._on_tap)
@@ -848,7 +881,6 @@ class PlayerControls(QWidget):
 
         self._beat_sync_btn = QPushButton("Sync")
         self._beat_sync_btn.setCheckable(True)
-        self._beat_sync_btn.setFixedWidth(50)
         self._beat_sync_btn.setToolTip(
             "Sync metronome to detected beats (click on actual beat positions)"
         )
@@ -861,7 +893,7 @@ class PlayerControls(QWidget):
         self._beat_nudge_spin.setRange(-500, 500)
         self._beat_nudge_spin.setValue(0)
         self._beat_nudge_spin.setSuffix(" ms")
-        self._beat_nudge_spin.setFixedWidth(104)
+        # Default sizeHint fits "-500 ms" -- no fixed width needed.
         self._beat_nudge_spin.setToolTip("Metronome nudge (shift metronome clicking)")
         self._beat_nudge_spin.setAccessibleName("Sync Nudge")
         self._beat_nudge_spin.valueChanged.connect(self._on_beat_nudge_changed)
@@ -889,7 +921,9 @@ class PlayerControls(QWidget):
         for v in _MET_VOL_PRESETS:
             self._metronome_vol_combo.addItem(f"{v}%", v)
         self._metronome_vol_combo.setCurrentText("100%")
-        self._metronome_vol_combo.setFixedWidth(62)
+        self._metronome_vol_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
         self._metronome_vol_combo.setToolTip("Metronome volume")
         self._metronome_vol_combo.setAccessibleName("Metronome volume preset")
         self._metronome_vol_combo.activated.connect(

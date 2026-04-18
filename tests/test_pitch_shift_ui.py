@@ -225,6 +225,29 @@ class TestPitchSpinBoxText:
         assert "+2 semitones" in text
         assert "(processing 1/4)" in text
 
+    def test_size_hint_shrinks_with_shorter_text(self, controls):
+        """Width must adapt to content -- no wasted space when the
+        text is short ("original") vs long ("+12 semitones ...")."""
+        spin = controls._pitch_spin
+        spin.setValue(0)  # "original"
+        short_w = spin.sizeHint().width()
+        spin.setValue(12)  # "+12 semitones"
+        long_w = spin.sizeHint().width()
+        assert long_w > short_w, (
+            f"sizeHint should grow with longer text ({short_w} vs {long_w})"
+        )
+
+    def test_size_hint_grows_with_processing_suffix(self, controls, player):
+        """The processing suffix must expand the spinbox width so it
+        doesn't clip mid-render."""
+        spin = controls._pitch_spin
+        spin.setValue(2)
+        idle_w = spin.sizeHint().width()
+        player._pitch_semitones = 2
+        controls._on_stretch_progress(1, 4)
+        processing_w = spin.sizeHint().width()
+        assert processing_w > idle_w
+
 
 # -----------------------------------------------------------------------
 # Label verb selection based on active transforms (helper function)
