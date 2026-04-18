@@ -89,21 +89,14 @@ class StretchWorker(QThread):
     progress = Signal(int, int)  # (current_stem, total_stems)
     error = Signal(str)
 
-    # soxr_mq is ~3-4x faster than the default soxr_hq with no audible
-    # difference at musical material. soxr_hq is mastering-grade; for
-    # interactive scrubbing we want responsiveness.
-    _RESAMPLE_TYPE = "soxr_mq"
-
-    # STFT hop size for pitch_shift / time_stretch.  Default librosa value
-    # is 512 (75 % overlap at n_fft=2048).  Doubling to 1024 (50 % overlap)
-    # reduces the number of STFT frames by 2x → roughly 2-3x faster
-    # end-to-end, with no perceptible quality difference for ±1–7 semitone
-    # shifts on typical music material.  Benchmarked values for a 5-min
-    # 4-stem song at 44.1 kHz:
-    #   hop=512  → ~44 s  (default)
-    #   hop=1024 → ~19 s  (current — ~2.3x faster)
-    #   hop=2048 → ~10 s  (further speedup but audible smearing on drums)
-    _HOP_LENGTH = 1024
+    # Resampler quality.  librosa's default is "soxr_hq" (high-quality
+    # SOX resampler).  We keep it -- dropping to "soxr_mq" is ~3x faster
+    # but introduces an audible metallic timbre on transient-heavy
+    # material (drums, plucked strings), which is unacceptable for a
+    # tool whose whole purpose is faithful playback of the source.
+    # Speed wins come from parallel stem rendering, not from cutting
+    # resampler quality.
+    _RESAMPLE_TYPE = "soxr_hq"
 
     # Cap parallelism to avoid excess RAM usage.  Each thread buffers a
     # mono copy of one stem; 4 threads × ~28 MB/stem = ~112 MB overhead
@@ -232,12 +225,10 @@ class StretchWorker(QThread):
                     sr=self._sample_rate,
                     n_steps=self._pitch_semitones,
                     res_type=self._RESAMPLE_TYPE,
-                    hop_length=self._HOP_LENGTH,
                 )
             if apply_speed:
                 mono = librosa.effects.time_stretch(
                     mono, rate=self._speed,
-                    hop_length=self._HOP_LENGTH,
                 )
             channels.append(mono)
 

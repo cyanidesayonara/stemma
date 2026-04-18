@@ -8,11 +8,15 @@ discoverable:
   - Scrolling the spinbox cancels any in-flight render immediately so
     we stop wasting CPU on a stale target.
   - The pitch spinbox stays enabled during a render (no more frozen UI).
-  - ``stretch_progress`` updates the pitch spinbox suffix
-    (``" st (2/4)"``) so progress is visually attached to the control.
-  - ``stretch_finished`` restores the idle suffix.
+  - ``stretch_progress`` updates the pitch spinbox with a processing
+    suffix (e.g. ``"+2 semitones (processing 2/4)"``) so progress is
+    visually attached to the control that spawned the render.
+  - ``stretch_finished`` clears the suffix.
   - Speed-only renders fall back to the floating status label because
     a QComboBox cannot carry inline suffix text.
+  - The spinbox itself renders human-readable text via
+    ``PitchSpinBox.textFromValue`` -- "original" at 0, "+N semitone(s)"
+    otherwise.
 """
 
 from unittest.mock import patch
@@ -124,8 +128,8 @@ class TestStretchStatusIndicator:
     def test_pitch_render_updates_spinbox_suffix(self, controls, player):
         player._pitch_semitones = 2
         controls._on_stretch_started()
-        # Before any progress ticks, we show a pending state.
-        assert controls._pitch_spin.suffix() != " st"
+        # Before any progress ticks, we show a pending state (non-empty).
+        assert controls._pitch_spin.suffix() != ""
 
     def test_pitch_progress_appears_in_spinbox_suffix(
         self, controls, player,
@@ -133,8 +137,8 @@ class TestStretchStatusIndicator:
         player._pitch_semitones = 2
         controls._on_stretch_progress(2, 4)
         suffix = controls._pitch_spin.suffix()
-        assert "(2/4)" in suffix
-        assert "st" in suffix
+        assert "2/4" in suffix
+        assert "processing" in suffix.lower()
 
     def test_pitch_progress_does_not_duplicate_in_floating_label(
         self, controls, player,
@@ -156,20 +160,70 @@ class TestStretchStatusIndicator:
         text = controls._speed_status.text()
         assert "Time-stretching" in text
         assert "(2/4)" in text
-        # And the spinbox suffix stays at its idle state.
-        assert controls._pitch_spin.suffix() == " st"
+        # And the spinbox suffix stays empty (its main text already
+        # reads "original" when pitch is 0).
+        assert controls._pitch_spin.suffix() == ""
 
-    def test_finished_restores_spinbox_suffix(self, controls, player):
+    def test_finished_clears_spinbox_suffix(self, controls, player):
         player._pitch_semitones = 2
         controls._on_stretch_progress(2, 4)
         controls._on_stretch_finished()
-        assert controls._pitch_spin.suffix() == " st"
+        assert controls._pitch_spin.suffix() == ""
 
     def test_finished_clears_floating_label(self, controls, player):
         player._playback_speed = 0.75
         controls._on_stretch_progress(1, 4)
         controls._on_stretch_finished()
         assert controls._speed_status.text() == ""
+
+
+# -----------------------------------------------------------------------
+# PitchSpinBox human-readable text
+# -----------------------------------------------------------------------
+
+class TestPitchSpinBoxText:
+    """``textFromValue`` produces human-readable labels rather than a
+    bare integer + unit suffix.  This is what the user sees in the UI."""
+
+    def test_zero_reads_as_original(self, controls):
+        controls._pitch_spin.setValue(0)
+        assert "original" in controls._pitch_spin.text()
+
+    def test_positive_one_is_singular(self, controls):
+        controls._pitch_spin.setValue(1)
+        text = controls._pitch_spin.text()
+        assert "+1 semitone" in text
+        assert "semitones" not in text  # not plural
+
+    def test_positive_two_is_plural(self, controls):
+        controls._pitch_spin.setValue(2)
+        assert "+2 semitones" in controls._pitch_spin.text()
+
+    def test_negative_one_is_singular(self, controls):
+        controls._pitch_spin.setValue(-1)
+        text = controls._pitch_spin.text()
+        assert "-1 semitone" in text
+        assert "semitones" not in text
+
+    def test_negative_three_is_plural(self, controls):
+        controls._pitch_spin.setValue(-3)
+        assert "-3 semitones" in controls._pitch_spin.text()
+
+    def test_idle_spinbox_has_no_suffix_parens(self, controls):
+        """When the spinbox is idle we only show the core label --
+        the processing tail is added only during a render."""
+        controls._pitch_spin.setValue(2)
+        assert "(processing" not in controls._pitch_spin.text()
+
+    def test_processing_suffix_appended_during_render(
+        self, controls, player,
+    ):
+        player._pitch_semitones = 2
+        controls._pitch_spin.setValue(2)
+        controls._on_stretch_progress(1, 4)
+        text = controls._pitch_spin.text()
+        assert "+2 semitones" in text
+        assert "(processing 1/4)" in text
 
 
 # -----------------------------------------------------------------------

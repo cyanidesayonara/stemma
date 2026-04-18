@@ -172,10 +172,13 @@ class TestStretchWorkerCombined:
         assert ps.call_count == 2  # Once per channel.
         ts.assert_not_called()
 
-    def test_pitch_uses_fast_res_type(self, app):
-        """The worker passes the fast resample kernel and a tuned hop_length
-        to librosa so renders complete in a usable time during interactive
-        use."""
+    def test_pitch_uses_high_quality_resampler(self, app):
+        """The worker uses soxr_hq -- dropping to soxr_mq gives a big
+        speedup but introduces an audible metallic timbre on transient
+        material (drums, plucked strings), which defeats the point of a
+        faithful-playback tool.  Speed wins come from parallel stem
+        rendering instead.
+        """
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
         worker = StretchWorker(stems, 44100, 1.0, 2)
         with patch(
@@ -183,11 +186,27 @@ class TestStretchWorkerCombined:
             side_effect=lambda y, sr, n_steps, **kw: y,
         ) as ps:
             worker.run()
-        # All calls must have passed res_type=soxr_mq (~3-4x faster than
-        # soxr_hq) and hop_length=_HOP_LENGTH (~2-3x faster per benchmark).
+        assert ps.call_count > 0
         for call in ps.call_args_list:
-            assert call.kwargs.get("res_type") == "soxr_mq"
-            assert call.kwargs.get("hop_length") == StretchWorker._HOP_LENGTH
+            assert call.kwargs.get("res_type") == "soxr_hq"
+            # hop_length must be librosa's default (i.e. not overridden);
+            # enlarging it was tried and rejected -- it caused phase
+            # smearing on drums.
+            assert "hop_length" not in call.kwargs
+
+    def test_time_stretch_uses_default_hop_length(self, app):
+        """time_stretch also uses librosa's default hop.  Larger hops
+        are faster but smear transients."""
+        stems = {"vocals": np.random.randn(8820, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 0.75, 0)
+        with patch(
+            "src.player.librosa.effects.time_stretch",
+            side_effect=lambda y, rate, **kw: y,
+        ) as ts:
+            worker.run()
+        assert ts.call_count > 0
+        for call in ts.call_args_list:
+            assert "hop_length" not in call.kwargs
 
     def test_speed_only_calls_time_stretch(self, app):
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}

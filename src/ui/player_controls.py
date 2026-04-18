@@ -284,6 +284,41 @@ def _format_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+class PitchSpinBox(QSpinBox):
+    """Spinbox whose displayed text is human-readable ("original",
+    "+1 semitone", "-2 semitones") rather than a bare number.
+
+    QSpinBox always renders ``prefix + textFromValue(value) + suffix``,
+    so ``suffix`` is used exclusively for the live render-progress tail
+    (e.g. ``" (processing 2/4)"``) and kept empty when idle.
+    """
+
+    def textFromValue(self, value: int) -> str:  # noqa: D401 (Qt API)
+        if value == 0:
+            return "original"
+        sign = "+" if value > 0 else "-"
+        magnitude = abs(value)
+        word = "semitone" if magnitude == 1 else "semitones"
+        return f"{sign}{magnitude} {word}"
+
+    def valueFromText(self, text: str) -> int:  # noqa: D401 (Qt API)
+        # Users edit via the wheel / spin buttons / keyboard arrows
+        # rather than typing, but Qt still calls valueFromText during
+        # focus-out.  Parse the leading signed integer if present;
+        # anything else (including "original") maps to 0.
+        import re
+        stripped = text.strip()
+        if not stripped:
+            return 0
+        match = re.match(r"[+-]?\d+", stripped)
+        if match:
+            try:
+                return int(match.group())
+            except ValueError:
+                return 0
+        return 0
+
+
 class StemRow(QWidget):
     """A single stem row with label, mute, and solo buttons."""
 
@@ -747,12 +782,13 @@ class PlayerControls(QWidget):
         self._pitch_label = QLabel("Pitch:")
         loop_speed_bar.addWidget(self._pitch_label)
 
-        self._pitch_spin = QSpinBox()
+        self._pitch_spin = PitchSpinBox()
         self._pitch_spin.setRange(PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES)
         self._pitch_spin.setValue(0)
-        self._pitch_spin.setSuffix(" st")
-        # Room for the "… 1/6" progress suffix that appears during a render.
-        self._pitch_spin.setFixedWidth(130)
+        # The display ("+2 semitones") plus the processing suffix
+        # ("(processing 2/4)") need room without clipping; pick a width
+        # that fits "+12 semitones (processing 10/10)" comfortably.
+        self._pitch_spin.setFixedWidth(230)
         self._pitch_spin.setToolTip(
             "Transpose in semitones (Shift+Left / Shift+Right)"
         )
@@ -1434,29 +1470,29 @@ class PlayerControls(QWidget):
         self._update_stretch_indicator(current, total)
 
     def _on_stretch_finished(self) -> None:
-        """Clear the render indicator and restore the idle suffix."""
-        self._pitch_spin.setSuffix(" st")
+        """Clear the render indicator and restore the idle display."""
+        self._pitch_spin.setSuffix("")
         self._speed_status.setText("")
 
     def _update_stretch_indicator(self, current: int, total: int) -> None:
         """Paint render progress onto the pitch spinbox / speed label.
 
-        Pitch progress goes on the spinbox as a suffix
-        (e.g. ``" st (2/4)"``) so the indicator is unmistakably tied
-        to the control that spawned the render.  Speed progress stays
-        as a small label next to the speed combo, since combos can't
-        carry inline suffix text.
+        The pitch spinbox's primary text ("+2 semitones") is produced by
+        :class:`PitchSpinBox.textFromValue`; this method only manages the
+        trailing progress suffix (e.g. ``" (processing 2/4)"``).  Speed
+        progress uses a small floating label next to the speed combo,
+        since QComboBox can't carry inline suffix text.
         """
         pitch_on = self._player.pitch_semitones != 0
         speed_on = self._player.speed != 1.0
 
         if pitch_on:
             if total > 0:
-                self._pitch_spin.setSuffix(f" st ({current}/{total})")
+                self._pitch_spin.setSuffix(f" (processing {current}/{total})")
             else:
-                self._pitch_spin.setSuffix(" st\u2026")
+                self._pitch_spin.setSuffix(" (processing\u2026)")
         else:
-            self._pitch_spin.setSuffix(" st")
+            self._pitch_spin.setSuffix("")
 
         if speed_on and not pitch_on:
             verb = "Time-stretching"
