@@ -46,12 +46,17 @@ from src.app_settings import (
     read_default_export_format,
     read_default_mp3_bitrate,
     read_latency_offset_ms,
+    read_sync_recording_pitch,
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
 from src.model_manager import ModelManager
-from src.player import MultiTrackPlayer
+from src.player import (
+    PITCH_MAX_SEMITONES,
+    PITCH_MIN_SEMITONES,
+    MultiTrackPlayer,
+)
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import PlayerControls, _format_time
@@ -136,6 +141,9 @@ class MainWindow(QMainWindow):
         )
         self._player.set_latency_offset_ms(
             read_latency_offset_ms(self._settings)
+        )
+        self._player.set_sync_recording_pitch(
+            read_sync_recording_pitch(self._settings)
         )
         self._intro_pending = True
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
@@ -291,6 +299,12 @@ class MainWindow(QMainWindow):
         u(Qt.Modifier.SHIFT | Qt.Key.Key_Down,
           lambda: self._player_controls.cycle_speed(-1))
 
+        # -- Pitch (Shift+Left/Right) -- unguarded; one semitone per press.
+        u(Qt.Modifier.SHIFT | Qt.Key.Key_Right,
+          lambda: self._player_controls.bump_pitch(1))
+        u(Qt.Modifier.SHIFT | Qt.Key.Key_Left,
+          lambda: self._player_controls.bump_pitch(-1))
+
         # -- Loop --
         g(Qt.Key.Key_A, self._player_controls.set_loop_a)
         g(Qt.Key.Key_B, self._player_controls.set_loop_b)
@@ -419,6 +433,9 @@ class MainWindow(QMainWindow):
             self._player.set_latency_offset_ms(
                 read_latency_offset_ms(self._settings)
             )
+            self._player.set_sync_recording_pitch(
+                read_sync_recording_pitch(self._settings)
+            )
 
     def apply_theme(self, theme: str, colors: dict[str, str]) -> None:
         """Apply a theme to all child widgets that need explicit updates."""
@@ -492,9 +509,10 @@ class MainWindow(QMainWindow):
             + row("0-9", "Jump to 0%–90% position")
             + row("Left / Right", "Seek −5s / +5s")
             + row("Home / End", "Jump to start / end")
-            + section("Volume &amp; Speed")
+            + section("Volume, Speed &amp; Pitch")
             + row("Up / Down", "Master volume")
             + row("Shift+Up / Down", "Speed up / down")
+            + row("Shift+Left / Right", "Transpose \u2212 / + 1 semitone")
             + section("Stems")
             + row("Ctrl+1-6", "Mute/unmute stem")
             + section("Loop")
@@ -598,6 +616,9 @@ class MainWindow(QMainWindow):
         self._settings.setValue("session/loop_b", loop_b if loop_b is not None else -1)
         self._settings.setValue("session/looping", self._player.looping)
         self._settings.setValue("session/speed", self._player.speed)
+        self._settings.setValue(
+            "session/pitch_semitones", self._player.pitch_semitones
+        )
         self._settings.setValue(
             "session/metronome_bpm", self._player.metronome_bpm
         )
@@ -734,33 +755,78 @@ class MainWindow(QMainWindow):
             bool(looping),
         )
 
-        # Speed (async — seek after stretch completes)
+        # Speed + pitch (async — seek after stretch completes). When both
+        # are non-identity, the pitch worker is superseded by the speed
+        # worker, which renders both in a single pass.
         try:
             speed = float(self._settings.value("session/speed", 1.0))
         except (TypeError, ValueError):
             speed = 1.0
 
         try:
+            pitch_semi = int(self._settings.value(
+                "session/pitch_semitones", 0,
+            ))
+        except (TypeError, ValueError):
+            pitch_semi = 0
+        pitch_semi = max(
+            PITCH_MIN_SEMITONES, min(PITCH_MAX_SEMITONES, pitch_semi),
+        )
+
+        try:
             position = float(self._settings.value("session/position", 0.0))
         except (TypeError, ValueError):
             position = 0.0
 
-        if speed != 1.0:
-            def _after_speed_applied(_s: float, pos=position) -> None:
-                self._player.speed_changed.disconnect(_after_speed_applied)
-                self._player.seek(pos)
+        # Sync the spinbox display now so the UI matches the restored
+        # state even if the render is superseded (pitch_changed wouldn't
+        # fire in that case).
+        self._player_controls._pitch_spin.blockSignals(True)
+        self._player_controls._pitch_spin.setValue(pitch_semi)
+        self._player_controls._pitch_spin.blockSignals(False)
 
-            self._player.speed_changed.connect(_after_speed_applied)
-            self._player_controls._speed_combo.blockSignals(True)
-            label = f"{speed}x"
-            idx = self._player_controls._speed_combo.findText(label)
-            if idx >= 0:
-                self._player_controls._speed_combo.setCurrentIndex(idx)
-            self._player_controls._speed_combo.blockSignals(False)
-            self._player_controls._speed_status.setText("Stretching...")
-            self._player.set_speed(speed)
-        else:
+        speed_non_identity = speed != 1.0
+        pitch_non_identity = pitch_semi != 0
+
+        def _seek_after_render(_v: object = None, pos=position) -> None:
+            self._player.seek(pos)
+            # Ensure key label reflects pitch even if only speed_changed fired.
+            self._player_controls._refresh_key_label()
+
+        if not speed_non_identity and not pitch_non_identity:
             self._player.seek(position)
+        else:
+            # The last signal to fire is the one from the final render;
+            # speed supersedes pitch when both are active.
+            if speed_non_identity:
+                def _after_speed(_s: float) -> None:
+                    try:
+                        self._player.speed_changed.disconnect(_after_speed)
+                    except (TypeError, RuntimeError):
+                        pass
+                    _seek_after_render()
+                self._player.speed_changed.connect(_after_speed)
+            else:
+                def _after_pitch(_p: int) -> None:
+                    try:
+                        self._player.pitch_changed.disconnect(_after_pitch)
+                    except (TypeError, RuntimeError):
+                        pass
+                    _seek_after_render()
+                self._player.pitch_changed.connect(_after_pitch)
+
+            if pitch_non_identity:
+                self._player.set_pitch(pitch_semi)
+            if speed_non_identity:
+                self._player_controls._speed_combo.blockSignals(True)
+                label = f"{speed}x"
+                idx = self._player_controls._speed_combo.findText(label)
+                if idx >= 0:
+                    self._player_controls._speed_combo.setCurrentIndex(idx)
+                self._player_controls._speed_combo.blockSignals(False)
+                # Status text driven by the player's stretch_started/progress
+                # signals -- no need to set it manually here.
+                self._player.set_speed(speed)
 
         # Metronome state
         try:
