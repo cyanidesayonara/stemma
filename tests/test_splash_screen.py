@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.app_settings import read_startup_play_sound
@@ -26,6 +26,30 @@ def app():
     if instance is None:
         instance = QApplication([])
     return instance
+
+
+@pytest.fixture(autouse=True)
+def _headless_safe_show(monkeypatch):
+    """Prevent native window creation during splash tests.
+
+    Calling ``show()`` on a QWidget on a headless Windows CI runner can
+    trigger a synchronous WM_PAINT that fatally faults without a display
+    driver (access violation).  ``WA_DontShowOnScreen`` is Qt's designated
+    attribute for this: it skips native window creation while leaving
+    ``isVisible()``/``setVisible()`` semantics intact.
+
+    Rather than patch every test, we wrap ``QWidget.show`` so the
+    attribute is applied immediately before any show() call -- covering
+    both the SplashScreen and any QWidget instances that ``finish()``
+    may try to show.
+    """
+    original_show = QWidget.show
+
+    def safe_show(self):
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        original_show(self)
+
+    monkeypatch.setattr(QWidget, "show", safe_show)
 
 
 @pytest.fixture

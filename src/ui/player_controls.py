@@ -751,13 +751,26 @@ class PlayerControls(QWidget):
         self._pitch_spin.setRange(PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES)
         self._pitch_spin.setValue(0)
         self._pitch_spin.setSuffix(" st")
-        self._pitch_spin.setFixedWidth(70)
+        # Room for the "… 1/6" progress suffix that appears during a render.
+        self._pitch_spin.setFixedWidth(130)
         self._pitch_spin.setToolTip(
             "Transpose in semitones (Shift+Left / Shift+Right)"
         )
         self._pitch_spin.setAccessibleName("Pitch semitones")
         self._pitch_spin.valueChanged.connect(self._on_pitch_changed)
         loop_speed_bar.addWidget(self._pitch_spin)
+
+        # Debounce rapid spinbox scrolling so we don't spawn a librosa
+        # render for every intermediate semitone when the user scrubs
+        # through 1..7st. Each pitch render takes ~1-2s per stem; without
+        # debounce, holding the up arrow or scrolling the wheel pile up
+        # parallel workers, saturating the CPU and (historically) crashing
+        # the QThread layer.
+        self._pitch_debounce = QTimer(self)
+        self._pitch_debounce.setSingleShot(True)
+        self._pitch_debounce.setInterval(200)
+        self._pitch_debounce.timeout.connect(self._flush_pending_pitch)
+        self._pending_pitch: int | None = None
 
         controls_layout.addLayout(loop_speed_bar)
 
@@ -983,6 +996,9 @@ class PlayerControls(QWidget):
         self._player.play_finished.connect(self._on_play_finished)
         self._player.speed_changed.connect(self._on_speed_applied)
         self._player.pitch_changed.connect(self._on_pitch_applied)
+        self._player.stretch_started.connect(self._on_stretch_started)
+        self._player.stretch_progress.connect(self._on_stretch_progress)
+        self._player.stretch_finished.connect(self._on_stretch_finished)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
@@ -1318,12 +1334,12 @@ class PlayerControls(QWidget):
         speed = self._speed_combo.currentData()
         if speed is None:
             return
-        self._speed_status.setText("Stretching..." if speed != 1.0 else "")
+        # Status text is now driven by stretch_started/progress/finished
+        # signals from the player, not set here. Spawn the render.
         self._player.set_speed(speed)
 
     def _on_speed_applied(self, speed: float) -> None:
         """Player finished stretching; update UI."""
-        self._speed_status.setText("")
         self._speed_combo.blockSignals(True)
         label = f"{speed}x"
         idx = self._speed_combo.findText(label)
@@ -1346,13 +1362,33 @@ class PlayerControls(QWidget):
     # -- Pitch control slots --
 
     def _on_pitch_changed(self, semitones: int) -> None:
-        """User adjusted the pitch spinbox."""
-        self._speed_status.setText("Stretching..." if semitones != 0 else "")
-        self._player.set_pitch(int(semitones))
+        """User adjusted the pitch spinbox.
+
+        We don't call ``player.set_pitch`` immediately; a 200ms debounce
+        timer coalesces rapid scroll/arrow input into a single render.
+        The descriptive status text is set by ``_on_stretch_started``
+        once the worker actually spawns, not while the user is still
+        adjusting the value.
+
+        Any already-running render is cancelled right away so we stop
+        wasting CPU on a stale target -- the new render will spawn when
+        the debounce timer fires.
+        """
+        self._pending_pitch = int(semitones)
+        self._pitch_debounce.start()
+        # Kill the stale render immediately; the next one is queued.
+        self._player.cancel_stretch()
+
+    def _flush_pending_pitch(self) -> None:
+        """Apply the latest pitch value after the debounce window expires."""
+        if self._pending_pitch is None:
+            return
+        pitch = self._pending_pitch
+        self._pending_pitch = None
+        self._player.set_pitch(pitch)
 
     def _on_pitch_applied(self, semitones: int) -> None:
         """Player finished pitch-shifting; update UI."""
-        self._speed_status.setText("")
         self._pitch_spin.blockSignals(True)
         self._pitch_spin.setValue(int(semitones))
         self._pitch_spin.blockSignals(False)
@@ -1369,6 +1405,87 @@ class PlayerControls(QWidget):
             direction: +1 for up, -1 for down. Clamped by the spinbox range.
         """
         self._pitch_spin.setValue(self._pitch_spin.value() + direction)
+
+    # -- Stretch worker progress indicator --
+    #
+    # Progress is shown *inside* the control the user is manipulating:
+    # the pitch spinbox suffix becomes " st (2/4)" during a pitch render,
+    # and a short "Time-stretching stems…" label sits next to the speed
+    # combo (combos can't carry inline progress text).  The spinbox stays
+    # enabled throughout -- scrolling it cancels the in-flight render
+    # and queues a fresh one via the debounce timer.
+
+    def _on_stretch_started(self) -> None:
+        """Begin showing render progress on the active control.
+
+        The spinbox stays enabled so the user can keep scrubbing -- the
+        player cancels the in-flight worker as soon as a new target is
+        committed (see ``_flush_pending_pitch``).
+        """
+        self._update_stretch_indicator(0, 0)
+
+    def _on_stretch_progress(self, current: int, total: int) -> None:
+        """Update the live render indicator with per-stem progress."""
+        self._update_stretch_indicator(current, total)
+
+    def _on_stretch_finished(self) -> None:
+        """Clear the render indicator and restore the idle suffix."""
+        self._pitch_spin.setSuffix(" st")
+        self._speed_status.setText("")
+
+    def _update_stretch_indicator(self, current: int, total: int) -> None:
+        """Paint render progress onto the pitch spinbox / speed label.
+
+        Pitch progress goes on the spinbox as a suffix
+        (e.g. ``" st (2/4)"``) so the indicator is unmistakably tied
+        to the control that spawned the render.  Speed progress stays
+        as a small label next to the speed combo, since combos can't
+        carry inline suffix text.
+        """
+        pitch_on = self._player.pitch_semitones != 0
+        speed_on = self._player.speed != 1.0
+
+        if pitch_on:
+            if total > 0:
+                self._pitch_spin.setSuffix(f" st ({current}/{total})")
+            else:
+                self._pitch_spin.setSuffix(" st\u2026")
+        else:
+            self._pitch_spin.setSuffix(" st")
+
+        if speed_on and not pitch_on:
+            verb = "Time-stretching"
+            if total > 0:
+                self._speed_status.setText(
+                    f"{verb} stems ({current}/{total})\u2026"
+                )
+            else:
+                self._speed_status.setText(f"{verb} stems\u2026")
+        else:
+            # When pitch is active, the spinbox suffix already carries
+            # the indicator; don't duplicate it in a floating label.
+            self._speed_status.setText("")
+
+    def _render_status_label(self, current: int, total: int) -> str:
+        """Compose the floating-label status text (speed-only renders).
+
+        Retained for tests and for callers that want a single-string
+        status. For the pitch case the spinbox suffix is authoritative.
+        """
+        pitch_on = self._player.pitch_semitones != 0
+        speed_on = self._player.speed != 1.0
+        if pitch_on and speed_on:
+            verb = "Transposing and time-stretching"
+        elif pitch_on:
+            verb = "Transposing"
+        elif speed_on:
+            verb = "Time-stretching"
+        else:
+            # Transition back to identity (fast path emits no progress).
+            verb = "Rendering"
+        if total > 0:
+            return f"{verb} stems ({current}/{total})\u2026"
+        return f"{verb} stems\u2026"
 
     # -- Metronome handlers --
 

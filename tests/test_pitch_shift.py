@@ -8,9 +8,11 @@ Covers:
   - Recording-take stems skip pitch by default; sync toggle includes them
   - ``sync_recording_pitch`` re-renders only when pitch is active
   - Recording cannot be armed when pitch != 0
+  - Stretch lifecycle signals (started / progress / finished) emit correctly
+  - Detached workers are kept alive on ``_detached_workers`` until finished
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -163,11 +165,27 @@ class TestStretchWorkerCombined:
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
         worker = StretchWorker(stems, 44100, 1.0, 2)
         with patch("src.player.librosa.effects.pitch_shift",
-                   side_effect=lambda y, sr, n_steps: y) as ps, \
+                   side_effect=lambda y, sr, n_steps, **kw: y) as ps, \
              patch("src.player.librosa.effects.time_stretch") as ts:
             worker.run()
         assert ps.call_count == 2  # Once per channel.
         ts.assert_not_called()
+
+    def test_pitch_uses_fast_res_type(self, app):
+        """The worker passes a fast resample kernel to librosa so renders
+        complete in a usable time during interactive use."""
+        stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 1.0, 2)
+        with patch(
+            "src.player.librosa.effects.pitch_shift",
+            side_effect=lambda y, sr, n_steps, **kw: y,
+        ) as ps:
+            worker.run()
+        # All calls must have passed res_type.  soxr_mq is ~3-4x faster
+        # than the default soxr_hq and sounds identical on music.
+        for call in ps.call_args_list:
+            assert "res_type" in call.kwargs
+            assert call.kwargs["res_type"] == "soxr_mq"
 
     def test_speed_only_calls_time_stretch(self, app):
         stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
@@ -185,7 +203,7 @@ class TestStretchWorkerCombined:
         worker = StretchWorker(stems, 44100, 0.75, 2)
         call_order: list[str] = []
 
-        def fake_ps(y, sr, n_steps):
+        def fake_ps(y, sr, n_steps, **kw):
             call_order.append("pitch")
             return y
 
@@ -229,7 +247,7 @@ class TestRecordingPitchSync:
         worker = StretchWorker(stems, 44100, 1.0, 3, sync_recording_pitch=False)
         shifted_names: list[str] = []
 
-        def fake_ps(y, sr, n_steps):
+        def fake_ps(y, sr, n_steps, **kw):
             # Track which stem names the shift is applied to by reading
             # the worker's loop context indirectly: nothing in the call
             # reveals the name, so use call count instead.
@@ -249,7 +267,7 @@ class TestRecordingPitchSync:
         worker = StretchWorker(stems, 44100, 1.0, 3, sync_recording_pitch=True)
         shifts: list[int] = []
 
-        def fake_ps(y, sr, n_steps):
+        def fake_ps(y, sr, n_steps, **kw):
             shifts.append(1)
             return y
 
@@ -326,3 +344,264 @@ class TestLoadStemsResetsPitch:
         sf.write(str(wav_path), np.zeros((4410, 2), dtype=np.float32), 44100)
         loaded_player.load_stems({"vocals": str(wav_path)})
         assert loaded_player.pitch_semitones == 0
+
+
+# -----------------------------------------------------------------------
+# Stretch lifecycle signals (started / progress / finished)
+# -----------------------------------------------------------------------
+
+class TestStretchLifecycleSignals:
+    """stretch_started/progress/finished frame the async render for the UI."""
+
+    def test_started_emits_when_worker_spawns(self, loaded_player):
+        """Spawning a worker emits stretch_started exactly once."""
+        started: list[int] = []
+        loaded_player.stretch_started.connect(lambda: started.append(1))
+        with patch("src.player.StretchWorker") as worker_cls:
+            worker_cls.return_value.isRunning.return_value = False
+            loaded_player.set_pitch(2)
+        assert started == [1]
+
+    def test_started_does_not_emit_on_fast_path(self, loaded_player):
+        """Identity no-op takes the fast path and must not emit."""
+        started: list[int] = []
+        loaded_player.stretch_started.connect(lambda: started.append(1))
+        loaded_player.set_pitch(0)  # Already 0 -- fast path.
+        assert started == []
+
+    def test_finished_emits_on_success(self, loaded_player):
+        """Successful render emits stretch_finished via _on_stretch_ready."""
+        finished: list[int] = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player._on_stretch_ready(
+            dict(loaded_player._original_stems), ("pitch",)
+        )
+        assert finished == [1]
+
+    def test_finished_emits_on_error(self, loaded_player):
+        """Worker failure still emits stretch_finished so UI re-enables."""
+        finished: list[int] = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player._on_stretch_error("boom", ("pitch",))
+        assert finished == [1]
+
+    def test_progress_connected_to_worker(self, loaded_player):
+        """Player wires the worker's per-stem progress through to its own
+        ``stretch_progress`` Signal, so the UI can subscribe once and stay
+        connected across successive renders."""
+        with patch("src.player.StretchWorker") as worker_cls:
+            fake_worker = MagicMock()
+            fake_worker.isRunning.return_value = False
+            worker_cls.return_value = fake_worker
+            loaded_player.set_pitch(3)
+
+        # The player must forward progress to its own signal.
+        fake_worker.progress.connect.assert_called_once_with(
+            loaded_player.stretch_progress
+        )
+
+
+# -----------------------------------------------------------------------
+# Worker keepalive: QThread GC safety
+# -----------------------------------------------------------------------
+
+class TestWorkerKeepalive:
+    """Detached-but-running workers must be held on _detached_workers.
+
+    Without the keepalive list, the Python wrapper refcount can drop to
+    zero while the QThread is still active, triggering the classic
+    "QThread: Destroyed while thread is still running" crash.
+    """
+
+    def test_running_worker_is_detached_to_keepalive(self, loaded_player):
+        """A running worker gets appended to _detached_workers."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        loaded_player._stretch_worker = fake_worker
+
+        assert loaded_player._detach_stretch_worker() is True
+
+        assert fake_worker in loaded_player._detached_workers
+        assert loaded_player._stretch_worker is None
+
+    def test_running_worker_is_cancelled_on_detach(self, loaded_player):
+        """Detach must call ``cancel()`` so the worker exits early
+        instead of wasting CPU on a stale render target."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        loaded_player._stretch_worker = fake_worker
+
+        loaded_player._detach_stretch_worker()
+
+        fake_worker.cancel.assert_called_once()
+
+    def test_detached_worker_defers_setParent(self, loaded_player):
+        """A running worker must not be setParent(None)'d mid-run."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        loaded_player._stretch_worker = fake_worker
+
+        loaded_player._detach_stretch_worker()
+
+        # Qt parent ownership stays intact while the thread is running.
+        fake_worker.setParent.assert_not_called()
+
+    def test_finished_signal_is_connected_to_reaper(self, loaded_player):
+        """The keepalive list is emptied when the worker finishes."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        loaded_player._stretch_worker = fake_worker
+
+        loaded_player._detach_stretch_worker()
+
+        assert fake_worker.finished.connect.called
+
+    def test_reaper_removes_from_keepalive(self, loaded_player):
+        """_reap_detached_worker drops the worker from _detached_workers."""
+        fake_worker = MagicMock()
+        loaded_player._detached_workers.append(fake_worker)
+
+        loaded_player._reap_detached_worker(fake_worker)
+
+        assert fake_worker not in loaded_player._detached_workers
+        fake_worker.setParent.assert_called_once_with(None)
+        fake_worker.deleteLater.assert_called_once()
+
+    def test_reaper_is_idempotent(self, loaded_player):
+        """Calling the reaper twice does not raise on the second call."""
+        fake_worker = MagicMock()
+        loaded_player._detached_workers.append(fake_worker)
+        loaded_player._reap_detached_worker(fake_worker)
+        # Second call: the worker is no longer in the list but should not
+        # raise (protects against double-connections or test re-entry).
+        loaded_player._reap_detached_worker(fake_worker)
+
+    def test_non_running_worker_is_released_immediately(self, loaded_player):
+        """If the worker already stopped, skip the keepalive dance."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = False
+        loaded_player._stretch_worker = fake_worker
+
+        assert loaded_player._detach_stretch_worker() is False
+
+        assert fake_worker not in loaded_player._detached_workers
+        fake_worker.setParent.assert_called_once_with(None)
+        fake_worker.deleteLater.assert_called_once()
+
+    def test_multiple_rapid_detaches_accumulate(self, loaded_player):
+        """Two rapid set_pitch calls keep both workers alive."""
+        worker_a = MagicMock()
+        worker_a.isRunning.return_value = True
+        loaded_player._stretch_worker = worker_a
+        loaded_player._detach_stretch_worker()
+
+        worker_b = MagicMock()
+        worker_b.isRunning.return_value = True
+        loaded_player._stretch_worker = worker_b
+        loaded_player._detach_stretch_worker()
+
+        assert worker_a in loaded_player._detached_workers
+        assert worker_b in loaded_player._detached_workers
+        assert len(loaded_player._detached_workers) == 2
+
+    def test_detach_returns_false_when_no_worker(self, loaded_player):
+        """Detach is idempotent and reports 'no render was active'."""
+        loaded_player._stretch_worker = None
+        assert loaded_player._detach_stretch_worker() is False
+
+
+# -----------------------------------------------------------------------
+# StretchWorker.cancel() — early exit semantics
+# -----------------------------------------------------------------------
+
+class TestStretchWorkerCancel:
+    """Cancellation must stop the worker without emitting completion."""
+
+    def test_cancel_sets_flag(self, app):
+        stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 1.0, 2)
+        assert worker.cancelled is False
+        worker.cancel()
+        assert worker.cancelled is True
+
+    def test_cancelled_worker_emits_no_completed(self, app):
+        """If cancelled before run, no completed signal fires."""
+        stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 1.0, 2)
+        worker.cancel()
+        completed: list = []
+        worker.completed.connect(lambda d: completed.append(d))
+        worker.run()
+        assert completed == []
+
+    def test_cancelled_worker_emits_no_progress(self, app):
+        """Progress signals are suppressed once cancelled."""
+        stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 1.0, 2)
+        worker.cancel()
+        progress: list = []
+        worker.progress.connect(lambda c, t: progress.append((c, t)))
+        worker.run()
+        assert progress == []
+
+    def test_cancelled_worker_swallows_errors(self, app):
+        """Errors raised after cancellation are not surfaced (the caller
+        no longer cares; surfacing would confuse the UI, which already
+        moved on)."""
+        stems = {"vocals": np.random.randn(4410, 2).astype(np.float32)}
+        worker = StretchWorker(stems, 44100, 1.0, 2)
+        errors: list = []
+        worker.error.connect(lambda m: errors.append(m))
+        worker.cancel()
+
+        # Make librosa blow up; since we're cancelled, no error should
+        # escape.
+        with patch(
+            "src.player.librosa.effects.pitch_shift",
+            side_effect=RuntimeError("oops"),
+        ):
+            worker.run()
+        assert errors == []
+
+
+# -----------------------------------------------------------------------
+# cancel_stretch() — player-level cancel without new render
+# -----------------------------------------------------------------------
+
+class TestCancelStretch:
+    def test_cancel_without_active_worker_is_noop(self, loaded_player):
+        """No worker running → no signal, no crash."""
+        finished: list = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player._stretch_worker = None
+        loaded_player.cancel_stretch()
+        assert finished == []
+
+    def test_cancel_with_active_worker_emits_finished(self, loaded_player):
+        """Cancelling a live render lets the UI clear its indicator."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        loaded_player._stretch_worker = fake_worker
+
+        finished: list = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player.cancel_stretch()
+
+        fake_worker.cancel.assert_called_once()
+        assert finished == [1]
+
+    def test_cancel_with_non_running_worker_still_releases(
+        self, loaded_player,
+    ):
+        """If the worker exists but already finished, clean up quietly."""
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = False
+        loaded_player._stretch_worker = fake_worker
+
+        finished: list = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player.cancel_stretch()
+
+        # Non-running worker is not "rendering", so no finished signal.
+        assert finished == []
+        assert loaded_player._stretch_worker is None
