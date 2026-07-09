@@ -20,7 +20,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 ## Features
 
 - AI-powered stem separation using HTDemucs v4 (4-stem and 6-stem models)
-- GPU-accelerated inference via ONNX Runtime + DirectML
+- ONNX Runtime inference; DirectML GPU acceleration is attempted per model with automatic CPU fallback (separation currently runs on CPU — see issue #125)
 - Multi-track player with per-stem mute/solo/volume controls
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
 - Real-time chord detection (major/minor) with Viterbi smoothing, updated 4×/s during playback
@@ -31,11 +31,12 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
 - A-B loop for practice sections (Stop returns to loop A while looping; seek stays inside the loop); pitch-preserving playback speed presets
+- Pitch transposition (±7 semitones), rendered in a single pass with the speed change; the Key badge shows the transposed key
 - Metronome with BPM entry, tap tempo, and beat-sync nudge (±500ms)
 - Optional count-in beats before playback (and optionally before each loop repeat)
 - Session persistence: restore last song, position, mixer, loop, speed, metronome, count-in, and recording take state after restart
 - Library panel shows artist and title on separate lines with teal selection highlight
-- Keyboard shortcuts for transport, stems, loop, speed, metronome, and count-in; full list under **Help > Keyboard Shortcuts**
+- Keyboard shortcuts for transport, stems, loop, speed, pitch, metronome, count-in, and recording; full list under **Help > Keyboard Shortcuts**
 - Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
 
@@ -58,7 +59,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~25 seconds, ~625 tests)
+# Fast tests (~25 seconds, ~825 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)
@@ -76,13 +77,19 @@ pytest -m hardware
 | Space | Play / Pause |
 | S | Stop |
 | Left / Right | Seek -/+ 5 seconds |
-| 1-6 | Toggle mute on stem |
-| A | Set loop start point |
-| B | Set loop end point |
+| Home / End | Jump to start / end |
+| 0-9 | Jump to 0%–90% position |
+| Up / Down | Master volume |
+| Shift+Up / Down | Speed up / down |
+| Shift+Left / Right | Transpose -/+ 1 semitone |
+| Ctrl+1-6 | Toggle mute on stem |
+| A / B | Set loop point A / B |
 | L | Toggle A-B loop |
-| [ / ] | Slower / faster playback speed |
 | M | Toggle metronome |
 | C | Toggle count-in |
+| R | Arm / disarm recording |
+| N / P | Next / previous song |
+| F1 | Keyboard shortcuts dialog |
 
 Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bindings as above).
 
