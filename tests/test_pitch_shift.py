@@ -675,3 +675,221 @@ class TestStretchErrorBeatsReset:
         assert np.array_equal(
             loaded_player._beat_frames, normal_beat_frames
         ), "_beat_frames not recomputed after error; metronome would misfire"
+
+
+# -----------------------------------------------------------------------
+# Render serialization — at most one live worker at a time
+# -----------------------------------------------------------------------
+
+class TestRenderSerialization:
+    """A draining worker must block new spawns to bound peak memory use.
+
+    The disk-fill bug: rapid speed/pitch knob twirls spawned a fresh
+    ``StretchWorker`` every time.  Each worker runs a ``ThreadPoolExecutor``
+    with up to 8 librosa calls holding float32 intermediates; stacking
+    them serialized into ~10GB of pagefile swap on ~60s stems before the
+    drain caught up.  The fix is a single queued-render slot that the
+    reaper drains once the previous worker's cancellation settles.
+    """
+
+    def test_second_render_queues_instead_of_spawning(self, loaded_player):
+        """While a worker drains, a new _render_stretch must not start a
+        second thread."""
+        # Simulate an in-flight worker that was just cancelled.
+        draining = MagicMock()
+        draining.isRunning.return_value = True
+        loaded_player._detached_workers.append(draining)
+        loaded_player._stretch_worker = None
+
+        loaded_player._playback_speed = 0.75
+        loaded_player._pitch_semitones = 0
+
+        with patch.object(loaded_player, "_spawn_stretch_worker") as spawn:
+            loaded_player._render_stretch(emit=("speed",))
+            spawn.assert_not_called()
+
+        assert loaded_player._pending_render_emit == ("speed",)
+
+    def test_queued_render_supersedes_previous_queued(self, loaded_player):
+        """A fresh queued render replaces the old emit tuple."""
+        draining = MagicMock()
+        draining.isRunning.return_value = True
+        loaded_player._detached_workers.append(draining)
+        loaded_player._pending_render_emit = ("pitch",)
+        loaded_player._playback_speed = 0.75
+
+        with patch.object(loaded_player, "_spawn_stretch_worker"):
+            loaded_player._render_stretch(emit=("speed",))
+
+        # The newer emit wins; the UI only needs to know the latest knob.
+        assert loaded_player._pending_render_emit == ("speed",)
+
+    def test_reaper_dispatches_queued_render(self, loaded_player):
+        """When the last drain finishes, the queued render fires."""
+        draining = MagicMock()
+        loaded_player._detached_workers = [draining]
+        loaded_player._pending_render_emit = ("speed",)
+        loaded_player._playback_speed = 0.75
+        loaded_player._pitch_semitones = 0
+
+        with patch.object(loaded_player, "_spawn_stretch_worker") as spawn:
+            loaded_player._reap_detached_worker(draining)
+            spawn.assert_called_once_with(("speed",))
+
+        assert loaded_player._pending_render_emit is None
+
+    def test_reaper_dispatch_emits_stretch_started(self, loaded_player):
+        """The queued render must re-light the UI indicator.
+
+        Otherwise the render runs invisibly when cancel_stretch had
+        previously cleared the indicator (common: every UI-driven
+        debounce path calls cancel_stretch first).
+        """
+        draining = MagicMock()
+        loaded_player._detached_workers = [draining]
+        loaded_player._pending_render_emit = ("speed",)
+        loaded_player._playback_speed = 0.75
+        loaded_player._pitch_semitones = 0
+
+        started: list[int] = []
+        loaded_player.stretch_started.connect(lambda: started.append(1))
+
+        # Patch StretchWorker construction so we exercise _spawn_stretch_worker
+        # end-to-end without actually spinning up a QThread.
+        with patch("src.player.StretchWorker") as mock_cls:
+            mock_worker = MagicMock()
+            mock_worker.isRunning.return_value = False
+            mock_cls.return_value = mock_worker
+            loaded_player._reap_detached_worker(draining)
+
+        assert started == [1], (
+            "queued render must re-emit stretch_started so the UI "
+            "indicator lights back up"
+        )
+
+    def test_reaper_does_not_dispatch_while_others_draining(
+        self, loaded_player,
+    ):
+        """If two workers are draining, only the last reap fires the queue."""
+        drain_a = MagicMock()
+        drain_b = MagicMock()
+        loaded_player._detached_workers = [drain_a, drain_b]
+        loaded_player._pending_render_emit = ("speed",)
+
+        with patch.object(loaded_player, "_spawn_stretch_worker") as spawn:
+            loaded_player._reap_detached_worker(drain_a)
+            spawn.assert_not_called()
+
+        # Queue is still armed for when drain_b reaps.
+        assert loaded_player._pending_render_emit == ("speed",)
+
+    def test_reaper_fast_path_when_queued_identity(self, loaded_player):
+        """Queued render at identity settings uses fast path (no spawn)."""
+        draining = MagicMock()
+        loaded_player._detached_workers = [draining]
+        loaded_player._pending_render_emit = ("speed",)
+        loaded_player._playback_speed = 1.0
+        loaded_player._pitch_semitones = 0
+
+        finished: list = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+
+        with patch.object(loaded_player, "_spawn_stretch_worker") as spawn:
+            loaded_player._reap_detached_worker(draining)
+            spawn.assert_not_called()
+
+        assert finished == [1], "fast-path queued render must close lifecycle"
+        assert loaded_player._pending_render_emit is None
+
+    def test_cancel_stretch_clears_pending(self, loaded_player):
+        """An explicit cancel supersedes a queued render."""
+        loaded_player._pending_render_emit = ("speed",)
+        loaded_player._stretch_worker = None
+
+        finished: list = []
+        loaded_player.stretch_finished.connect(lambda: finished.append(1))
+        loaded_player.cancel_stretch()
+
+        assert loaded_player._pending_render_emit is None
+        # Pending alone (no active worker) still closes the lifecycle so
+        # the UI indicator clears.
+        assert finished == [1]
+
+    def test_load_stems_clears_pending(self, loaded_player, tmp_path):
+        """Switching songs must drop any queued render for the old stems."""
+        loaded_player._pending_render_emit = ("speed",)
+
+        # load_stems with an empty dict is a no-op load but still resets
+        # the pending slot.
+        with patch.object(loaded_player, "_render_stretch"):
+            try:
+                loaded_player.load_stems({})
+            except Exception:  # noqa: BLE001
+                pass
+
+        assert loaded_player._pending_render_emit is None
+
+
+# -----------------------------------------------------------------------
+# Shutdown — cancel in-flight work and wait so atexit doesn't hang
+# -----------------------------------------------------------------------
+
+class TestPlayerShutdown:
+    """``shutdown()`` is called from MainWindow.closeEvent.  Without it
+    the Python atexit handler blocks on the ThreadPoolExecutor inside
+    ``StretchWorker.run``, forcing Ctrl+C to quit the app."""
+
+    def test_shutdown_cancels_active_worker(self, loaded_player):
+        worker = MagicMock()
+        worker.isRunning.return_value = True
+        loaded_player._stretch_worker = worker
+
+        loaded_player.shutdown(wait_ms=10)
+
+        worker.cancel.assert_called_once()
+        worker.wait.assert_called_once_with(10)
+
+    def test_shutdown_cancels_detached_workers(self, loaded_player):
+        a = MagicMock()
+        a.isRunning.return_value = True
+        b = MagicMock()
+        b.isRunning.return_value = True
+        loaded_player._detached_workers = [a, b]
+
+        loaded_player.shutdown(wait_ms=5)
+
+        a.cancel.assert_called_once()
+        b.cancel.assert_called_once()
+        a.wait.assert_called_once_with(5)
+        b.wait.assert_called_once_with(5)
+
+    def test_shutdown_clears_pending_render(self, loaded_player):
+        loaded_player._pending_render_emit = ("speed",)
+        loaded_player.shutdown(wait_ms=0)
+        assert loaded_player._pending_render_emit is None
+
+    def test_shutdown_stops_position_timer(self, loaded_player):
+        loaded_player._timer.start()
+        assert loaded_player._timer.isActive()
+
+        loaded_player.shutdown(wait_ms=0)
+
+        assert not loaded_player._timer.isActive()
+
+    def test_shutdown_no_wait_for_already_stopped(self, loaded_player):
+        """Workers that already finished must not get a .wait() call
+        (Qt thread may be destroyed by then)."""
+        done = MagicMock()
+        done.isRunning.return_value = False
+        loaded_player._stretch_worker = done
+
+        loaded_player.shutdown(wait_ms=10)
+
+        done.cancel.assert_called_once()
+        done.wait.assert_not_called()
+
+    def test_shutdown_is_safe_with_no_workers(self, loaded_player):
+        """Idle-shutdown is a no-op but must not raise."""
+        loaded_player._stretch_worker = None
+        loaded_player._detached_workers = []
+        loaded_player.shutdown(wait_ms=0)  # should not raise

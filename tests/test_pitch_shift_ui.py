@@ -137,8 +137,9 @@ class TestStretchStatusIndicator:
         player._pitch_semitones = 2
         controls._on_stretch_progress(2, 4)
         suffix = controls._pitch_spin.suffix()
+        # Compact indicator: just "(current/total)" -- the control
+        # being greyed-out is itself the "this is processing" cue.
         assert "2/4" in suffix
-        assert "processing" in suffix.lower()
 
     def test_pitch_progress_does_not_duplicate_in_floating_label(
         self, controls, player,
@@ -153,13 +154,14 @@ class TestStretchStatusIndicator:
         self, controls, player,
     ):
         """Combos can't carry suffixes, so speed-only renders fall back
-        to the floating label near the speed combo."""
+        to the floating label next to the speed combo.  The compact
+        format matches the spinbox suffix so both indicators read the
+        same way."""
         player._pitch_semitones = 0
         player._playback_speed = 0.75
         controls._on_stretch_progress(2, 4)
         text = controls._speed_status.text()
-        assert "Time-stretching" in text
-        assert "(2/4)" in text
+        assert "2/4" in text
         # And the spinbox suffix stays empty (its main text already
         # reads "original" when pitch is 0).
         assert controls._pitch_spin.suffix() == ""
@@ -183,37 +185,44 @@ class TestStretchStatusIndicator:
 
 class TestPitchSpinBoxText:
     """``textFromValue`` produces human-readable labels rather than a
-    bare integer + unit suffix.  This is what the user sees in the UI."""
+    bare integer + unit suffix.  This is what the user sees in the UI.
+
+    The text is kept intentionally compact ("+2 semi" rather than
+    "+2 semitones") because the progress suffix is appended during
+    renders and the combined string has to fit the spinbox width
+    without clipping.  "semi" is short for "semitone" and is
+    unambiguous in the context of a "Pitch:" label.
+    """
 
     def test_zero_reads_as_original(self, controls):
         controls._pitch_spin.setValue(0)
         assert "original" in controls._pitch_spin.text()
 
-    def test_positive_one_is_singular(self, controls):
+    def test_positive_value_shows_plus_sign(self, controls):
         controls._pitch_spin.setValue(1)
         text = controls._pitch_spin.text()
-        assert "+1 semitone" in text
-        assert "semitones" not in text  # not plural
+        assert "+1 semi" in text
 
-    def test_positive_two_is_plural(self, controls):
+    def test_positive_multi_semitone(self, controls):
         controls._pitch_spin.setValue(2)
-        assert "+2 semitones" in controls._pitch_spin.text()
+        assert "+2 semi" in controls._pitch_spin.text()
 
-    def test_negative_one_is_singular(self, controls):
+    def test_negative_value_shows_minus_sign(self, controls):
         controls._pitch_spin.setValue(-1)
         text = controls._pitch_spin.text()
-        assert "-1 semitone" in text
-        assert "semitones" not in text
+        assert "-1 semi" in text
 
-    def test_negative_three_is_plural(self, controls):
+    def test_negative_multi_semitone(self, controls):
         controls._pitch_spin.setValue(-3)
-        assert "-3 semitones" in controls._pitch_spin.text()
+        assert "-3 semi" in controls._pitch_spin.text()
 
-    def test_idle_spinbox_has_no_suffix_parens(self, controls):
+    def test_idle_spinbox_has_no_processing_suffix(self, controls):
         """When the spinbox is idle we only show the core label --
         the processing tail is added only during a render."""
         controls._pitch_spin.setValue(2)
-        assert "(processing" not in controls._pitch_spin.text()
+        text = controls._pitch_spin.text()
+        # No "(N/M)" fragment when idle.
+        assert "/" not in text
 
     def test_processing_suffix_appended_during_render(
         self, controls, player,
@@ -222,31 +231,36 @@ class TestPitchSpinBoxText:
         controls._pitch_spin.setValue(2)
         controls._on_stretch_progress(1, 4)
         text = controls._pitch_spin.text()
-        assert "+2 semitones" in text
-        assert "(processing 1/4)" in text
+        assert "+2 semi" in text
+        # Compact progress format: just "(current/total)", no word.
+        assert "(1/4)" in text
 
-    def test_size_hint_shrinks_with_shorter_text(self, controls):
-        """Width must adapt to content -- no wasted space when the
-        text is short ("original") vs long ("+12 semitones ...")."""
-        spin = controls._pitch_spin
-        spin.setValue(0)  # "original"
-        short_w = spin.sizeHint().width()
-        spin.setValue(12)  # "+12 semitones"
-        long_w = spin.sizeHint().width()
-        assert long_w > short_w, (
-            f"sizeHint should grow with longer text ({short_w} vs {long_w})"
-        )
+    def test_size_hint_fits_widest_processing_text(self, controls):
+        """sizeHint must be wide enough for the worst-case text so
+        the processing suffix never clips the ``semi`` or the counter.
 
-    def test_size_hint_grows_with_processing_suffix(self, controls, player):
-        """The processing suffix must expand the spinbox width so it
-        doesn't clip mid-render."""
+        Sizing is now fixed at construction (not dynamic) for
+        layout-stability reasons -- see PitchSpinBox docstring.
+        """
+        from PySide6.QtGui import QFontMetrics
         spin = controls._pitch_spin
-        spin.setValue(2)
-        idle_w = spin.sizeHint().width()
-        player._pitch_semitones = 2
-        controls._on_stretch_progress(1, 4)
-        processing_w = spin.sizeHint().width()
-        assert processing_w > idle_w
+        fm = QFontMetrics(spin.font())
+        # Longest text the spinbox can ever show at ±7 semitones
+        # with a progress counter capped at two digits per stem.
+        widest_text_w = fm.horizontalAdvance("+7 semi (10/10)")
+        assert spin.sizeHint().width() >= widest_text_w
+
+    def test_size_hint_is_stable_across_values(self, controls):
+        """Width must not jitter as the value / suffix changes --
+        the layout was previously thrashing on every render start."""
+        spin = controls._pitch_spin
+        spin.setValue(0)
+        w_at_zero = spin.sizeHint().width()
+        spin.setValue(7)
+        w_at_seven = spin.sizeHint().width()
+        spin.setSuffix(" (3/10)")
+        w_processing = spin.sizeHint().width()
+        assert w_at_zero == w_at_seven == w_processing
 
 
 # -----------------------------------------------------------------------
@@ -377,3 +391,134 @@ class TestDebounceResetOnSongLoad:
             # Manually flush as if the timer fired.
             controls._flush_pending_pitch()
             mock_set_pitch.assert_not_called()
+
+
+# -----------------------------------------------------------------------
+# Speed debounce — mirrors the pitch debounce
+# -----------------------------------------------------------------------
+
+class TestSpeedDebounce:
+    """Rapid speed combo changes coalesce into one render just like pitch.
+
+    Before this, Shift+Up/Down cycling through presets would spawn a new
+    worker per step, feeding the same disk-fill bug that motivated the
+    render-serialization fix on the player side.
+    """
+
+    def test_speed_change_defers_set_speed(self, controls, player):
+        """Selecting a preset does not synchronously call set_speed."""
+        with patch.object(player, "set_speed") as mock_set_speed:
+            # Find the index for 0.75 and select it.
+            idx = controls._speed_combo.findData(0.75)
+            assert idx >= 0, "0.75 preset should exist"
+            controls._speed_combo.setCurrentIndex(idx)
+            mock_set_speed.assert_not_called()
+
+    def test_speed_debounce_timer_starts(self, controls):
+        """Speed change should arm the 100ms debounce timer."""
+        idx = controls._speed_combo.findData(0.75)
+        controls._speed_combo.setCurrentIndex(idx)
+        assert controls._speed_debounce.isActive()
+        assert controls._pending_speed == 0.75
+
+    def test_speed_change_cancels_in_flight(self, controls, player):
+        """A fresh change cancels any running render for CPU relief."""
+        with patch.object(player, "cancel_stretch") as mock_cancel:
+            idx = controls._speed_combo.findData(0.5)
+            controls._speed_combo.setCurrentIndex(idx)
+            mock_cancel.assert_called_once()
+
+    def test_speed_rapid_changes_coalesce(self, controls, player):
+        """Cycling through 1.0 -> 0.9 -> 0.75 -> 0.5 yields one set_speed(0.5)."""
+        with patch.object(player, "set_speed") as mock_set_speed:
+            for target in (0.9, 0.75, 0.5):
+                idx = controls._speed_combo.findData(target)
+                if idx < 0:
+                    continue
+                controls._speed_combo.setCurrentIndex(idx)
+            controls._flush_pending_speed()
+            # Final call is whatever the last preset was.
+            mock_set_speed.assert_called_once()
+            (called_speed,), _ = mock_set_speed.call_args
+            assert called_speed == controls._speed_combo.currentData()
+
+    def test_speed_flush_clears_pending(self, controls, player):
+        """After flush, _pending_speed resets for the next cycle."""
+        idx = controls._speed_combo.findData(0.75)
+        controls._speed_combo.setCurrentIndex(idx)
+        with patch.object(player, "set_speed"):
+            controls._flush_pending_speed()
+        assert controls._pending_speed is None
+
+    def test_speed_flush_no_pending_is_noop(self, controls, player):
+        """Timer fire with no pending change does nothing."""
+        controls._pending_speed = None
+        with patch.object(player, "set_speed") as mock_set_speed:
+            controls._flush_pending_speed()
+            mock_set_speed.assert_not_called()
+
+    def test_load_stems_resets_speed_debounce(self, controls):
+        """Switching songs drops any queued speed change."""
+        idx = controls._speed_combo.findData(0.75)
+        controls._speed_combo.setCurrentIndex(idx)
+        assert controls._speed_debounce.isActive()
+
+        controls.set_stem_names([])
+
+        assert not controls._speed_debounce.isActive()
+        assert controls._pending_speed is None
+
+
+# -----------------------------------------------------------------------
+# Master volume slider — transport-row indicator
+# -----------------------------------------------------------------------
+
+class TestMasterVolumeSlider:
+    """The slider mirrors the player's master volume and is the single
+    entry point for shortcut-driven volume changes."""
+
+    def test_default_value_is_full(self, controls):
+        assert controls._master_volume_slider.value() == 100
+        assert controls._master_volume_label.text() == "100%"
+
+    def test_slider_drag_calls_player(self, controls, player):
+        """Moving the slider propagates into the player."""
+        with patch.object(player, "set_master_volume") as mock_set:
+            controls._master_volume_slider.setValue(75)
+            mock_set.assert_called_once_with(0.75)
+
+    def test_slider_drag_updates_label(self, controls):
+        controls._master_volume_slider.setValue(125)
+        assert controls._master_volume_label.text() == "125%"
+
+    def test_set_master_volume_updates_slider(self, controls):
+        """External callers (shortcuts, session restore) use set_master_volume."""
+        controls.set_master_volume(0.5)
+        assert controls._master_volume_slider.value() == 50
+        assert controls._master_volume_label.text() == "50%"
+
+    def test_set_master_volume_clamps(self, controls):
+        """Out-of-range values are clamped to the 0-200% range."""
+        controls.set_master_volume(5.0)
+        assert controls._master_volume_slider.value() == 200
+
+        controls.set_master_volume(-1.0)
+        assert controls._master_volume_slider.value() == 0
+
+    def test_set_master_volume_blocks_signal_recursion(self, controls, player):
+        """set_master_volume must not recurse through the slider signal
+        (which would call set_master_volume again via
+        _on_master_volume_slider_changed -> player.set_master_volume)."""
+        calls: list[float] = []
+        with patch.object(
+            player, "set_master_volume", side_effect=calls.append,
+        ):
+            controls.set_master_volume(0.6)
+            # Exactly one player call -- not the slider's valueChanged
+            # bouncing back through the handler.
+            assert calls == [0.6]
+
+    def test_set_master_volume_propagates_to_player(self, controls, player):
+        with patch.object(player, "set_master_volume") as mock_set:
+            controls.set_master_volume(1.5)
+            mock_set.assert_called_once_with(1.5)

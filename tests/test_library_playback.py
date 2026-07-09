@@ -307,7 +307,8 @@ class TestNextSongResolution:
 
 
 class TestMasterVolumeAdjust:
-    """_adjust_master_volume delegates to the player and clamps correctly."""
+    """_adjust_master_volume routes through PlayerControls.set_master_volume
+    so the transport-row slider/label stay in sync with the player."""
 
     def test_adjust_adds_delta(self, app):
         from src.ui.main_window import MainWindow
@@ -315,7 +316,7 @@ class TestMasterVolumeAdjust:
         stub = MagicMock()
         stub._player.master_volume = 1.0
         MainWindow._adjust_master_volume(stub, 0.1)
-        stub._player.set_master_volume.assert_called_once_with(
+        stub._player_controls.set_master_volume.assert_called_once_with(
             pytest.approx(1.1)
         )
 
@@ -326,7 +327,7 @@ class TestMasterVolumeAdjust:
         stub._player.master_volume = 1.95
         MainWindow._adjust_master_volume(stub, 0.1)
         # Caller clamps to 2.0 before calling set_master_volume.
-        stub._player.set_master_volume.assert_called_once_with(2.0)
+        stub._player_controls.set_master_volume.assert_called_once_with(2.0)
 
     def test_adjust_clamps_lower(self, app):
         from src.ui.main_window import MainWindow
@@ -334,7 +335,7 @@ class TestMasterVolumeAdjust:
         stub = MagicMock()
         stub._player.master_volume = 0.02
         MainWindow._adjust_master_volume(stub, -0.1)
-        stub._player.set_master_volume.assert_called_once_with(0.0)
+        stub._player_controls.set_master_volume.assert_called_once_with(0.0)
 
     def test_adjust_shows_toast(self, app):
         from src.ui.main_window import MainWindow

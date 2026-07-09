@@ -59,8 +59,12 @@ from src.player import (
 )
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
-from src.ui.player_controls import PlayerControls, _format_time
-from src.ui.styles import get_colors, get_stylesheet
+from src.ui.player_controls import (
+    PlayerControls,
+    _format_time,
+    shutdown_peak_pool,
+)
+from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
 from src.version import __version__
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
@@ -371,7 +375,9 @@ class MainWindow(QMainWindow):
     def _adjust_master_volume(self, delta: float) -> None:
         """Adjust master volume by *delta* (clamped 0.0–2.0)."""
         new_vol = max(0.0, min(2.0, self._player.master_volume + delta))
-        self._player.set_master_volume(new_vol)
+        # Route through PlayerControls so the slider + percent label in
+        # the transport row stay in sync with the player.
+        self._player_controls.set_master_volume(new_vol)
         self._show_volume_toast(new_vol)
 
     def _show_volume_toast(self, volume: float) -> None:
@@ -462,6 +468,9 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(get_stylesheet(self._theme))
+        # Palette-based tooltip colors survive child widget stylesheet
+        # scopes; the QSS rule alone isn't reliable on toggle.
+        apply_tooltip_palette(self._theme)
 
         colors = get_colors(self._theme)
         self.apply_theme(self._theme, colors)
@@ -734,7 +743,7 @@ class MainWindow(QMainWindow):
             )
         except (TypeError, ValueError):
             master_vol = 1.0
-        self._player.set_master_volume(master_vol)
+        self._player_controls.set_master_volume(master_vol)
 
         # Loop points
         try:
@@ -935,6 +944,12 @@ class MainWindow(QMainWindow):
             self._export_worker.wait(5000)
 
         self._player.stop()
+        # Cancel and drain stretch/peak workers *before* Qt tears down,
+        # otherwise Python's atexit blocks in ThreadPoolExecutor.join()
+        # (librosa pitch/time-stretch is uninterruptible mid-call, so
+        # the pool threads can't exit until the current stem finishes).
+        self._player.shutdown()
+        shutdown_peak_pool()
 
         super().closeEvent(event)
 
