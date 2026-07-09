@@ -17,7 +17,7 @@ For full technical specs, module descriptions, and the phased roadmap, see `PROJ
 
 - Python 3.14 (local dev; GitHub Actions CI uses 3.12 per `.github/workflows/ci.yml`)
 - PySide6 (Qt 6) for GUI
-- ONNX Runtime + DirectML for GPU-accelerated inference (no PyTorch)
+- ONNX Runtime for inference (no PyTorch); DirectML GPU path attempted with CPU fallback — separation runs on CPU today, see issue #125
 - HTDemucs v4 ONNX models (4-stem and 6-stem)
 - sounddevice + soundfile for audio playback
 - numpy for audio buffer processing
@@ -73,7 +73,7 @@ stemma/
       wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
       _wav_playback_impl.py  # QSoundEffect + winsound fallback
       styles.py          # Dark / light themes
-  tests/               # pytest test suite (~825 fast + slow/hardware deselected by default)
+  tests/               # pytest test suite (~845 fast + slow/hardware deselected by default)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -141,7 +141,7 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 Last updated: 2026-07-09
 
-Current version: **v2.4.1** — v2.4.0 shipped pitch shift / key transposition (#117); v2.4.1 is a stability pass on top of it.
+Current version: **v2.5.0** — v2.4.0 shipped pitch shift / key transposition (#117); v2.4.1 was a stability pass; v2.5.0 adds the Loop Trainer (auto speed ramp per loop repeat).
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -216,7 +216,7 @@ All core functionality implemented and tested:
 ## Test Suite
 
 ```
-pytest                                    # ~825 fast tests (~25s)
+pytest                                    # ~845 fast tests (~25s)
 pytest -m slow                            # ONNX inference tests (needs model)
 pytest -m hardware                        # audible playback test (needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests

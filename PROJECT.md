@@ -257,7 +257,7 @@ stemma/
 - [x] PyInstaller packaging + GitHub Release workflow (#56)
 
 ### Post-2.0 backlog (see GitHub issues)
-Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118), pitch shift / key transposition (#117, shipped v2.4.0).
+Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118), pitch shift / key transposition (#117, shipped v2.4.0), Loop Trainer speed ramp (shipped v2.5.0).
 
 Open (all labeled `v3.0` on GitHub):
 - [ ] Experimental DSP extensions (#28)

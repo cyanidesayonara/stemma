@@ -32,6 +32,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
 - A-B loop for practice sections (Stop returns to loop A while looping; seek stays inside the loop); pitch-preserving playback speed presets
 - Pitch transposition (±7 semitones), rendered in a single pass with the speed change; the Key badge shows the transposed key
+- Loop Trainer: with an A-B loop active, playback speed steps up one preset each repeat, from a chosen start speed up to 1.0x — learn a passage slow and work it up to tempo hands-free
 - Metronome with BPM entry, tap tempo, and beat-sync nudge (±500ms)
 - Optional count-in beats before playback (and optionally before each loop repeat)
 - Session persistence: restore last song, position, mixer, loop, speed, metronome, count-in, and recording take state after restart
@@ -59,7 +60,7 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~25 seconds, ~825 tests)
+# Fast tests (~25 seconds, ~845 tests)
 pytest
 
 # Include ONNX inference tests (~20 seconds, needs model file)
