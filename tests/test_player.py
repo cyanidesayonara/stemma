@@ -1069,6 +1069,24 @@ class TestChordSequence:
         player.load_stems(mock_stems)
         assert player.chord_sequence == []
 
+    def test_chord_at_maps_stretched_frames_back_to_original_time(
+        self, mock_stems,
+    ):
+        """At 0.5x the audio is twice as long: original time t sits at
+        stretched frame t / speed * sr, so the inverse mapping must
+        multiply by speed. The old code divided, looking up the chord
+        at 4x the playhead time."""
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        chords = [(0.0, "Am"), (0.5, "G")]
+        player.set_chord_sequence(chords)
+        sr = player.sample_rate
+        player._playback_speed = 0.5
+        # Original t=0.25s ("Am") sits at stretched frame 0.25/0.5*sr.
+        assert player.chord_at(int(0.25 / 0.5 * sr)) == "Am"
+        # Original t=0.75s ("G") sits at stretched frame 0.75/0.5*sr.
+        assert player.chord_at(int(0.75 / 0.5 * sr)) == "G"
+
 
 class TestMasterVolume:
     """Master volume multiplier for all stems."""

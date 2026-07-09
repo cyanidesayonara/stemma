@@ -592,9 +592,10 @@ class MultiTrackPlayer(QObject):
             return ""
         speed = self._playback_speed if self._playback_speed > 0 else 1.0
         # Frame is in the stretched timeline; chord onsets are in original
-        # audio time.  Divide by speed to map back (same convention as
-        # _recompute_beat_frames).
-        time_sec = frame / self._sample_rate / speed
+        # audio time. _recompute_beat_frames maps original time t to
+        # stretched frame t / speed * sr, so the inverse is
+        # frame / sr * speed.
+        time_sec = frame / self._sample_rate * speed
         idx = int(np.searchsorted(self._chord_times, time_sec, side="right")) - 1
         if idx < 0:
             return ""
