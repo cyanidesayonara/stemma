@@ -1098,3 +1098,73 @@ class TestMasterVolume:
         assert player.master_volume == 0.0
         player.set_master_volume(2.0)
         assert player.master_volume == 2.0
+
+
+class TestCallbackSafety:
+    """Regressions for GUI-thread mutations racing the audio callback."""
+
+    def _playing_player(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._is_playing = True
+        return player
+
+    def test_new_recording_take_is_audible_without_mute_toggle(
+        self, mock_stems,
+    ):
+        """add_recording_stem must invalidate the active-stems cache.
+
+        The callback builds the cache on first playback; recording
+        requires playback, so the cache always exists before the take
+        lands. Without invalidation the take mixed at gain 0 -- visible
+        in the mixer but silent -- until any mute/solo was toggled.
+        """
+        player = self._playing_player(mock_stems)
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+        assert player._active_stems_cache is not None
+
+        take = np.ones((44100, 2), dtype=np.float32) * 0.05
+        player.add_recording_stem("recording_take1", take)
+
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+        # 0.1 + 0.2 + 0.3 + 0.05 -- the take is mixed in.
+        assert np.allclose(outdata, 0.65, atol=1e-3)
+
+    def test_remove_recording_stem_invalidates_cache(self, mock_stems):
+        player = self._playing_player(mock_stems)
+        take = np.ones((44100, 2), dtype=np.float32) * 0.05
+        player.add_recording_stem("recording_take1", take)
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+        player.remove_recording_stem("recording_take1")
+        assert player._active_stems_cache is None
+
+    def test_recording_stem_mutations_replace_stems_dict(self, mock_stems):
+        """Copy-on-write: the callback may be iterating the old dict on
+        the PortAudio thread, so mutations must swap in a new dict
+        instead of popping/inserting in place."""
+        player = self._playing_player(mock_stems)
+        take = np.ones((44100, 2), dtype=np.float32) * 0.05
+
+        before = player._stems
+        player.add_recording_stem("recording_take1", take)
+        assert player._stems is not before
+
+        before = player._stems
+        player.remove_recording_stem("recording_take1")
+        assert player._stems is not before
+
+    def test_callback_survives_inconsistent_loop_state(self, mock_stems):
+        """clear_loop() can null the loop frames between the callback's
+        reads; the callback snapshots them once so a mid-block clear
+        cannot produce None arithmetic."""
+        player = self._playing_player(mock_stems)
+        player._looping = True
+        player._loop_a_frame = None
+        player._loop_b_frame = None
+        outdata = np.zeros((100, 2), dtype=np.float32)
+        player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+        assert player._current_frame == 100

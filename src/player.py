@@ -361,7 +361,7 @@ class MultiTrackPlayer(QObject):
         self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
         self._master_volume: float = 1.0     # Master gain, 0.0–2.0
         self._applied_gains: dict[str, float] = {}  # Last gain per stem (for ramping)
-        self._active_stems_cache: list[str] | None = None
+        self._active_stems_cache: set[str] | None = None
 
         # A-B loop state.
         self._loop_a_frame: int | None = None
@@ -793,21 +793,41 @@ class MultiTrackPlayer(QObject):
         """Add a recording take as a playable stem.
 
         Validates sample rate compatibility and forces stereo.
+
+        The stems dict is replaced, not mutated: the audio callback may
+        be iterating the old dict on the PortAudio thread. The active-
+        stems cache is invalidated so the new take is audible on the
+        next play without requiring a mute/solo toggle.
         """
         if data.shape[1] == 1:
             data = np.repeat(data, 2, axis=1)
-        self._stems[name] = data
-        self._original_stems[name] = data
+        stems = dict(self._stems)
+        stems[name] = data
+        self._stems = stems
+        originals = dict(self._original_stems)
+        originals[name] = data
+        self._original_stems = originals
         self._total_frames = max(self._total_frames, data.shape[0])
+        self._active_stems_cache = None
 
     def remove_recording_stem(self, name: str) -> None:
-        """Remove a recording stem and recalculate total frames."""
-        self._stems.pop(name, None)
-        self._original_stems.pop(name, None)
+        """Remove a recording stem and recalculate total frames.
+
+        Same copy-on-write discipline as ``add_recording_stem``: the
+        audio callback may be mid-iteration over the current dict, so
+        it is replaced rather than popped in place.
+        """
+        stems = dict(self._stems)
+        stems.pop(name, None)
+        self._stems = stems
+        originals = dict(self._original_stems)
+        originals.pop(name, None)
+        self._original_stems = originals
         self._muted_stems.discard(name)
         self._soloed_stems.discard(name)
         self._volumes.pop(name, None)
         self._nudge_offsets.pop(name, None)
+        self._active_stems_cache = None
         self._recalculate_total_frames()
 
     def nudge_stem(self, name: str, offset_ms: float) -> None:
@@ -1742,14 +1762,23 @@ class MultiTrackPlayer(QObject):
 
         # -- Normal playback -------------------------------------------------
 
+        # Snapshot cross-thread state once per callback. The GUI thread
+        # replaces the stems dict (copy-on-write) and can null the loop
+        # frames at any moment (clear_loop); reading them repeatedly
+        # mid-callback risks a None arithmetic TypeError that aborts the
+        # stream.
+        stems = self._stems
+        loop_a = self._loop_a_frame
+        loop_b = self._loop_b_frame
+
         # If at or past end and not looping, stop playback.
         looping = (self._looping
-                   and self._loop_a_frame is not None
-                   and self._loop_b_frame is not None
-                   and self._loop_b_frame > self._loop_a_frame)
+                   and loop_a is not None
+                   and loop_b is not None
+                   and loop_b > loop_a)
         if self._current_frame >= self._total_frames:
             if looping:
-                self._current_frame = self._loop_a_frame
+                self._current_frame = loop_a
             else:
                 outdata.fill(0.0)
                 raise sd.CallbackStop
@@ -1758,18 +1787,20 @@ class MultiTrackPlayer(QObject):
         outdata.fill(0.0)
 
         # Determine which stems should be audible (cached between changes).
+        # Stored as a set so the per-segment membership tests below don't
+        # allocate.
         active_stems = self._active_stems_cache
         if active_stems is None:
             if self._soloed_stems:
-                active_stems = [
-                    name for name in self._stems
+                active_stems = {
+                    name for name in stems
                     if name in self._soloed_stems
-                ]
+                }
             else:
-                active_stems = [
-                    name for name in self._stems
+                active_stems = {
+                    name for name in stems
                     if name not in self._muted_stems
-                ]
+                }
             self._active_stems_cache = active_stems
 
         # Fill the output buffer, handling loop wraps as needed.
@@ -1778,7 +1809,7 @@ class MultiTrackPlayer(QObject):
 
         while remaining > 0:
             if looping:
-                boundary = self._loop_b_frame
+                boundary = loop_b
             else:
                 boundary = self._total_frames
 
@@ -1789,10 +1820,9 @@ class MultiTrackPlayer(QObject):
                 start = self._current_frame
                 end = start + frames_to_read
 
-                active_set = set(active_stems)
-                for name, stem_data in self._stems.items():
+                for name, stem_data in stems.items():
                     target = (self._volumes.get(name, 1.0) * self._master_volume
-                              if name in active_set else 0.0)
+                              if name in active_stems else 0.0)
                     prev = self._applied_gains.get(name, target)
                     if target == 0.0 and prev == 0.0:
                         continue
@@ -1854,7 +1884,7 @@ class MultiTrackPlayer(QObject):
             # Check if we hit the boundary.
             if self._current_frame >= boundary:
                 if looping:
-                    self._current_frame = self._loop_a_frame
+                    self._current_frame = loop_a
                     if (self._count_in_enabled
                             and self._count_in_on_repeats):
                         self._arm_count_in()
