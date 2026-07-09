@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.paths import app_root
 from src.ui.splash_screen import SplashScreen
-from src.ui.styles import get_stylesheet
+from src.ui.styles import apply_tooltip_palette, get_stylesheet
 from src.version import __version__
 
 _ROOT_DIR = app_root()
@@ -63,6 +63,7 @@ def main() -> int:
     if theme not in ("dark", "light"):
         theme = "dark"
     qapp.setStyleSheet(get_stylesheet(theme))
+    apply_tooltip_palette(theme)
 
     if os.path.exists(_ICON_PATH):
         qapp.setWindowIcon(QIcon(_ICON_PATH))

@@ -19,6 +19,7 @@ from src.beat_detector import (
     _sigmoid,
     _viterbi_smooth,
     detect_bpm_and_key,
+    transpose_key,
 )
 
 
@@ -459,3 +460,44 @@ class TestDetectChords:
         labels = [c for _, c in chords]
         # The set of unique labels should have more than 1 entry.
         assert len(set(labels)) >= 2
+
+
+# ---------------------------------------------------------------------------
+# transpose_key
+# ---------------------------------------------------------------------------
+
+class TestTransposeKey:
+    def test_zero_steps_is_identity(self):
+        assert transpose_key("A minor", 0) == "A minor"
+
+    def test_up_two_semitones_major(self):
+        assert transpose_key("C major", 2) == "D major"
+
+    def test_up_one_semitone_minor(self):
+        assert transpose_key("A minor", 1) == "Bb minor"
+
+    def test_down_semitone(self):
+        assert transpose_key("C major", -1) == "B major"
+
+    def test_wrap_around_twelve(self):
+        assert transpose_key("C major", 12) == "C major"
+        assert transpose_key("C major", -12) == "C major"
+
+    def test_flat_spelling_accepted(self):
+        # Detector uses "Bb"; ensure aliases (e.g. A#) also parse.
+        assert transpose_key("A# minor", 1) == "B minor"
+
+    def test_empty_string_unchanged(self):
+        assert transpose_key("", 3) == ""
+
+    def test_unparseable_unchanged(self):
+        assert transpose_key("nonsense", 2) == "nonsense"
+        assert transpose_key("C", 2) == "C"
+        assert transpose_key("Q major", 2) == "Q major"
+
+    def test_mode_preserved(self):
+        assert transpose_key("F# minor", 3).endswith("minor")
+        assert transpose_key("F major", 5).endswith("major")
+
+    def test_case_insensitive_mode(self):
+        assert transpose_key("C MAJOR", 2) == "D major"

@@ -22,13 +22,20 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from src.beat_detector import DetectionResult, DetectionWorker
+from src.beat_detector import DetectionResult, DetectionWorker, transpose_key
 from src.metronome import tap_tempo
-from src.player import SPEED_PRESETS, MultiTrackPlayer
+from src.player import (
+    PITCH_MAX_SEMITONES,
+    PITCH_MIN_SEMITONES,
+    SPEED_PRESETS,
+    MultiTrackPlayer,
+)
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import (
@@ -86,6 +93,80 @@ def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
 
 
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
+
+
+def _get_peak_pool() -> ThreadPoolExecutor:
+    """Return the module's peak-computation pool, recreating it if needed.
+
+    ``closeEvent`` calls ``shutdown_peak_pool`` to let the interpreter
+    exit promptly instead of blocking in atexit on an in-flight peak
+    computation.  In test runs several ``MainWindow`` instances are
+    constructed and closed sequentially; once the shared pool is shut
+    down, later tests still expect it to accept submits.  Rather than
+    plumb a per-window pool through every call site, we detect the
+    shutdown state and lazily spin up a fresh pool.
+    """
+    global _peak_pool
+    if getattr(_peak_pool, "_shutdown", False):
+        _peak_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="peak",
+        )
+    return _peak_pool
+
+
+def _fit_spinbox_width(spin: QSpinBox, sample: str | None = None) -> None:
+    """Shrink a QSpinBox so its frame hugs its widest value.
+
+    Uses Qt's own ``QStyle.sizeFromContents(CT_SpinBox, ...)`` to get
+    the native frame + up/down-button chrome size -- the previous
+    hand-rolled formula underestimated on Windows (the native spinbox
+    arrows are ~20 px wide, not 16) and occasionally clipped the last
+    character of ``"120 BPM"`` and similar right-justified values.
+
+    *sample* may override the measured text for spinboxes whose
+    displayed width isn't captured by ``prefix+max+suffix`` (e.g.
+    negative-signed nudge values, PitchSpinBox).
+    """
+    if sample is None:
+        sample = f"{spin.prefix()}{spin.maximum()}{spin.suffix()}"
+    fm = spin.fontMetrics()
+    text_w = fm.horizontalAdvance(sample)
+    text_h = fm.height()
+    # Stylesheet adds 4px padding on each side -> 8px horizontal.
+    content = QSize(text_w + 8, text_h)
+    opt = QStyleOptionSpinBox()
+    spin.initStyleOption(opt)
+    hint = spin.style().sizeFromContents(
+        QStyle.ContentsType.CT_SpinBox, opt, content, spin,
+    )
+    # Small extra slack so the last character doesn't kiss the
+    # up/down button edge at fractional DPI scales.
+    spin.setFixedWidth(hint.width() + 4)
+
+
+def _fit_combo_width(combo: QComboBox, extra: int = 0) -> None:
+    """Shrink a QComboBox so its frame hugs its widest entry.
+
+    Similar reasoning to ``_fit_spinbox_width`` but for combos: accounts
+    for the padding, drop-down arrow, and border from ``styles.py``.
+    ``extra`` adds additional pixels when the combo is editable (its
+    ``QLineEdit`` child doubles up the left padding).
+    """
+    fm = combo.fontMetrics()
+    widest = 0
+    for i in range(combo.count()):
+        widest = max(widest, fm.horizontalAdvance(combo.itemText(i)))
+    combo.setFixedWidth(widest + 10 + 20 + 2 + 8 + extra)
+
+
+def shutdown_peak_pool() -> None:
+    """Shut down the module-level peak computation pool.
+
+    Called from the main window's ``closeEvent`` so the interpreter
+    doesn't block in ``atexit`` waiting for an in-flight waveform peak
+    computation to finish.
+    """
+    _peak_pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _make_icon(draw_fn, color: QColor, size: int = _ICON_SIZE) -> QIcon:
@@ -279,6 +360,85 @@ def _format_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+class PitchSpinBox(QSpinBox):
+    """Spinbox whose displayed text is human-readable ("original",
+    "+1 semi", "-2 semi") rather than a bare number.
+
+    QSpinBox always renders ``prefix + textFromValue(value) + suffix``,
+    so ``suffix`` is used exclusively for the live render-progress
+    tail (e.g. ``" (2/4)"``) and kept empty when idle.
+
+    Sizing strategy: the width is *fixed at construction* to fit the
+    worst-case text ("+7 semi (10/10)") plus Qt's native frame chrome.
+    An earlier attempt dynamically resized the spinbox whenever the
+    text changed, via a per-text ``sizeHint`` override + a
+    ``updateGeometry`` call in ``setSuffix``.  That approach had two
+    failure modes:
+      - the parent QHBoxLayout sometimes refused to shrink the widget
+        when the text got shorter (layouts cache child hints between
+        full relayouts), so the spinbox stayed stuck at its widest
+        recent size with visible trailing whitespace;
+      - on DPI scales the layout *did* honour the smaller hint and
+        the spinbox would then snap narrower than the text needed,
+        clipping the processing suffix.
+    A single fixed width avoids both: "original" shows with a bit of
+    trailing space (acceptable -- it's the idle state), and
+    "+7 semi (10/10)" always fits.
+    """
+
+    # Widest text we'll ever display: ±7 semitones max, and the
+    # progress counter maxes out at the stem count (≤ ~10 for any
+    # realistic project).  Longer strings would get clipped by Qt's
+    # right-padded up/down button so we only need to fit this case.
+    _WIDEST_TEXT = "+7 semi (10/10)"
+
+    def _compute_fixed_hint(self) -> QSize:
+        fm = self.fontMetrics()
+        text_w = fm.horizontalAdvance(self._WIDEST_TEXT)
+        text_h = fm.height()
+        # Stylesheet's 4 px left+right padding (8 total) + slack for
+        # anti-aliasing and fractional-DPI rounding.
+        content = QSize(text_w + 16, text_h)
+        opt = QStyleOptionSpinBox()
+        self.initStyleOption(opt)
+        return self.style().sizeFromContents(
+            QStyle.ContentsType.CT_SpinBox, opt, content, self,
+        )
+
+    def sizeHint(self) -> QSize:  # noqa: D401 (Qt API)
+        return self._compute_fixed_hint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: D401 (Qt API)
+        return self._compute_fixed_hint()
+
+    def textFromValue(self, value: int) -> str:  # noqa: D401 (Qt API)
+        # Compact display -- the accompanying label reads "Pitch:" so
+        # the unit can be abbreviated.  "semi" (short for semitone) is
+        # unambiguous in a music app without bloating the spinbox
+        # width every time the processing suffix is appended.
+        if value == 0:
+            return "original"
+        sign = "+" if value > 0 else "-"
+        return f"{sign}{abs(value)} semi"
+
+    def valueFromText(self, text: str) -> int:  # noqa: D401 (Qt API)
+        # Users edit via the wheel / spin buttons / keyboard arrows
+        # rather than typing, but Qt still calls valueFromText during
+        # focus-out.  Parse the leading signed integer if present;
+        # anything else (including "original") maps to 0.
+        import re
+        stripped = text.strip()
+        if not stripped:
+            return 0
+        match = re.match(r"[+-]?\d+", stripped)
+        if match:
+            try:
+                return int(match.group())
+            except ValueError:
+                return 0
+        return 0
+
+
 class StemRow(QWidget):
     """A single stem row with label, mute, and solo buttons."""
 
@@ -442,7 +602,7 @@ class RecordingStemRow(StemRow):
         self._nudge_spin.setRange(-200, 200)
         self._nudge_spin.setValue(0)
         self._nudge_spin.setSuffix(" ms")
-        self._nudge_spin.setFixedWidth(104)
+        _fit_spinbox_width(self._nudge_spin, sample="-200 ms")
         self._nudge_spin.setToolTip(
             f"Nudge {display_name} alignment (-200 to +200 ms)"
         )
@@ -601,6 +761,30 @@ class PlayerControls(QWidget):
         self._time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         transport.addWidget(self._time_label)
 
+        # Master volume indicator (slider + percent).  Sits in the
+        # transport row so the user has a single glance-target for
+        # "what's my volume at" and a direct manipulator.  The same
+        # keyboard shortcut (Up/Down) drives this slider.
+        self._master_vol_label_prefix = QLabel("Vol:")
+        transport.addWidget(self._master_vol_label_prefix)
+
+        self._master_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._master_volume_slider.setRange(0, 200)
+        self._master_volume_slider.setValue(100)
+        self._master_volume_slider.setFixedWidth(90)
+        self._master_volume_slider.setToolTip("Master volume (Up / Down)")
+        self._master_volume_slider.setAccessibleName("Master volume")
+        self._master_volume_slider.valueChanged.connect(
+            self._on_master_volume_slider_changed
+        )
+        transport.addWidget(self._master_volume_slider)
+
+        self._master_volume_label = QLabel("100%")
+        self._master_volume_label.setFixedWidth(42)
+        self._master_volume_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._master_volume_label.setObjectName("subtle-label")
+        transport.addWidget(self._master_volume_label)
+
         transport.addStretch()
 
         # -- Count-in controls (right side of transport bar) --
@@ -628,7 +812,7 @@ class PlayerControls(QWidget):
         self._count_in_beats_spin.setRange(1, 8)
         self._count_in_beats_spin.setValue(4)
         self._count_in_beats_spin.setSuffix(" beats")
-        self._count_in_beats_spin.setFixedWidth(96)
+        _fit_spinbox_width(self._count_in_beats_spin)
         self._count_in_beats_spin.setToolTip("Number of count-in beats")
         self._count_in_beats_spin.setAccessibleName("Count-in beats")
         self._count_in_beats_spin.valueChanged.connect(
@@ -673,14 +857,12 @@ class PlayerControls(QWidget):
         loop_speed_bar = QHBoxLayout()
 
         self._loop_a_btn = QPushButton("Set A")
-        self._loop_a_btn.setFixedWidth(50)
         self._loop_a_btn.setToolTip("Set loop start point (A)")
         self._loop_a_btn.setAccessibleName("Set loop A")
         self._loop_a_btn.clicked.connect(self.set_loop_a)
         loop_speed_bar.addWidget(self._loop_a_btn)
 
         self._loop_b_btn = QPushButton("Set B")
-        self._loop_b_btn.setFixedWidth(50)
         self._loop_b_btn.setToolTip("Set loop end point (B)")
         self._loop_b_btn.setAccessibleName("Set loop B")
         self._loop_b_btn.clicked.connect(self.set_loop_b)
@@ -688,14 +870,12 @@ class PlayerControls(QWidget):
 
         self._loop_toggle_btn = QPushButton("Loop")
         self._loop_toggle_btn.setCheckable(True)
-        self._loop_toggle_btn.setFixedWidth(48)
         self._loop_toggle_btn.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_btn.setAccessibleName("Toggle loop")
         self._loop_toggle_btn.toggled.connect(self._on_loop_toggled)
         loop_speed_bar.addWidget(self._loop_toggle_btn)
 
         self._loop_clear_btn = QPushButton("Clear")
-        self._loop_clear_btn.setFixedWidth(48)
         self._loop_clear_btn.setToolTip("Clear loop points")
         self._loop_clear_btn.setAccessibleName("Clear loop")
         self._loop_clear_btn.clicked.connect(self._on_clear_loop)
@@ -720,10 +900,6 @@ class PlayerControls(QWidget):
         self._chord_label.setAccessibleName("Detected chord")
         loop_speed_bar.addWidget(self._chord_label)
 
-        self._speed_status = QLabel("")
-        self._speed_status.setObjectName("subtle-label")
-        loop_speed_bar.addWidget(self._speed_status)
-
         loop_speed_bar.addStretch()
 
         self._speed_label = QLabel("Speed:")
@@ -733,11 +909,56 @@ class PlayerControls(QWidget):
         for preset in SPEED_PRESETS:
             self._speed_combo.addItem(f"{preset}x", preset)
         self._speed_combo.setCurrentText("1.0x")
-        self._speed_combo.setFixedWidth(66)
+        _fit_combo_width(self._speed_combo)
         self._speed_combo.setToolTip("Playback speed ([ / ])")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
         loop_speed_bar.addWidget(self._speed_combo)
+
+        # Render-progress indicator sits immediately after the speed combo
+        # so it reads as "Speed: [1.5x] (processing 2/4)" -- the user sees
+        # the feedback on the control they just turned, not across the row
+        # by the chord label.  Only visible while a speed-only render is
+        # in flight (pitch renders use the spinbox suffix).
+        self._speed_status = QLabel("")
+        self._speed_status.setObjectName("subtle-label")
+        loop_speed_bar.addWidget(self._speed_status)
+
+        self._pitch_label = QLabel("Pitch:")
+        loop_speed_bar.addWidget(self._pitch_label)
+
+        self._pitch_spin = PitchSpinBox()
+        self._pitch_spin.setRange(PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES)
+        self._pitch_spin.setValue(0)
+        # PitchSpinBox self-sizes via AdjustToContents; no fixed width.
+        self._pitch_spin.setToolTip(
+            "Transpose in semitones (Shift+Left / Shift+Right)"
+        )
+        self._pitch_spin.setAccessibleName("Pitch semitones")
+        self._pitch_spin.valueChanged.connect(self._on_pitch_changed)
+        loop_speed_bar.addWidget(self._pitch_spin)
+
+        # Debounce rapid spinbox scrolling so we don't spawn a librosa
+        # render for every intermediate semitone when the user scrubs
+        # through 1..7st. Each pitch render takes ~1-2s per stem; without
+        # debounce, holding the up arrow or scrolling the wheel pile up
+        # parallel workers, saturating the CPU and (historically) crashing
+        # the QThread layer.
+        self._pitch_debounce = QTimer(self)
+        self._pitch_debounce.setSingleShot(True)
+        self._pitch_debounce.setInterval(200)
+        self._pitch_debounce.timeout.connect(self._flush_pending_pitch)
+        self._pending_pitch: int | None = None
+
+        # Speed debounce mirrors pitch: Shift+Up/Down cycles presets in
+        # quick bursts, and each cycle would otherwise spawn a render
+        # that gets cancelled by the next press.  Shorter window (100ms)
+        # than pitch because speed changes aren't typically scrubbed.
+        self._speed_debounce = QTimer(self)
+        self._speed_debounce.setSingleShot(True)
+        self._speed_debounce.setInterval(100)
+        self._speed_debounce.timeout.connect(self._flush_pending_speed)
+        self._pending_speed: float | None = None
 
         controls_layout.addLayout(loop_speed_bar)
 
@@ -763,7 +984,7 @@ class PlayerControls(QWidget):
         self._bpm_spin.setRange(20, 300)
         self._bpm_spin.setValue(120)
         self._bpm_spin.setSuffix(" BPM")
-        self._bpm_spin.setFixedWidth(105)
+        _fit_spinbox_width(self._bpm_spin)
         self._bpm_spin.setToolTip("Metronome tempo")
         self._bpm_spin.setAccessibleName("Metronome BPM")
         self._bpm_spin.valueChanged.connect(self._on_bpm_changed)
@@ -771,7 +992,6 @@ class PlayerControls(QWidget):
 
         self._tap_times: list[float] = []
         self._tap_btn = QPushButton("Tap")
-        self._tap_btn.setFixedWidth(46)
         self._tap_btn.setToolTip("Tap to set tempo")
         self._tap_btn.setAccessibleName("Tap tempo")
         self._tap_btn.clicked.connect(self._on_tap)
@@ -779,7 +999,6 @@ class PlayerControls(QWidget):
 
         self._beat_sync_btn = QPushButton("Sync")
         self._beat_sync_btn.setCheckable(True)
-        self._beat_sync_btn.setFixedWidth(50)
         self._beat_sync_btn.setToolTip(
             "Sync metronome to detected beats (click on actual beat positions)"
         )
@@ -792,7 +1011,7 @@ class PlayerControls(QWidget):
         self._beat_nudge_spin.setRange(-500, 500)
         self._beat_nudge_spin.setValue(0)
         self._beat_nudge_spin.setSuffix(" ms")
-        self._beat_nudge_spin.setFixedWidth(104)
+        _fit_spinbox_width(self._beat_nudge_spin, sample="-500 ms")
         self._beat_nudge_spin.setToolTip("Metronome nudge (shift metronome clicking)")
         self._beat_nudge_spin.setAccessibleName("Sync Nudge")
         self._beat_nudge_spin.valueChanged.connect(self._on_beat_nudge_changed)
@@ -820,6 +1039,10 @@ class PlayerControls(QWidget):
         for v in _MET_VOL_PRESETS:
             self._metronome_vol_combo.addItem(f"{v}%", v)
         self._metronome_vol_combo.setCurrentText("100%")
+        # AdjustToContents misbehaves on editable combos (via
+        # _make_display_combo) -- the line-edit padding isn't accounted
+        # for and the first digit of "100%" gets clipped.  Match the
+        # stem-row volume combo's fixed width for consistency.
         self._metronome_vol_combo.setFixedWidth(62)
         self._metronome_vol_combo.setToolTip("Metronome volume")
         self._metronome_vol_combo.setAccessibleName("Metronome volume preset")
@@ -923,11 +1146,7 @@ class PlayerControls(QWidget):
         # spans from the previous theme.
         badge = self._badge_style()
         if self._detected_key_raw:
-            key_c = self._conf_color(self._key_conf) if self._key_conf else ""
-            self._key_label.setStyleSheet(badge)
-            self._key_label.setText(
-                self._badge_html("Key:", self._detected_key_raw, key_c)
-            )
+            self._refresh_key_label()
         if self._detected_bpm_raw:
             bpm_c = self._conf_color(self._bpm_conf) if self._bpm_conf else ""
             self._detected_bpm_label.setStyleSheet(badge)
@@ -966,6 +1185,10 @@ class PlayerControls(QWidget):
         self._player.state_changed.connect(self._on_state_changed)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.speed_changed.connect(self._on_speed_applied)
+        self._player.pitch_changed.connect(self._on_pitch_applied)
+        self._player.stretch_started.connect(self._on_stretch_started)
+        self._player.stretch_progress.connect(self._on_stretch_progress)
+        self._player.stretch_finished.connect(self._on_stretch_finished)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
@@ -993,6 +1216,18 @@ class PlayerControls(QWidget):
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
         self._speed_status.setText("")
+
+        # Kill any in-flight debounce from the previous song so a pending
+        # scroll doesn't fire set_pitch / set_speed against the freshly
+        # loaded stems.
+        self._pitch_debounce.stop()
+        self._pending_pitch = None
+        self._speed_debounce.stop()
+        self._pending_speed = None
+
+        self._pitch_spin.blockSignals(True)
+        self._pitch_spin.setValue(0)
+        self._pitch_spin.blockSignals(False)
 
         self._record_btn.blockSignals(True)
         self._record_btn.setChecked(False)
@@ -1101,6 +1336,25 @@ class PlayerControls(QWidget):
     def _on_stop(self) -> None:
         self._player.stop()
 
+    def _on_master_volume_slider_changed(self, value: int) -> None:
+        """Slider moved -- mirror the new value into the player and label."""
+        self._player.set_master_volume(value / 100.0)
+        self._master_volume_label.setText(f"{value}%")
+
+    def set_master_volume(self, volume: float) -> None:
+        """Set master volume from any entry point (shortcut, session load).
+
+        Keeps the slider, percent label, and player in sync so callers
+        don't need to update each surface separately.
+        """
+        value = max(0, min(200, int(round(float(volume) * 100))))
+        if self._master_volume_slider.value() != value:
+            self._master_volume_slider.blockSignals(True)
+            self._master_volume_slider.setValue(value)
+            self._master_volume_slider.blockSignals(False)
+        self._master_volume_label.setText(f"{value}%")
+        self._player.set_master_volume(value / 100.0)
+
     def _on_waveform_seek(self, seconds: float) -> None:
         self._player.seek(seconds)
 
@@ -1184,7 +1438,7 @@ class PlayerControls(QWidget):
             self._peaks_timer.start()
             return
 
-        self._peak_future = _peak_pool.submit(
+        self._peak_future = _get_peak_pool().submit(
             _compute_peaks_bg,
             stems=stems,
             muted=self._player.muted_stems,
@@ -1293,16 +1547,29 @@ class PlayerControls(QWidget):
     # -- Speed control slots --
 
     def _on_speed_changed(self, index: int) -> None:
-        """User selected a speed preset from the combo box."""
+        """User selected a speed preset from the combo box.
+
+        Debounced so burst input (Shift+Up/Down cycling) coalesces into
+        a single render; any in-flight render is cancelled immediately
+        to free CPU while the user is still choosing.
+        """
         speed = self._speed_combo.currentData()
         if speed is None:
             return
-        self._speed_status.setText("Stretching..." if speed != 1.0 else "")
+        self._pending_speed = float(speed)
+        self._speed_debounce.start()
+        self._player.cancel_stretch()
+
+    def _flush_pending_speed(self) -> None:
+        """Apply the latest speed value after the debounce window expires."""
+        if self._pending_speed is None:
+            return
+        speed = self._pending_speed
+        self._pending_speed = None
         self._player.set_speed(speed)
 
     def _on_speed_applied(self, speed: float) -> None:
         """Player finished stretching; update UI."""
-        self._speed_status.setText("")
         self._speed_combo.blockSignals(True)
         label = f"{speed}x"
         idx = self._speed_combo.findText(label)
@@ -1321,6 +1588,143 @@ class PlayerControls(QWidget):
         idx = self._speed_combo.currentIndex() + direction
         idx = max(0, min(idx, self._speed_combo.count() - 1))
         self._speed_combo.setCurrentIndex(idx)
+
+    # -- Pitch control slots --
+
+    def _on_pitch_changed(self, semitones: int) -> None:
+        """User adjusted the pitch spinbox.
+
+        We don't call ``player.set_pitch`` immediately; a 200ms debounce
+        timer coalesces rapid scroll/arrow input into a single render.
+        The descriptive status text is set by ``_on_stretch_started``
+        once the worker actually spawns, not while the user is still
+        adjusting the value.
+
+        Any already-running render is cancelled right away so we stop
+        wasting CPU on a stale target -- the new render will spawn when
+        the debounce timer fires.
+        """
+        self._pending_pitch = int(semitones)
+        self._pitch_debounce.start()
+        # Kill the stale render immediately; the next one is queued.
+        self._player.cancel_stretch()
+
+    def _flush_pending_pitch(self) -> None:
+        """Apply the latest pitch value after the debounce window expires."""
+        if self._pending_pitch is None:
+            return
+        pitch = self._pending_pitch
+        self._pending_pitch = None
+        self._player.set_pitch(pitch)
+
+    def _on_pitch_applied(self, semitones: int) -> None:
+        """Player finished pitch-shifting; update UI."""
+        self._pitch_spin.blockSignals(True)
+        self._pitch_spin.setValue(int(semitones))
+        self._pitch_spin.blockSignals(False)
+        # Refresh peaks (buffers may have new lengths after a combined render)
+        self._do_recompute_peaks()
+        # Refresh the detected-key label to show the transposed key.
+        self._refresh_key_label()
+        self.update_record_button_state()
+
+    def bump_pitch(self, direction: int) -> None:
+        """Nudge the pitch spinbox by one semitone.
+
+        Args:
+            direction: +1 for up, -1 for down. Clamped by the spinbox range.
+        """
+        self._pitch_spin.setValue(self._pitch_spin.value() + direction)
+
+    # -- Stretch worker progress indicator --
+    #
+    # Progress is shown *inside* (or immediately beside) the control the
+    # user is manipulating.  The pitch spinbox carries a "(processing
+    # 2/4)" suffix; the speed combo is followed by a small label with
+    # the same suffix text (combos can't carry inline text of their own).
+    # When both knobs are active, only the pitch suffix is shown -- the
+    # single worker renders both transforms in one pass, and duplicating
+    # the indicator confuses the eye.  The control stays enabled
+    # throughout -- any new input cancels the in-flight render and queues
+    # a fresh one via the debounce timer.
+
+    def _on_stretch_started(self) -> None:
+        """Begin showing render progress on the active control.
+
+        The spinbox stays enabled so the user can keep scrubbing -- the
+        player cancels the in-flight worker as soon as a new target is
+        committed (see ``_flush_pending_pitch``).
+        """
+        self._update_stretch_indicator(0, 0)
+
+    def _on_stretch_progress(self, current: int, total: int) -> None:
+        """Update the live render indicator with per-stem progress."""
+        self._update_stretch_indicator(current, total)
+
+    def _on_stretch_finished(self) -> None:
+        """Clear the render indicator and restore the idle display."""
+        self._pitch_spin.setSuffix("")
+        self._speed_status.setText("")
+
+    def _update_stretch_indicator(self, current: int, total: int) -> None:
+        """Paint render progress onto the pitch spinbox / speed label.
+
+        The pitch spinbox's primary text ("+2 semi") is produced by
+        :class:`PitchSpinBox.textFromValue`; this method only manages
+        the trailing progress suffix (e.g. ``" (2/4)"``).  Speed
+        progress uses a small floating label next to the speed combo,
+        since QComboBox can't carry inline suffix text.
+
+        The suffix format is deliberately minimal -- the spinbox/label
+        is already tight, and the bare ``(N/M)`` form is still read
+        as progress-out-of-total in context (the control is frozen
+        grey while it's showing).  Earlier versions used
+        ``(processing N/M)`` but that pushed the spinbox ~80 px wider.
+        """
+        pitch_on = self._player.pitch_semitones != 0
+        speed_on = self._player.speed != 1.0
+
+        if pitch_on:
+            if total > 0:
+                self._pitch_spin.setSuffix(f" ({current}/{total})")
+            else:
+                self._pitch_spin.setSuffix(" \u2026")
+        else:
+            self._pitch_spin.setSuffix("")
+
+        if speed_on and not pitch_on:
+            # Match the pitch spinbox suffix format verbatim so both
+            # renders look visually identical.  Sits right after the
+            # combo so the user sees "Speed: [1.5x] (2/4)".
+            if total > 0:
+                self._speed_status.setText(f"({current}/{total})")
+            else:
+                self._speed_status.setText("\u2026")
+        else:
+            # When pitch is active, the spinbox suffix already carries
+            # the indicator; don't duplicate it in a floating label.
+            self._speed_status.setText("")
+
+    def _render_status_label(self, current: int, total: int) -> str:
+        """Compose the floating-label status text (speed-only renders).
+
+        Retained for tests and for callers that want a single-string
+        status. For the pitch case the spinbox suffix is authoritative.
+        """
+        pitch_on = self._player.pitch_semitones != 0
+        speed_on = self._player.speed != 1.0
+        if pitch_on and speed_on:
+            verb = "Transposing and time-stretching"
+        elif pitch_on:
+            verb = "Transposing"
+        elif speed_on:
+            verb = "Time-stretching"
+        else:
+            # Transition back to identity (fast path emits no progress).
+            verb = "Rendering"
+        if total > 0:
+            return f"{verb} stems ({current}/{total})\u2026"
+        return f"{verb} stems\u2026"
 
     # -- Metronome handlers --
 
@@ -1502,6 +1906,33 @@ class PlayerControls(QWidget):
             )
         return f'<span style="color:{val_c};">{value}</span>'
 
+    def _refresh_key_label(self) -> None:
+        """Re-render the key badge, showing ``detected → effective`` when pitch != 0."""
+        if not self._detected_key_raw:
+            return
+        pitch = self._player.pitch_semitones
+        key_c = self._conf_color(self._key_conf) if self._key_conf else ""
+        self._key_label.setStyleSheet(self._badge_style())
+        if pitch == 0:
+            self._key_label.setText(
+                self._badge_html("Key:", self._detected_key_raw, key_c)
+            )
+            self._key_label.setToolTip(
+                f"Detected key: {self._detected_key_raw}\n"
+                f"Confidence: {self._key_conf}\n"
+                f"Double-click to re-detect"
+            )
+            return
+        effective = transpose_key(self._detected_key_raw, pitch)
+        shown = f"{self._detected_key_raw} \u2192 {effective}"
+        self._key_label.setText(self._badge_html("Key:", shown, key_c))
+        self._key_label.setToolTip(
+            f"Detected key: {self._detected_key_raw}\n"
+            f"Transposed by {pitch:+d} st: {effective}\n"
+            f"Confidence: {self._key_conf}\n"
+            f"Double-click to re-detect"
+        )
+
     def _update_sync_btn_state(self, has_beats: bool) -> None:
         """Update beat-sync button enabled state."""
         self._beat_sync_btn.setEnabled(has_beats)
@@ -1548,16 +1979,7 @@ class PlayerControls(QWidget):
         if result.key:
             self._key_conf = result.key_confidence
             self._detected_key_raw = result.key
-            key_c = self._conf_color(result.key_confidence)
-            self._key_label.setStyleSheet(badge)
-            self._key_label.setText(
-                self._badge_html("Key:", result.key, key_c)
-            )
-            self._key_label.setToolTip(
-                f"Detected key: {result.key}\n"
-                f"Confidence: {result.key_confidence}\n"
-                f"Double-click to re-detect"
-            )
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")
@@ -1620,14 +2042,7 @@ class PlayerControls(QWidget):
         if result.key:
             self._key_conf = result.key_confidence
             self._detected_key_raw = result.key
-            key_c = self._conf_color(result.key_confidence)
-            self._key_label.setStyleSheet(self._badge_style())
-            self._key_label.setText(self._badge_html("Key:", result.key, key_c))
-            self._key_label.setToolTip(
-                f"Detected key: {result.key}\n"
-                f"Confidence: {result.key_confidence}\n"
-                f"Double-click to re-detect"
-            )
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")
@@ -1719,14 +2134,7 @@ class PlayerControls(QWidget):
         self._detected_key_raw = key
         if key:
             self._key_conf = confidence
-            c = self._conf_color(confidence) if confidence else ""
-            self._key_label.setStyleSheet(self._badge_style())
-            self._key_label.setText(self._badge_html("Key:", key, c))
-            parts = [f"Detected key: {key}"]
-            if confidence:
-                parts.append(f"Confidence: {confidence}")
-            parts.append("Double-click to re-detect")
-            self._key_label.setToolTip("\n".join(parts))
+            self._refresh_key_label()
         else:
             self._key_label.setText("")
             self._key_label.setStyleSheet("")
@@ -1963,12 +2371,20 @@ class PlayerControls(QWidget):
         return len(self._recording_rows) >= _MAX_RECORDING_TAKES
 
     def update_record_button_state(self) -> None:
-        """Sync Record button enabled state with current speed."""
-        at_1x = self._player.speed == 1.0
-        self._record_btn.setEnabled(at_1x and self._player.has_stems)
-        if not at_1x:
+        """Sync Record button enabled state with current speed and pitch."""
+        at_identity = (
+            self._player.speed == 1.0
+            and self._player.pitch_semitones == 0
+        )
+        self._record_btn.setEnabled(at_identity and self._player.has_stems)
+        if not at_identity:
+            reasons = []
+            if self._player.speed != 1.0:
+                reasons.append("1.0x speed")
+            if self._player.pitch_semitones != 0:
+                reasons.append("0 st pitch")
             self._record_btn.setToolTip(
-                "Recording requires 1.0x speed"
+                "Recording requires " + " and ".join(reasons)
             )
             if self._record_btn.isChecked():
                 self._record_btn.blockSignals(True)

@@ -433,3 +433,29 @@ def get_stylesheet(theme: str) -> str:
 def get_colors(theme: str) -> dict[str, str]:
     """Return the color token dict for the given theme name."""
     return THEMES[theme]["colors"]
+
+
+def apply_tooltip_palette(theme: str) -> None:
+    """Force QToolTip colors via QPalette.
+
+    Qt's stylesheet-driven ``QToolTip { ... }`` rule is unreliable:
+    when a child widget has its own ``setStyleSheet`` (as several do
+    in our stem rows), Qt can show tooltips spawned from that widget
+    using the *system* palette instead of the app stylesheet -- which
+    on Windows Light themes surfaces near-black-on-near-black text.
+
+    Setting the ``ToolTipBase`` / ``ToolTipText`` palette roles
+    directly on the QApplication bypasses the stylesheet entirely and
+    applies globally regardless of child widget stylesheet scope.
+    """
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QColor, QPalette
+
+    app = QApplication.instance()
+    if app is None:
+        return
+    c = get_colors(theme)
+    palette = app.palette()
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(c["surface0"]))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(c["text"]))
+    app.setPalette(palette)

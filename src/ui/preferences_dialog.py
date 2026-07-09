@@ -34,6 +34,7 @@ from src.app_settings import (
     read_default_mp3_bitrate,
     read_latency_offset_ms,
     read_startup_play_sound,
+    read_sync_recording_pitch,
 )
 from src.data_paths import platform_user_data_dir
 from src.version import __version__
@@ -130,6 +131,17 @@ class PreferencesDialog(QDialog):
         sform = QFormLayout(startup_box)
         sform.addRow(self._startup_sound_cb)
 
+        self._sync_rec_pitch_cb = QCheckBox(
+            "Pitch-shift recording takes with the stems"
+        )
+        self._sync_rec_pitch_cb.setToolTip(
+            "When off (default), recordings play back at their original "
+            "pitch even when the stems are transposed."
+        )
+        playback_box = QGroupBox("Playback")
+        pform = QFormLayout(playback_box)
+        pform.addRow(self._sync_rec_pitch_cb)
+
         self._load_from_settings()
 
         buttons = QDialogButtonBox(
@@ -143,6 +155,7 @@ class PreferencesDialog(QDialog):
         layout.addWidget(audio_box)
         layout.addWidget(import_box)
         layout.addWidget(export_box)
+        layout.addWidget(playback_box)
         layout.addWidget(startup_box)
 
         ver = QLabel(f"stemma {__version__}")
@@ -218,6 +231,10 @@ class PreferencesDialog(QDialog):
 
         self._startup_sound_cb.setChecked(
             read_startup_play_sound(self._settings)
+        )
+
+        self._sync_rec_pitch_cb.setChecked(
+            read_sync_recording_pitch(self._settings)
         )
 
         self._model_combo.setCurrentIndex(
@@ -308,5 +325,10 @@ class PreferencesDialog(QDialog):
         self._settings.setValue(
             "startup/play_sound",
             self._startup_sound_cb.isChecked(),
+        )
+
+        self._settings.setValue(
+            "playback/sync_recording_pitch",
+            self._sync_rec_pitch_cb.isChecked(),
         )
         self.accept()
