@@ -4,6 +4,17 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-07-09 -- v2.5.0 Loop Trainer
+
+### Done
+- **Loop Trainer:** New "Loop Trainer" toggle in the transport area. With an A-B loop active, it steps playback speed up one preset each time the loop repeats — from a chosen start speed (0.5x / 0.75x / 0.85x) up to 1.0x, then holds — so a passage can be learned slow and worked up to tempo hands-free. Start speed and enabled state persist across restarts (reset per song).
+- **Player loop-wrap signal:** `MultiTrackPlayer` now exposes a `loop_wrapped` signal. A realtime-safe wrap counter is incremented in the audio callback and surfaced from the GUI-thread position timer, so loop-driven UI logic (the trainer) never runs on the audio thread. Reuses the existing render serialization, so rapid ramps don't pile up librosa workers.
+
+### Metrics
+- 846 fast tests pass, 1 skipped. +13 new tests (wrap counter/signal, ramp progression and 1.0x cap, reset-on-load, session round-trip).
+
+---
+
 ## 2026-07-09 -- v2.4.1 Stability Pass
 
 A returning-from-dormancy audit (deep review of the whole project plus PR #124) turned up a batch of correctness bugs; this session fixes them and gets CI green again.

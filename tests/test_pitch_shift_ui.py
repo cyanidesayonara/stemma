@@ -49,7 +49,16 @@ def player():
 def controls(qapp, player):
     ctrl = PlayerControls(player)
     yield ctrl
+    # Deterministic teardown: drain workers, then delete the widget now
+    # (while the QApplication is still alive) instead of leaving dozens of
+    # PlayerControls to be freed by Python's GC at interpreter exit in an
+    # order Qt can't survive (heap corruption). The player<->controls
+    # signal connections form a reference cycle, so this must happen
+    # before the player fixture tears down.
     ctrl._cleanup_peak_thread()
+    ctrl.setParent(None)
+    ctrl.deleteLater()
+    qapp.processEvents()
 
 
 # -----------------------------------------------------------------------

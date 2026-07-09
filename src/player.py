@@ -344,6 +344,7 @@ class MultiTrackPlayer(QObject):
     stretch_finished = Signal()  # render completed (success or error)
     playback_failed = Signal(str)
     recording_saved = Signal(str)  # emitted with the saved WAV path
+    loop_wrapped = Signal()  # A-B loop repeated (wrapped back to A)
 
     def __init__(self) -> None:
         super().__init__()
@@ -367,6 +368,12 @@ class MultiTrackPlayer(QObject):
         self._loop_a_frame: int | None = None
         self._loop_b_frame: int | None = None
         self._looping: bool = False
+        # Incremented in the audio callback each time the loop wraps back
+        # to A (a plain int write -- realtime-safe). _emit_position (GUI
+        # thread) diffs it against _loop_wrap_seen and emits loop_wrapped
+        # so trainer/UI logic runs on the GUI thread, never the callback.
+        self._loop_wrap_count: int = 0
+        self._loop_wrap_seen: int = 0
 
         # Speed / time-stretch / pitch state.
         self._playback_speed: float = 1.0
@@ -920,6 +927,8 @@ class MultiTrackPlayer(QObject):
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False
+        self._loop_wrap_count = 0
+        self._loop_wrap_seen = 0
         self._playback_speed = 1.0
         self._pitch_semitones = 0
         self._applied_render_state = (1.0, 0, False)
@@ -1653,6 +1662,14 @@ class MultiTrackPlayer(QObject):
                 self._recording_buffer = None
             return
 
+        # Surface loop wraps that happened on the audio thread since the
+        # last tick. Emitted here (GUI thread) so slots can safely touch
+        # Qt objects and spawn render workers.
+        wraps = self._loop_wrap_count
+        if wraps != self._loop_wrap_seen:
+            self._loop_wrap_seen = wraps
+            self.loop_wrapped.emit()
+
         pos_s = self._current_frame / self._sample_rate
         self.position_changed.emit(pos_s)
 
@@ -1931,6 +1948,9 @@ class MultiTrackPlayer(QObject):
             if self._current_frame >= boundary:
                 if looping:
                     self._current_frame = loop_a
+                    # RT-safe int write; surfaced as loop_wrapped from the
+                    # GUI-thread timer (see _emit_position).
+                    self._loop_wrap_count += 1
                     if (self._count_in_enabled
                             and self._count_in_on_repeats):
                         self._arm_count_in()

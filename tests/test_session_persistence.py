@@ -25,7 +25,9 @@ def qapp():
 
 @pytest.fixture
 def player():
-    return MultiTrackPlayer()
+    p = MultiTrackPlayer()
+    yield p
+    p.shutdown(wait_ms=5000)
 
 
 @pytest.fixture
@@ -37,7 +39,14 @@ def library(tmp_path):
 def controls(qapp, player):
     ctrl = PlayerControls(player)
     yield ctrl
+    # Delete the widget while the QApplication is alive rather than
+    # leaving it for GC at interpreter exit (heap corruption); the
+    # player<->controls signal connections form a reference cycle, so
+    # tear the widget down before the player fixture.
     ctrl._cleanup_peak_thread()
+    ctrl.setParent(None)
+    ctrl.deleteLater()
+    qapp.processEvents()
 
 
 @pytest.fixture

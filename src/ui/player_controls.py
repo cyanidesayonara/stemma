@@ -15,6 +15,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -979,6 +980,44 @@ class PlayerControls(QWidget):
 
         controls_layout.addLayout(loop_speed_bar)
 
+        # -- Loop Trainer bar --
+        # Steps playback speed up one preset each time the A-B loop
+        # repeats, from a chosen start speed up to 1.0x, so a passage can
+        # be learned slow and worked up to tempo hands-free.
+        trainer_bar = QHBoxLayout()
+        self._trainer_enabled = False
+        self._trainer_start_speed = 0.75
+
+        self._trainer_check = QCheckBox("Loop Trainer")
+        self._trainer_check.setToolTip(
+            "Step speed up one preset each loop repeat, from the start "
+            "speed up to 1.0x. Requires an A-B loop."
+        )
+        self._trainer_check.setAccessibleName("Loop trainer")
+        self._trainer_check.toggled.connect(self._on_trainer_toggled)
+        trainer_bar.addWidget(self._trainer_check)
+
+        trainer_bar.addWidget(QLabel("from"))
+        self._trainer_start_combo = QComboBox()
+        for preset in SPEED_PRESETS:
+            if preset < 1.0:
+                self._trainer_start_combo.addItem(f"{preset}x", preset)
+        self._trainer_start_combo.setCurrentText("0.75x")
+        _fit_combo_width(self._trainer_start_combo)
+        self._trainer_start_combo.setToolTip("Trainer start speed")
+        self._trainer_start_combo.setAccessibleName("Trainer start speed")
+        self._trainer_start_combo.currentIndexChanged.connect(
+            self._on_trainer_start_changed
+        )
+        trainer_bar.addWidget(self._trainer_start_combo)
+        trainer_bar.addWidget(QLabel("→ 1.0x"))
+
+        self._trainer_status = QLabel("")
+        self._trainer_status.setObjectName("subtle-label")
+        trainer_bar.addWidget(self._trainer_status)
+        trainer_bar.addStretch()
+        controls_layout.addLayout(trainer_bar)
+
         # -- Metronome bar --
         metro_ci_bar = QHBoxLayout()
 
@@ -1206,6 +1245,7 @@ class PlayerControls(QWidget):
         self._player.stretch_started.connect(self._on_stretch_started)
         self._player.stretch_progress.connect(self._on_stretch_progress)
         self._player.stretch_finished.connect(self._on_stretch_finished)
+        self._player.loop_wrapped.connect(self._on_loop_wrapped)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
@@ -1245,6 +1285,14 @@ class PlayerControls(QWidget):
         self._pitch_spin.blockSignals(True)
         self._pitch_spin.setValue(0)
         self._pitch_spin.blockSignals(False)
+
+        # Reset the trainer for the new song (speed was reset to 1.0x
+        # above); leave the chosen start-speed preset as the user set it.
+        self._trainer_check.blockSignals(True)
+        self._trainer_check.setChecked(False)
+        self._trainer_check.blockSignals(False)
+        self._trainer_enabled = False
+        self._update_trainer_status()
 
         self._record_btn.blockSignals(True)
         self._record_btn.setChecked(False)
@@ -1517,6 +1565,7 @@ class PlayerControls(QWidget):
         self._update_loop_label()
         self._update_waveform_loop_markers()
         self._maybe_redetect_for_loop()
+        self._update_trainer_status()
 
     def set_loop_b(self) -> None:
         """Set loop B to the current playback position."""
@@ -1524,6 +1573,7 @@ class PlayerControls(QWidget):
         self._update_loop_label()
         self._update_waveform_loop_markers()
         self._maybe_redetect_for_loop()
+        self._update_trainer_status()
 
     def _maybe_redetect_for_loop(self) -> None:
         """Re-run detection for the A-B region when both points are set."""
@@ -1542,6 +1592,7 @@ class PlayerControls(QWidget):
         self._loop_toggle_btn.setChecked(False)
         self._update_loop_label()
         self._update_waveform_loop_markers()
+        self._update_trainer_status()
         # Re-detect for the full song after clearing A-B region.
         if self._player.stems:
             self.start_detection()
@@ -1549,6 +1600,108 @@ class PlayerControls(QWidget):
     def toggle_looping(self) -> None:
         """Toggle the loop button state (e.g. from keyboard shortcut)."""
         self._loop_toggle_btn.setChecked(not self._loop_toggle_btn.isChecked())
+
+    # -- Loop Trainer -----------------------------------------------------
+
+    @property
+    def trainer_enabled(self) -> bool:
+        """Whether the loop trainer is currently on."""
+        return self._trainer_enabled
+
+    @property
+    def trainer_start_speed(self) -> float:
+        """The trainer's configured start-speed preset."""
+        return self._trainer_start_speed
+
+    def restore_trainer_state(
+        self, enabled: bool, start_speed: float,
+    ) -> None:
+        """Restore trainer settings from a saved session.
+
+        Sets the start-speed combo and enabled checkbox without letting
+        the toggle immediately re-drop playback speed -- session restore
+        drives speed separately.
+        """
+        idx = self._trainer_start_combo.findText(f"{start_speed}x")
+        if idx >= 0:
+            self._trainer_start_combo.blockSignals(True)
+            self._trainer_start_combo.setCurrentIndex(idx)
+            self._trainer_start_combo.blockSignals(False)
+            self._trainer_start_speed = float(start_speed)
+        self._trainer_check.blockSignals(True)
+        self._trainer_check.setChecked(bool(enabled))
+        self._trainer_check.blockSignals(False)
+        self._trainer_enabled = bool(enabled)
+        self._update_trainer_status()
+
+    def _loop_region_valid(self) -> bool:
+        """True when a usable A-B region (B > A) is set."""
+        a = self._player.loop_a
+        b = self._player.loop_b
+        return a is not None and b is not None and b > a
+
+    def _next_speed_up(self, speed: float) -> float | None:
+        """Smallest speed preset greater than *speed*, capped at 1.0x.
+
+        Returns None once the ramp has reached 1.0x (nothing above it
+        that the trainer should step to).
+        """
+        for preset in SPEED_PRESETS:  # ascending
+            if preset > speed + 1e-6 and preset <= 1.0 + 1e-6:
+                return preset
+        return None
+
+    def _set_speed_preset(self, speed: float) -> None:
+        """Drive the speed combo to *speed* (fires the normal render)."""
+        idx = self._speed_combo.findText(f"{speed}x")
+        if idx >= 0:
+            self._speed_combo.setCurrentIndex(idx)
+
+    def _on_trainer_toggled(self, checked: bool) -> None:
+        """Enable/disable the trainer.
+
+        Enabling with a valid loop region drops playback to the start
+        speed; the ramp then advances one preset per loop repeat.
+        """
+        self._trainer_enabled = checked
+        if checked and self._loop_region_valid():
+            if self._player.speed != self._trainer_start_speed:
+                self._set_speed_preset(self._trainer_start_speed)
+        self._update_trainer_status()
+
+    def _on_trainer_start_changed(self, _index: int) -> None:
+        speed = self._trainer_start_combo.currentData()
+        if speed is None:
+            return
+        self._trainer_start_speed = float(speed)
+        # If the ramp is already above the new start, re-arm from it.
+        if (self._trainer_enabled and self._loop_region_valid()
+                and self._player.speed > self._trainer_start_speed):
+            self._set_speed_preset(self._trainer_start_speed)
+        self._update_trainer_status()
+
+    def _on_loop_wrapped(self) -> None:
+        """A-B loop repeated: step the trainer ramp up one preset."""
+        if not self._trainer_enabled:
+            return
+        nxt = self._next_speed_up(self._player.speed)
+        if nxt is not None:
+            self._set_speed_preset(nxt)
+        self._update_trainer_status()
+
+    def _update_trainer_status(self) -> None:
+        """Refresh the trainer readout next to the start combo."""
+        if not self._trainer_enabled:
+            self._trainer_status.setText("")
+            return
+        if not self._loop_region_valid():
+            self._trainer_status.setText("(set an A-B loop)")
+            return
+        cur = self._player.speed
+        if cur >= 1.0:
+            self._trainer_status.setText("at 1.0x")
+        else:
+            self._trainer_status.setText(f"now {cur:g}x")
 
     def _update_loop_label(self) -> None:
         """Update the loop info label with current A/B points."""
@@ -1595,6 +1748,7 @@ class PlayerControls(QWidget):
         self._speed_combo.blockSignals(False)
         self._do_recompute_peaks()
         self.update_record_button_state()
+        self._update_trainer_status()
 
     def cycle_speed(self, direction: int) -> None:
         """Cycle to the next/previous speed preset.
