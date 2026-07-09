@@ -35,10 +35,10 @@ stemma/
   PROJECT.md           # Detailed spec and roadmap (reference doc)
   AGENTS.md            # This file (AI context, living document)
   CHANGELOG.md         # Append-only session history
-  stemma.spec              # PyInstaller one-file build spec
+  stemma.spec              # PyInstaller one-folder (COLLECT) build spec
   requirements-dev.txt     # Dev/build dependencies (pyinstaller)
   .github/workflows/ci.yml      # CI: fast tests on push
-  .github/workflows/release.yml # On v* tags: sync version + manifest, fast tests, .exe/.msix, GitHub Release
+  .github/workflows/release.yml # On v* tags: sync version + manifest, fast tests, stemma.zip + stemma.msix, GitHub Release
   .github/workflows/partner-center-submit.yml # Optional manual Partner Center API (default: credentials check only)
   src/
     app.py             # QApplication setup
@@ -48,7 +48,9 @@ stemma/
     version.py         # __version__ string
     import_messages.py # User-facing import / download / separation error text
     metronome.py       # Tap tempo / BPM helpers for metronome UI
+    click_utils.py     # Metronome click sample generation
     separator.py       # ONNX stem separation engine
+    beat_detector.py   # BPM/key/chord detection + beat_this ONNX beat tracking
     model_manager.py   # Download/cache ONNX models
     player.py          # Multi-track audio player
     library.py         # Song library (JSON-based)
@@ -71,7 +73,7 @@ stemma/
       wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
       _wav_playback_impl.py  # QSoundEffect + winsound fallback
       styles.py          # Dark / light themes
-  tests/               # pytest test suite (~498 fast + 5 slow + 1 hardware)
+  tests/               # pytest test suite (~825 fast + slow/hardware deselected by default)
     conftest.py        # Shared fixtures
     test_separator.py
     test_model_manager.py
@@ -137,7 +139,9 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-04-03
+Last updated: 2026-07-09
+
+Current version: **v2.4.1** — v2.4.0 shipped pitch shift / key transposition (#117); v2.4.1 is a stability pass on top of it.
 
 ### Phase 1 (MVP) -- Complete
 All core functionality implemented and tested:
@@ -149,7 +153,7 @@ All core functionality implemented and tested:
 
 ### Phase 2 (Polish) -- Complete
 - MP3 export (lameenc, 320kbps)
-- Keyboard shortcuts (Space, S, arrows, 1-6, A/B/L, [ / ], M, C; Help > Keyboard Shortcuts)
+- Keyboard shortcuts (Space, S, arrows, Ctrl+1-6, A/B/L, Shift+Up/Down speed, Shift+Left/Right pitch, M, C; Help > Keyboard Shortcuts)
 - Per-stem volume sliders
 - Window state persistence
 - Wiener filter + soft gate post-processing
@@ -190,8 +194,10 @@ All core functionality implemented and tested:
 
 ### Post-2.0 Backlog
 - [x] Tempo/key detection & beat-synced metronome (#42)
+- [x] Pitch shift / key transposition (#117, shipped v2.4.0)
 - [ ] Experimental DSP (#28)
 - [ ] Real-time streaming (#13)
+- [ ] GPU separation via DirectML re-export (#125)
 
 ### v2.1.0 Release -- Shipped
 - [x] Metronome beat-sync nudge (±500ms spinbox, all click sources)
@@ -210,9 +216,9 @@ All core functionality implemented and tested:
 ## Test Suite
 
 ```
-pytest                                    # ~625 fast tests (~25s)
-pytest -m slow                            # 5 ONNX inference tests (~20s, needs model)
-pytest -m hardware                        # 1 audible playback test (~30s, needs speakers)
+pytest                                    # ~825 fast tests (~25s)
+pytest -m slow                            # ONNX inference tests (needs model)
+pytest -m hardware                        # audible playback test (needs speakers)
 set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
 ```
 

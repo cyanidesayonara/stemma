@@ -23,7 +23,7 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 | **Platform** | Windows desktop only | No mobile/web for now |
 | **GPU** | NVIDIA RTX 4070 Ti | DirectML acceleration via ONNX Runtime |
 | **Stems** | 4-stem and 6-stem models | Both available per song |
-| **Distribution** | Single `.exe` via GitHub Releases | Models download on first run |
+| **Distribution** | Microsoft Store (primary); portable `stemma.zip` + `stemma.msix` on GitHub Releases | Models download on first run |
 | **Python** | 3.14 | All deps confirmed compatible (March 2026) |
 
 ---
@@ -40,7 +40,7 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 | **Audio Processing** | `numpy` | Efficient buffer manipulation |
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
-| **Packaging** | PyInstaller | Single `.exe` (~150-250MB without models) |
+| **Packaging** | PyInstaller | One-folder (COLLECT) build shipped as `stemma.zip` + `stemma.msix` (~150-250MB without models) |
 | **Future** | `librosa` / other | Key transposition (pitch-shift); tempo stretch is implemented via librosa |
 
 ### Why HTDemucs v4?
@@ -66,7 +66,7 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 ```
 stemma/
 ├── main.py                    # App entry point
-├── stemma.spec                # PyInstaller one-file build spec
+├── stemma.spec                # PyInstaller one-folder (COLLECT) build spec
 ├── requirements.txt
 ├── requirements-dev.txt       # Dev/build deps (pyinstaller)
 ├── pyproject.toml             # pytest config
@@ -74,7 +74,7 @@ stemma/
 ├── LICENSE                    # MIT
 ├── .gitignore
 ├── .github/workflows/ci.yml      # CI: fast tests on every push
-├── .github/workflows/release.yml # Build .exe + GitHub Release on v* tags
+├── .github/workflows/release.yml # Build one-folder app -> stemma.zip + stemma.msix, GitHub Release on v* tags
 ├── src/
 │   ├── __init__.py
 │   ├── app.py                 # QApplication setup
@@ -82,9 +82,12 @@ stemma/
 │   ├── data_paths.py          # Per-user data directory resolution
 │   ├── import_messages.py     # User-facing text for import/download failures
 │   ├── metronome.py           # Tap tempo helper for metronome UI
+│   ├── click_utils.py         # Metronome click sample generation
 │   ├── paths.py               # app_root(): frozen-build-aware root dir
+│   ├── qt_signal_utils.py     # PySide6 helpers (safe signal disconnect)
 │   ├── version.py             # __version__ string
 │   ├── separator.py           # ONNX Runtime stem separation
+│   ├── beat_detector.py       # BPM/key/chord detection + beat_this ONNX beat tracking
 │   ├── model_manager.py       # Download/cache ONNX models on first run
 │   ├── player.py              # Multi-track audio player (sounddevice)
 │   ├── library.py             # Song library (JSON-based)
@@ -100,13 +103,21 @@ stemma/
 │       ├── library_panel.py   # Song list with remove
 │       ├── import_dialog.py   # Import songs + YouTube URL + model download
 │       ├── preferences_dialog.py  # Data dir, audio device, defaults
+│       ├── audio_sync.py      # Splash/logo audio-visual timing constants
+│       ├── animated_logo.py   # Animated main logo (notes + waves, click Easter egg)
+│       ├── animated_arpeggio.py # Animated footer arpeggio logo (letter glow, click Easter egg)
+│       ├── splash_screen.py   # Animated startup splash with arpeggio logo
+│       ├── wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
+│       ├── _wav_playback_impl.py  # QSoundEffect + winsound fallback
 │       └── styles.py          # Dark / light themes
-├── tests/
+├── tests/                     # 32 test files (825 fast tests; not all listed here)
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_separator.py      # 22 tests
+│   ├── test_beat_detector.py  # BPM/key/chord detection + beat tracking
 │   ├── test_model_manager.py  # 9 tests
 │   ├── test_player.py         # Player, A-B loop, metronome-related behaviour
 │   ├── test_library.py        # 22 tests
+│   ├── test_library_playback.py
 │   ├── test_downloader.py     # 26 tests
 │   ├── test_exporter.py       # 18 tests
 │   ├── test_post_processing.py # 17 tests
@@ -118,6 +129,8 @@ stemma/
 │   ├── test_app_settings.py
 │   ├── test_metronome.py
 │   ├── test_count_in.py
+│   ├── test_pitch_shift.py
+│   ├── test_pitch_shift_ui.py
 │   ├── test_theme.py
 │   └── test_integration.py    # includes slow + hardware markers
 └── data/                      # Created at runtime
@@ -143,6 +156,12 @@ stemma/
 - Handles STFT/iSTFT pre/post-processing in NumPy (stripped from ONNX model)
 - Runs in background `QThread`, emits progress signals
 - Supports both `htdemucs` (4-stem) and `htdemucs_6s` (6-stem)
+
+### `beat_detector.py` — Musical Analysis
+- BPM detection and beat/downbeat tracking via the `beat_this` ONNX model (chunked inference)
+- Key detection using Krumhansl-Schmuckler profiles
+- Chord detection (major/minor) with Viterbi smoothing
+- `transpose_key()` helper for shifting a detected key by semitones (used by pitch shift)
 
 ### `model_manager.py` — Model Download & Cache
 - Checks if ONNX model files exist under the app data directory (`models/`)
@@ -222,7 +241,7 @@ stemma/
 ### Phase 2 — Polish (complete)
 - [x] MP3 export support (lameenc, 320kbps)
 - [x] Separation progress bar (in import dialog)
-- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, 1-6=mute stems, A/B/L=loop)
+- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, Ctrl+1-6=mute stems, A/B/L=loop)
 - [x] Per-stem volume sliders (0-200%)
 - [x] Window state persistence (QSettings)
 - [x] Audio post-processing (Wiener filter + soft gating)
@@ -238,11 +257,12 @@ stemma/
 - [x] PyInstaller packaging + GitHub Release workflow (#56)
 
 ### Post-2.0 backlog (see GitHub issues)
-Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118).
+Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118), pitch shift / key transposition (#117, shipped v2.4.0).
 
 Open (all labeled `v3.0` on GitHub):
 - [ ] Experimental DSP extensions (#28)
 - [ ] Real-time streaming stem separation (#13)
+- [ ] GPU separation via DirectML re-export (#125)
 
 For the live checklist, prefer `AGENTS.md` and the GitHub issue list over this section if they disagree.
 
