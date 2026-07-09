@@ -14,9 +14,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -25,4 +25,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run fast tests
+        # The offscreen QPA platform keeps Qt away from the runner's
+        # display driver entirely: real window show() on the hosted
+        # Windows image intermittently access-violates or hangs inside
+        # WM_PAINT once enough widget tests have run before it.
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120

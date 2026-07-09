@@ -14,9 +14,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -31,6 +31,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run fast tests
+        # Same offscreen rationale as ci.yml: keep Qt off the hosted
+        # runner's display driver.
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120
 
       - name: Build executable
