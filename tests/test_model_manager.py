@@ -1,10 +1,30 @@
 """Tests for the model download and cache manager."""
 
+import io
 import os
+from unittest.mock import patch
 
 import pytest
 
 from src.model_manager import ModelDownloader, ModelManager, _MODEL_FILES
+
+
+class _FakeResponse:
+    """Minimal stand-in for the urlopen context manager."""
+
+    def __init__(self, body: bytes, content_length: int | None = None):
+        self._buf = io.BytesIO(body)
+        length = len(body) if content_length is None else content_length
+        self.headers = {"Content-Length": str(length)} if length is not None else {}
+
+    def read(self, size: int = -1) -> bytes:
+        return self._buf.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 class TestModelManager:
@@ -96,3 +116,110 @@ class TestModelFiles:
     def test_6_stem_artifacts(self):
         assert _MODEL_FILES["htdemucs_6s"][0] == "htdemucs_6s.onnx"
         assert _MODEL_FILES["htdemucs_6s"][1] == "htdemucs_6s.onnx.data"
+
+
+class TestDownloadFile:
+    """Exercise the atomic streaming download (previously untested)."""
+
+    def test_downloads_to_final_path_via_partial(self, tmp_dir):
+        dl = ModelDownloader("beat_this", tmp_dir,
+                             url="http://x/m.onnx", file_name="m.onnx")
+        os.makedirs(tmp_dir, exist_ok=True)
+        dest = os.path.join(tmp_dir, "m.onnx")
+        body = b"onnx-bytes" * 5000
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   return_value=_FakeResponse(body)):
+            dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
+
+        assert os.path.isfile(dest)
+        assert open(dest, "rb").read() == body
+        # The .partial scratch file must not survive a success.
+        assert not os.path.exists(dest + ".partial")
+        assert dl._current_partial_path is None
+
+    def test_incomplete_download_raises_and_leaves_no_final_file(self, tmp_dir):
+        """Server promises more bytes than it delivers -> error, and the
+        final path stays empty so it isn't mistaken for a cached model."""
+        dl = ModelDownloader("beat_this", tmp_dir,
+                             url="http://x/m.onnx", file_name="m.onnx")
+        os.makedirs(tmp_dir, exist_ok=True)
+        dest = os.path.join(tmp_dir, "m.onnx")
+        truncated = _FakeResponse(b"only-half", content_length=1000)
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   return_value=truncated):
+            with pytest.raises(OSError, match="Incomplete download"):
+                dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
+
+        assert not os.path.exists(dest)
+
+    def test_run_cleans_up_partial_on_error(self, tmp_dir):
+        """A mid-stream failure must leave neither the final nor the
+        .partial file, and must surface via the error signal."""
+        dl = ModelDownloader("beat_this", tmp_dir,
+                             url="http://x/m.onnx", file_name="m.onnx")
+        dest = os.path.join(tmp_dir, "models", "m.onnx")
+        dl.models_dir = os.path.join(tmp_dir, "models")
+
+        errors = []
+        dl.error.connect(lambda m: errors.append(m))
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   side_effect=OSError("connection reset")):
+            dl.run()
+
+        assert errors and "connection reset" in errors[0]
+        assert not os.path.exists(dest)
+        assert not os.path.exists(dest + ".partial")
+
+    def test_cancel_mid_stream_stops_and_leaves_no_final_file(self, tmp_dir):
+        dl = ModelDownloader("beat_this", tmp_dir,
+                             url="http://x/m.onnx", file_name="m.onnx")
+        os.makedirs(tmp_dir, exist_ok=True)
+        dest = os.path.join(tmp_dir, "m.onnx")
+
+        def _cancel_after_first_chunk(downloaded, total):
+            dl.cancel()
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   return_value=_FakeResponse(b"x" * (1 << 18))):
+            with pytest.raises(InterruptedError):
+                dl._download_file("http://x/m.onnx", dest,
+                                  _cancel_after_first_chunk)
+
+        assert not os.path.exists(dest)
+
+    def test_stale_partial_is_removed_before_new_download(self, tmp_dir):
+        dl = ModelDownloader("beat_this", tmp_dir,
+                             url="http://x/m.onnx", file_name="m.onnx")
+        os.makedirs(tmp_dir, exist_ok=True)
+        dest = os.path.join(tmp_dir, "m.onnx")
+        # Leave a stale partial from a hypothetical previous run.
+        with open(dest + ".partial", "wb") as f:
+            f.write(b"garbage-prefix")
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   return_value=_FakeResponse(b"fresh-bytes")):
+            dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
+
+        assert open(dest, "rb").read() == b"fresh-bytes"
+
+    def test_full_multi_artifact_download_completes(self, tmp_dir):
+        """The two-artifact htdemucs path renames both files and emits
+        download_complete with the graph path."""
+        manager_dir = os.path.join(tmp_dir, "models")
+        dl = ModelDownloader("htdemucs", manager_dir)
+        done = []
+        dl.download_complete.connect(lambda p: done.append(p))
+
+        with patch("src.model_manager.urllib.request.urlopen",
+                   side_effect=lambda *a, **k: _FakeResponse(b"data" * 100)):
+            dl.run()
+
+        assert done and done[0].endswith("htdemucs.onnx")
+        for fname in _MODEL_FILES["htdemucs"]:
+            assert os.path.isfile(os.path.join(manager_dir, fname))
+            assert not os.path.exists(
+                os.path.join(manager_dir, fname + ".partial")
+            )
