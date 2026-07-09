@@ -1385,6 +1385,18 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Refuse a second export while one is running: ExportWorker is
+        # parentless, so reassigning self._export_worker would drop the
+        # last reference to the live QThread and crash Qt with
+        # "QThread: Destroyed while thread is still running".
+        if self._export_worker is not None and self._export_worker.isRunning():
+            QMessageBox.information(
+                self, "Export",
+                "An export is already in progress. Please wait for it "
+                "to finish.",
+            )
+            return
+
         song = self._library.get_song(self._current_song_id) if self._current_song_id else None
         if song is None:
             return
@@ -1407,7 +1419,10 @@ class MainWindow(QMainWindow):
         loop_a = self._player.loop_a
         loop_b = self._player.loop_b
         has_loop = loop_a is not None and loop_b is not None and loop_b > loop_a
-        has_bpm = self._player.metronome_bpm > 0
+        # Only offer the count-in export option when count-in is actually
+        # enabled -- metronome_bpm is always > 0 (clamped 20-300), so the
+        # old check surfaced the dialog on every single export.
+        has_bpm = self._player.count_in_enabled
 
         start_frame: int | None = None
         end_frame: int | None = None
@@ -1423,8 +1438,13 @@ class MainWindow(QMainWindow):
                 return
             if opts.get("loop_region") and has_loop:
                 sr = self._player.sample_rate
-                start_frame = int(loop_a * sr)
-                end_frame = int(loop_b * sr)
+                # loop_a/loop_b are in the *stretched* timeline (the loop
+                # frames are rescaled by _apply_stretched_stems), but the
+                # exporter reads the original on-disk WAVs. Map back to
+                # original time: original_t = stretched_t * speed.
+                speed = self._player.speed
+                start_frame = int(loop_a * speed * sr)
+                end_frame = int(loop_b * speed * sr)
             if opts.get("count_in"):
                 count_in_beats = self._player.count_in_beats
 
