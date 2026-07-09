@@ -389,6 +389,13 @@ class MultiTrackPlayer(QObject):
         # -- each allocating hundreds of MB of librosa intermediates --
         # and the OS swaps them to the pagefile, filling the disk.
         self._pending_render_emit: tuple[str, ...] | None = None
+        # What self._stems actually contain, as (speed, pitch, sync).
+        # The knobs (_playback_speed / _pitch_semitones) are set
+        # optimistically before a render lands, and cancel_stretch()
+        # can discard the render that would have realised them -- so
+        # "requested value unchanged" is not the same as "nothing to
+        # do".  set_speed/set_pitch compare against this instead.
+        self._applied_render_state: tuple[float, int, bool] = (1.0, 0, False)
 
         # Metronome state.
         self._metronome_enabled: bool = False
@@ -883,6 +890,7 @@ class MultiTrackPlayer(QObject):
         self._looping = False
         self._playback_speed = 1.0
         self._pitch_semitones = 0
+        self._applied_render_state = (1.0, 0, False)
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
@@ -1236,7 +1244,7 @@ class MultiTrackPlayer(QObject):
         audio is ready.
         """
         speed = max(0.5, min(speed, 2.0))
-        if speed == self._playback_speed:
+        if speed == self._playback_speed and self._stems_render_current():
             return
         self._playback_speed = speed
         self._render_stretch(emit=("speed",))
@@ -1254,10 +1262,31 @@ class MultiTrackPlayer(QObject):
             return
         semitones = max(PITCH_MIN_SEMITONES,
                         min(PITCH_MAX_SEMITONES, semitones))
-        if semitones == self._pitch_semitones:
+        if semitones == self._pitch_semitones and self._stems_render_current():
             return
         self._pitch_semitones = semitones
         self._render_stretch(emit=("pitch",))
+
+    def _target_render_state(self) -> tuple[float, int, bool]:
+        """The render state the knobs currently ask for.
+
+        The sync-recording-pitch flag only changes audible output while
+        a pitch shift is active, so it is normalised to False at pitch 0
+        -- toggling the preference at pitch 0 must not mark the stems
+        stale.
+        """
+        pitch = self._pitch_semitones
+        sync = self._sync_recording_pitch if pitch != 0 else False
+        return (self._playback_speed, pitch, sync)
+
+    def _stems_render_current(self) -> bool:
+        """True when self._stems already reflect the knob values.
+
+        False means a render is owed -- either one is in flight, or a
+        previous one was discarded by ``cancel_stretch()`` before it
+        could land.
+        """
+        return self._applied_render_state == self._target_render_state()
 
     def set_sync_recording_pitch(self, sync: bool) -> None:
         """Enable or disable pitch-shifting of recording-take stems.
@@ -1296,6 +1325,15 @@ class MultiTrackPlayer(QObject):
         self._pending_render_emit = None
 
         if not self._original_stems:
+            self._emit_stretch_signals(emit)
+            if was_rendering or had_pending:
+                self.stretch_finished.emit()
+            return
+
+        if self._stems_render_current():
+            # Stems already reflect the target -- e.g. a cancelled scrub
+            # came back to the applied value, or a completed render landed
+            # just before this request. Nothing to render.
             self._emit_stretch_signals(emit)
             if was_rendering or had_pending:
                 self.stretch_finished.emit()
@@ -1390,6 +1428,14 @@ class MultiTrackPlayer(QObject):
             worker.finished.connect(
                 lambda w=worker: self._reap_detached_worker(w)
             )
+            if not worker.isRunning():
+                # The thread can finish between the isRunning() check
+                # above and the connect() -- the finished signal then
+                # fired with nobody listening, and the worker would sit
+                # in _detached_workers forever, blocking every queued
+                # render. Reap it now; the reaper tolerates a double
+                # call if the signal did land after all.
+                self._reap_detached_worker(worker)
         else:
             worker.setParent(None)
             worker.deleteLater()
@@ -1419,7 +1465,10 @@ class MultiTrackPlayer(QObject):
         try:
             self._detached_workers.remove(worker)
         except ValueError:
-            pass
+            # Already reaped (double delivery: manual reap in
+            # _detach_stretch_worker plus the queued finished signal).
+            # The wrapper may already be deleteLater'd -- don't touch it.
+            return
         worker.setParent(None)
         worker.deleteLater()
 
@@ -1433,6 +1482,13 @@ class MultiTrackPlayer(QObject):
         self._pending_render_emit = None
 
         if not self._original_stems:
+            self._emit_stretch_signals(emit)
+            self.stretch_finished.emit()
+            return
+
+        if self._stems_render_current():
+            # A completed render landed before the queued request was
+            # dispatched and already matches the target.
             self._emit_stretch_signals(emit)
             self.stretch_finished.emit()
             return
@@ -1487,6 +1543,11 @@ class MultiTrackPlayer(QObject):
 
     def _apply_stretched_stems(self, stems: dict) -> None:
         """Replace current stems with *stems* and adjust frame indices."""
+        # Every call site applies stems that realise the knob values as
+        # they stand right now (any knob change detaches the worker whose
+        # completion would land here), so the applied state is simply the
+        # current target.
+        self._applied_render_state = self._target_render_state()
         old_total = self._total_frames if self._total_frames > 0 else 1
 
         self._stems = stems

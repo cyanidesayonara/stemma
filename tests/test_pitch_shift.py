@@ -893,3 +893,141 @@ class TestPlayerShutdown:
         loaded_player._stretch_worker = None
         loaded_player._detached_workers = []
         loaded_player.shutdown(wait_ms=0)  # should not raise
+
+
+# -----------------------------------------------------------------------
+# Regression: a render discarded by cancel_stretch() must not be lost
+# -----------------------------------------------------------------------
+
+class TestCancelledRenderNotLost:
+    """set_speed/set_pitch used to no-op purely on the requested value.
+
+    The knobs are set optimistically before the render lands, and
+    cancel_stretch() can discard that render -- after which "value
+    unchanged" does not mean "nothing to do". The player now tracks the
+    applied render state and re-renders when the stems are stale.
+    """
+
+    def test_set_pitch_same_value_rerenders_when_stems_stale(
+        self, loaded_player,
+    ):
+        """Speed knob is ahead of the stems; a pitch no-op must render."""
+        loaded_player._playback_speed = 0.75  # knob turned, render lost
+        with patch("src.player.StretchWorker") as worker_cls:
+            worker_cls.return_value.isRunning.return_value = False
+            loaded_player.set_pitch(0)  # unchanged pitch value
+            assert worker_cls.called
+        args = worker_cls.call_args[0]
+        assert args[2] == 0.75  # the owed speed render is included
+
+    def test_set_speed_same_value_rerenders_when_stems_stale(
+        self, loaded_player,
+    ):
+        """Pitch knob is ahead of the stems; a speed no-op must render."""
+        loaded_player._pitch_semitones = 2
+        with patch("src.player.StretchWorker") as worker_cls:
+            worker_cls.return_value.isRunning.return_value = False
+            loaded_player.set_speed(1.0)  # unchanged speed value
+            assert worker_cls.called
+        args = worker_cls.call_args[0]
+        assert args[3] == 2  # the owed pitch render is included
+
+    def test_scrub_back_during_speed_render_still_applies_speed(
+        self, loaded_player,
+    ):
+        """Full UI flow: speed render in flight, pitch scrubbed away and
+        back (the UI cancels on every tick), debounce flush lands on the
+        current pitch value -- the speed render must still happen."""
+        with patch("src.player.StretchWorker") as worker_cls:
+            live = MagicMock()
+            live.isRunning.return_value = True
+            worker_cls.return_value = live
+            loaded_player.set_speed(0.75)
+        loaded_player.cancel_stretch()
+        assert live in loaded_player._detached_workers
+
+        with patch("src.player.StretchWorker") as worker_cls2:
+            worker_cls2.return_value.isRunning.return_value = False
+            loaded_player.set_pitch(0)
+            # The cancelled worker is still draining: the render queues...
+            assert loaded_player._pending_render_emit is not None
+            # ...and dispatches once the drain finishes.
+            loaded_player._reap_detached_worker(live)
+            assert worker_cls2.called
+            args = worker_cls2.call_args[0]
+            assert args[2] == 0.75
+
+    def test_true_noop_still_skips_render(self, loaded_player):
+        """With stems current, unchanged values spawn nothing."""
+        with patch("src.player.StretchWorker") as worker_cls:
+            loaded_player.set_pitch(0)
+            loaded_player.set_speed(1.0)
+            worker_cls.assert_not_called()
+
+    def test_sync_toggle_at_pitch_zero_does_not_mark_stale(
+        self, loaded_player,
+    ):
+        """The sync flag is inaudible at pitch 0; toggling it must not
+        make the next no-op set_speed/set_pitch re-render."""
+        loaded_player.set_sync_recording_pitch(True)
+        with patch("src.player.StretchWorker") as worker_cls:
+            loaded_player.set_pitch(0)
+            loaded_player.set_speed(1.0)
+            worker_cls.assert_not_called()
+
+    def test_apply_stretched_stems_records_applied_state(
+        self, loaded_player,
+    ):
+        loaded_player._playback_speed = 0.75
+        loaded_player._pitch_semitones = 2
+        loaded_player._apply_stretched_stems(
+            dict(loaded_player._original_stems)
+        )
+        assert loaded_player._applied_render_state == (0.75, 2, False)
+
+    def test_load_stems_resets_applied_state(self, loaded_player, tmp_path):
+        import soundfile as sf
+        loaded_player._applied_render_state = (0.75, 2, False)
+        wav_path = tmp_path / "fake.wav"
+        sf.write(str(wav_path), np.zeros((4410, 2), dtype=np.float32), 44100)
+        loaded_player.load_stems({"vocals": str(wav_path)})
+        assert loaded_player._applied_render_state == (1.0, 0, False)
+
+
+# -----------------------------------------------------------------------
+# Regression: worker finishing between isRunning() and connect() must
+# not wedge the render queue
+# -----------------------------------------------------------------------
+
+class TestDetachReapRace:
+    def test_detach_reaps_worker_that_finished_before_connect(
+        self, loaded_player,
+    ):
+        """isRunning flips False right after the keepalive connect: the
+        finished signal fired unheard, so detach must reap directly --
+        otherwise _detached_workers never drains and every queued render
+        waits forever."""
+        fake = MagicMock()
+        fake.isRunning.side_effect = [True, False]
+        loaded_player._stretch_worker = fake
+
+        loaded_player._detach_stretch_worker()
+
+        assert fake not in loaded_player._detached_workers
+        fake.deleteLater.assert_called_once()
+
+    def test_reaper_double_call_does_not_touch_worker_again(
+        self, loaded_player,
+    ):
+        """Second delivery (manual reap plus the queued finished signal)
+        must not poke a wrapper that may already be deleteLater'd."""
+        fake = MagicMock()
+        loaded_player._detached_workers.append(fake)
+        loaded_player._reap_detached_worker(fake)
+        fake.setParent.reset_mock()
+        fake.deleteLater.reset_mock()
+
+        loaded_player._reap_detached_worker(fake)
+
+        fake.setParent.assert_not_called()
+        fake.deleteLater.assert_not_called()
