@@ -650,6 +650,13 @@ class MainWindow(QMainWindow):
         self._settings.setValue(
             "session/count_in_on_repeats", self._player.count_in_on_repeats
         )
+        self._settings.setValue(
+            "session/trainer_enabled", self._player_controls.trainer_enabled
+        )
+        self._settings.setValue(
+            "session/trainer_start_speed",
+            self._player_controls.trainer_start_speed,
+        )
         # Per-song detected key & BPM (keyed by song_id).
         if self._current_song_id:
             prefix = f"detection/{self._current_song_id}"
@@ -886,6 +893,18 @@ class MainWindow(QMainWindow):
         self._player_controls.restore_count_in_state(
             bool(ci_enabled), ci_beats, bool(ci_repeats)
         )
+
+        # Loop trainer state
+        tr_enabled = self._settings.value("session/trainer_enabled", False)
+        if isinstance(tr_enabled, str):
+            tr_enabled = tr_enabled.lower() == "true"
+        try:
+            tr_start = float(
+                self._settings.value("session/trainer_start_speed", 0.75)
+            )
+        except (TypeError, ValueError):
+            tr_start = 0.75
+        self._player_controls.restore_trainer_state(bool(tr_enabled), tr_start)
 
         # Per-song detected key & BPM.
         if self._current_song_id:
