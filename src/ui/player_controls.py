@@ -686,6 +686,23 @@ class PlayerControls(QWidget):
             self._detection_worker.wait(2000)
             self._detection_worker = None
 
+    def shutdown(self) -> None:
+        """Drain all background workers before the app tears down.
+
+        Called from MainWindow.closeEvent. Detection runs on every song
+        load and takes seconds (ONNX beat tracking over the full mix);
+        closing the app shortly after selecting a song used to leave a
+        running parentless QThread to be reaped at interpreter exit,
+        crashing with 'QThread: Destroyed while thread is still running'.
+        """
+        self._pitch_debounce.stop()
+        self._speed_debounce.stop()
+        self._cleanup_peak_thread()
+        # Join any orphaned detection workers still finishing up.
+        for worker in list(self._orphaned_workers):
+            worker.wait(2000)
+        self._orphaned_workers.clear()
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -2033,9 +2050,16 @@ class PlayerControls(QWidget):
             model_path=self._beat_model_path,
         )
         worker.completed.connect(self._on_key_only_completed)
+        worker.error.connect(self._on_key_only_error)
         worker.finished.connect(self._on_detect_finished)
         self._detection_worker = worker
         worker.start()
+
+    def _on_key_only_error(self, msg: str) -> None:
+        """Clear the key badge if re-detection fails (was stuck on
+        'detecting...' because no error handler was connected)."""
+        self._key_label.setText("")
+        self._key_label.setStyleSheet("")
 
     def _on_key_only_completed(self, result: DetectionResult) -> None:
         """Update only the key label from a re-detection."""
@@ -2068,9 +2092,16 @@ class PlayerControls(QWidget):
             model_path=self._beat_model_path,
         )
         worker.completed.connect(self._on_bpm_only_completed)
+        worker.error.connect(self._on_bpm_only_error)
         worker.finished.connect(self._on_detect_finished)
         self._detection_worker = worker
         worker.start()
+
+    def _on_bpm_only_error(self, msg: str) -> None:
+        """Clear the tempo badge if re-detection fails (was stuck on
+        'detecting...' because no error handler was connected)."""
+        self._detected_bpm_label.setText("")
+        self._detected_bpm_label.setStyleSheet("")
 
     def _on_bpm_only_completed(self, result: DetectionResult) -> None:
         """Update only the BPM label from a re-detection."""

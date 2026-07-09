@@ -1,15 +1,16 @@
 PySide6>=6.6.0
+# CPU ONNX Runtime. The DirectML build was evaluated (see issue: GPU
+# separation via DirectML) but both HTDemucs ONNX exports fail DML
+# kernel compilation on real hardware and fall back to CPU anyway, so
+# the plain wheel is used to keep the installer ~200 MB smaller.
+# separator._create_session() still attempts DmlExecutionProvider first,
+# so a future DML-compatible model export would light up GPU with no
+# code change.
 onnxruntime>=1.24.4
 sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26.0
-pydub>=0.25.1
 lameenc>=1.7.0
 librosa>=0.10.1
 yt-dlp>=2024.1.0
 imageio-ffmpeg>=0.4.9
-
-# Development dependencies
-pytest>=8.0.0
-pytest-cov>=4.1.0
-pytest-timeout>=2.3.0

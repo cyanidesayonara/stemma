@@ -949,6 +949,10 @@ class MainWindow(QMainWindow):
         # (librosa pitch/time-stretch is uninterruptible mid-call, so
         # the pool threads can't exit until the current stem finishes).
         self._player.shutdown()
+        # Drain detection/peak QThreads owned by the controls too, so
+        # closing during a fresh song's beat detection doesn't crash on
+        # exit with a still-running QThread.
+        self._player_controls.shutdown()
         shutdown_peak_pool()
 
         super().closeEvent(event)

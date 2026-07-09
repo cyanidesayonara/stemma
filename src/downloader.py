@@ -18,8 +18,13 @@ class DownloadError(Exception):
 
 
 _YOUTUBE_PATTERN = re.compile(
-    r"^(https?://)?(www\.)?"
-    r"(youtube\.com/watch\?v=|youtu\.be/|music\.youtube\.com/watch\?v=)"
+    r"^(https?://)?"
+    # Optional youtube subdomains (www/m/music), in any combination, so
+    # m.youtube.com and www.music.youtube.com both parse. The chain is
+    # restricted to these labels so lookalikes (fakeyoutube.com) are
+    # still rejected.
+    r"(?:(?:www|m|music)\.)*"
+    r"(youtube\.com/(watch\?v=|shorts/|live/|embed/)|youtu\.be/)"
 )
 
 

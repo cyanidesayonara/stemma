@@ -30,6 +30,20 @@ class TestURLValidation:
     def test_youtube_no_scheme(self):
         assert is_supported_url("youtube.com/watch?v=dQw4w9WgXcQ")
 
+    def test_youtube_shorts_url(self):
+        assert is_supported_url("https://www.youtube.com/shorts/dQw4w9WgXcQ")
+
+    def test_youtube_mobile_url(self):
+        assert is_supported_url("https://m.youtube.com/watch?v=dQw4w9WgXcQ")
+
+    def test_youtube_live_url(self):
+        assert is_supported_url("https://www.youtube.com/live/dQw4w9WgXcQ")
+
+    def test_youtube_www_music_url(self):
+        assert is_supported_url(
+            "https://www.music.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+
     def test_empty_string(self):
         assert not is_supported_url("")
 

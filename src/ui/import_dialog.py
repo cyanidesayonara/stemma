@@ -494,7 +494,9 @@ class ImportDialog(QDialog):
             is_6_stem=is_6_stem,
         )
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(lambda _: self._on_finished(song.id))
+        self._worker.finished.connect(
+            lambda _: self._on_finished(song.id, is_6_stem)
+        )
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
@@ -532,11 +534,14 @@ class ImportDialog(QDialog):
         self._progress_bar.setValue(percent)
         self._status_label.setText(message)
 
-    def _on_finished(self, song_id: str) -> None:
+    def _on_finished(self, song_id: str, is_6_stem: bool) -> None:
         self._import_song_id = None
-        model_used = (
-            "htdemucs_6s" if self._pending_separation_is_6_stem else "htdemucs"
-        )
+        # Use the actual model that ran this separation, threaded through
+        # from _start_separation_worker. Reading
+        # _pending_separation_is_6_stem here was wrong: it is only set on
+        # the download path, so a cached-model import recorded whatever
+        # the previous download left behind.
+        model_used = "htdemucs_6s" if is_6_stem else "htdemucs"
         self._library.update_song(song_id, model_used=model_used)
         self.accept()
 
