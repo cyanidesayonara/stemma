@@ -20,7 +20,11 @@ def app():
 @pytest.fixture
 def player(app):
     """A MultiTrackPlayer with no stems loaded."""
-    return MultiTrackPlayer()
+    p = MultiTrackPlayer()
+    yield p
+    # Deterministic teardown: never let the GC delete a player whose
+    # render QThread may still be running (heap corruption otherwise).
+    p.shutdown(wait_ms=5000)
 
 
 # -----------------------------------------------------------------------

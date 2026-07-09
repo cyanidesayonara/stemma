@@ -38,7 +38,15 @@ def app():
 
 @pytest.fixture
 def loaded_player(app):
-    """Player with fake stems already loaded (no worker will spawn audio IO)."""
+    """Player with fake stems already loaded (no worker will spawn audio IO).
+
+    Teardown shuts the player down: tests that call set_pitch/set_speed
+    without patching StretchWorker spawn a real QThread rendering via
+    librosa, and letting the garbage collector delete the player (and
+    its child QThread) while that render is still running corrupts the
+    Qt heap -- the crash then surfaces in whichever later test touches
+    Qt next.
+    """
     p = MultiTrackPlayer()
     sr = 44100
     frames = sr  # 1 second
@@ -46,7 +54,8 @@ def loaded_player(app):
     p._original_stems = dict(p._stems)
     p._sample_rate = sr
     p._total_frames = frames
-    return p
+    yield p
+    p.shutdown(wait_ms=5000)
 
 
 # -----------------------------------------------------------------------

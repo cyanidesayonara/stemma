@@ -38,7 +38,11 @@ def qapp():
 
 @pytest.fixture
 def player():
-    return MultiTrackPlayer()
+    p = MultiTrackPlayer()
+    yield p
+    # Deterministic teardown: never let the GC delete a player whose
+    # render QThread may still be running (heap corruption otherwise).
+    p.shutdown(wait_ms=5000)
 
 
 @pytest.fixture
