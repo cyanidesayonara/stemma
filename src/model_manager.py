@@ -16,6 +16,16 @@ import urllib.request
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+# Connection/read timeout for model downloads, in seconds. A stalled TCP
+# connection would otherwise hang the download thread forever -- the
+# cancel flag is only checked between chunks, so a dead socket that
+# never delivers another chunk can't be interrupted without a timeout.
+_DOWNLOAD_TIMEOUT_S = 30
+
+# Streaming read size. 64 KiB balances progress-update granularity
+# against per-chunk Python overhead on ~180 MB model files.
+_CHUNK_SIZE = 1 << 16
+
 
 # HuggingFace repository hosting the pre-converted ONNX models.
 _REPO_URL = "https://huggingface.co/rysertio/Demucs-onnx/resolve/main"
@@ -63,6 +73,7 @@ class ModelDownloader(QThread):
         self._is_cancelled = False
         self._url = url
         self._file_name = file_name
+        self._current_partial_path: str | None = None
 
     def cancel(self) -> None:
         """Request cancellation of the active download."""
@@ -73,10 +84,63 @@ class ModelDownloader(QThread):
         try:
             self._download()
         except Exception as exc:
-            dest = getattr(self, "_current_dest_path", None)
-            if dest and os.path.exists(dest):
-                os.remove(dest)
+            # Clean up the in-progress ``.partial`` file so a later run
+            # doesn't resume from a corrupt prefix. Guard the removal:
+            # if it fails (AV lock, permissions) we still want to surface
+            # the original error rather than mask it with a second one.
+            partial = getattr(self, "_current_partial_path", None)
+            if partial and os.path.exists(partial):
+                try:
+                    os.remove(partial)
+                except OSError:
+                    pass
             self.error.emit(str(exc))
+
+    def _download_file(self, url: str, dest: str, on_progress) -> None:
+        """Download *url* to *dest* atomically.
+
+        Streams the body into ``dest + '.partial'`` and renames it into
+        place only after the whole response arrives and (when the server
+        advertises a length) the byte count matches. A partial or stalled
+        download therefore never leaves a file at the final path, so
+        ``is_model_downloaded`` cannot mistake an interrupted transfer
+        for a complete, usable model.
+
+        *on_progress* is called as ``on_progress(downloaded, total)`` with
+        byte counts (``total`` is 0 when the server sends no
+        Content-Length).
+        """
+        partial = dest + ".partial"
+        self._current_partial_path = partial
+        # Drop any stale partial from a previously aborted attempt.
+        if os.path.exists(partial):
+            os.remove(partial)
+
+        req = urllib.request.Request(url, headers={"User-Agent": "stemma"})
+        with urllib.request.urlopen(
+            req, timeout=_DOWNLOAD_TIMEOUT_S,
+        ) as resp:
+            total = int(resp.headers.get("Content-Length", 0) or 0)
+            downloaded = 0
+            with open(partial, "wb") as fh:
+                while True:
+                    if self._is_cancelled:
+                        raise InterruptedError("Download cancelled by user.")
+                    chunk = resp.read(_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    on_progress(downloaded, total)
+
+        if total > 0 and downloaded != total:
+            raise OSError(
+                f"Incomplete download: received {downloaded} of {total} "
+                f"bytes for {os.path.basename(dest)}."
+            )
+
+        os.replace(partial, dest)
+        self._current_partial_path = None
 
     def _download(self) -> None:
         """Core download logic."""
@@ -89,18 +153,16 @@ class ModelDownloader(QThread):
                 self.progress.emit(100, f"{self._file_name} already cached.")
                 self.download_complete.emit(dest)
                 return
-            self._current_dest_path = dest
             self.progress.emit(0, f"Downloading {self._file_name}...")
 
-            def _hook(block: int, block_size: int, total: int) -> None:
-                if self._is_cancelled:
-                    raise InterruptedError("Download cancelled by user.")
+            def _on_progress(downloaded: int, total: int) -> None:
                 if total > 0:
-                    pct = min(99, int(block * block_size * 100.0 / total))
-                    self.progress.emit(pct, f"Downloading {self._file_name}... {pct}%")
+                    pct = min(99, int(downloaded * 100 / total))
+                    self.progress.emit(
+                        pct, f"Downloading {self._file_name}... {pct}%",
+                    )
 
-            urllib.request.urlretrieve(self._url, dest, reporthook=_hook)
-            self._current_dest_path = None
+            self._download_file(self._url, dest, _on_progress)
             self.progress.emit(100, "Download complete.")
             self.download_complete.emit(dest)
             return
@@ -119,46 +181,27 @@ class ModelDownloader(QThread):
                 continue
 
             url = f"{_REPO_URL}/{file_name}"
-            self._current_dest_path = dest_path
             self.progress.emit(
                 int(i / n * 100),
                 f"Downloading {file_name}...",
             )
 
-            def _make_hook(
-                idx: int,
-                name: str,
-            ):
-                def _report_hook(
-                    block_num: int, block_size: int, total_size: int
-                ) -> None:
-                    if self._is_cancelled:
-                        raise InterruptedError("Download cancelled by user.")
-                    if total_size > 0:
-                        file_pct = min(
-                            100.0,
-                            (block_num * block_size * 100.0) / total_size,
-                        )
-                        overall = int(((idx + file_pct / 100.0) / n) * 100)
-                        overall = min(99, overall)
-                        self.progress.emit(
-                            overall,
-                            f"Downloading {name}... {int(file_pct)}%",
-                        )
-                    else:
-                        self.progress.emit(
-                            int(idx / n * 100),
-                            f"Downloading {name}...",
-                        )
+            def _on_progress(
+                downloaded: int, total: int, idx: int = i, name: str = file_name,
+            ) -> None:
+                if total > 0:
+                    file_pct = min(100.0, downloaded * 100.0 / total)
+                    overall = min(99, int(((idx + file_pct / 100.0) / n) * 100))
+                    self.progress.emit(
+                        overall, f"Downloading {name}... {int(file_pct)}%",
+                    )
+                else:
+                    self.progress.emit(
+                        int(idx / n * 100), f"Downloading {name}...",
+                    )
 
-                return _report_hook
+            self._download_file(url, dest_path, _on_progress)
 
-            urllib.request.urlretrieve(
-                url, dest_path, reporthook=_make_hook(i, file_name)
-            )
-            self._current_dest_path = None
-
-        self._current_dest_path = None
         self.progress.emit(100, "Download complete.")
         self.download_complete.emit(primary_path)
 

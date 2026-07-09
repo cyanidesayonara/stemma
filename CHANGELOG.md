@@ -4,6 +4,46 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
+## 2026-07-09 -- v2.4.1 Stability Pass
+
+A returning-from-dormancy audit (deep review of the whole project plus PR #124) turned up a batch of correctness bugs; this session fixes them and gets CI green again.
+
+### Player / audio callback
+- **Silent recording takes (critical):** `add_recording_stem` never invalidated the active-stems cache, so a freshly recorded take mixed at gain 0 — visible in the mixer but inaudible — until a mute/solo toggle. Now invalidated on add/remove.
+- **Callback vs. GUI-thread races:** recording-stem add/remove now replaces the stems dict copy-on-write (deleting a take mid-playback used to abort the stream with `dictionary changed size`); the callback snapshots the stems dict and loop frames once per block so `clear_loop` can't null a frame mid-read.
+- **`chord_at` speed mapping:** inverted the stretch factor — at 0.5x the chord badge read the chord from 4× the playhead time. Fixed and tested.
+- **Render desync (from #124 follow-up):** a render discarded by `cancel_stretch` (spinbox scrubbing) could leave the knobs claiming a speed/pitch the audio didn't have; the player now tracks the applied render state and re-renders when stale.
+
+### Recording lifecycle
+- Empty takes (stop during count-in) no longer save a full-length silent WAV that eats a take slot.
+- Speed/pitch changes are refused while recording (they rescaled the playhead under the live input stream).
+- The take limit and speed/pitch guards can no longer be bypassed via the `R` shortcut; opening a song already at the take limit disables recording.
+- Close Song and removing the loaded song now fully unload the player (`unload()`) instead of leaving it playing invisibly.
+
+### Export
+- Refuse a second export while one runs (double-start dropped the last reference to a live QThread and crashed Qt).
+- Loop-region export now maps stretched-timeline loop points back to original time, so it exports the right region at non-1.0x speed.
+- The count-in export option only appears when count-in is actually enabled.
+
+### Robustness
+- **Model downloads** stream to a `.partial` file, verify the byte count, and rename into place atomically, with a 30s socket timeout — a killed download can no longer masquerade as a cached (but truncated) model. Previously untested; now covered.
+- **Library** recovery preserves a corrupt index as `library.json.bak` and rebuilds from `songs/` on disk instead of destroying it; `_load` handles `OSError`/non-UTF-8; writes fsync before rename.
+- Detection/peak workers are drained on close (`PlayerControls.shutdown`), fixing a crash-on-exit when quitting during beat detection.
+- Re-detection (key/tempo) badges clear on failure instead of sticking on "detecting…".
+
+### CI / packaging
+- Tests run under Qt's offscreen platform; the splash-show test no longer crashes/hangs the hosted Windows runner. Root-caused the long-standing full-suite teardown flake (a test spawned a real render QThread the GC deleted mid-run; lazy GC destroyed old widget trees reentrantly inside Qt calls) — player fixtures join render threads at teardown and conftest collects garbage at module boundaries.
+- `actions/checkout@v5`, `actions/setup-python@v6` (Node 24).
+- Dropped unused `pydub`; split pytest deps into `requirements-dev.txt` (CI installs both).
+
+### Investigations
+- **DirectML GPU separation (#125):** verified on an RTX 4070 Ti that both HTDemucs ONNX exports fail DML kernel compilation and fall back to CPU, so shipping `onnxruntime-directml` would add ~200 MB for no separation speedup. Kept plain `onnxruntime`; filed #125 with diagnostics for a future model re-export. Docs corrected to stop claiming GPU-accelerated separation.
+
+### Metrics
+- 825 fast tests pass (834 collected, 9 slow/hardware deselected); clean full-suite runs on Python 3.14/PySide6 6.10.2 and a CI-parity venv (3.12/6.11.1). +~45 new tests.
+
+---
+
 ## 2026-04-18 -- v2.4.0 Pitch Shift / Transposition
 
 ### Done

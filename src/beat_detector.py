@@ -606,7 +606,10 @@ def detect_bpm_and_key(
     return DetectionResult(
         bpm=bpm,
         bpm_confidence=_bpm_confidence(beat_times),
-        key=key_name if _key_confidence(key_corr) != "low" else key_name,
+        # Low-confidence keys are still surfaced; the UI dims the badge by
+        # confidence rather than hiding it. (Was a no-op ternary that
+        # returned key_name on both branches.)
+        key=key_name,
         key_confidence=_key_confidence(key_corr),
         beat_times=beat_times,
         downbeat_times=downbeat_times,

@@ -949,6 +949,10 @@ class MainWindow(QMainWindow):
         # (librosa pitch/time-stretch is uninterruptible mid-call, so
         # the pool threads can't exit until the current stem finishes).
         self._player.shutdown()
+        # Drain detection/peak QThreads owned by the controls too, so
+        # closing during a fresh song's beat detection doesn't crash on
+        # exit with a still-running QThread.
+        self._player_controls.shutdown()
         shutdown_peak_pool()
 
         super().closeEvent(event)
@@ -956,6 +960,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.song_removed.connect(self._on_song_removed)
         self._library_panel.previous_requested.connect(
             lambda: self._advance_song(-1)
         )
@@ -1124,6 +1129,11 @@ class MainWindow(QMainWindow):
             except ValueError:
                 display = stem_name
             self._add_recording_stem(stem_name, take_path, display)
+
+        # A song opened with the maximum number of takes must start with
+        # the record button disabled (previously only recording/deleting
+        # within the session refreshed this).
+        self._update_record_button_for_take_limit()
 
         # Restore saved state for recording stems.
         try:
@@ -1301,12 +1311,18 @@ class MainWindow(QMainWindow):
         self._update_record_button_for_take_limit()
 
     def _on_close_song(self) -> None:
-        """Stop playback and return to the empty logo state."""
-        self._player.stop()
+        """Unload the song and return to the empty logo state."""
+        self._player.unload()
         self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
+        self._library_panel.set_playing_song(None)
         self._current_song_id = None
         self.setWindowTitle("stemma")
+
+    def _on_song_removed(self, song_id: str) -> None:
+        """Unload the player if the removed song is the one loaded."""
+        if song_id == self._current_song_id:
+            self._on_close_song()
 
     def _on_import(self) -> None:
         """Open the import dialog."""
@@ -1373,6 +1389,18 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Refuse a second export while one is running: ExportWorker is
+        # parentless, so reassigning self._export_worker would drop the
+        # last reference to the live QThread and crash Qt with
+        # "QThread: Destroyed while thread is still running".
+        if self._export_worker is not None and self._export_worker.isRunning():
+            QMessageBox.information(
+                self, "Export",
+                "An export is already in progress. Please wait for it "
+                "to finish.",
+            )
+            return
+
         song = self._library.get_song(self._current_song_id) if self._current_song_id else None
         if song is None:
             return
@@ -1395,7 +1423,10 @@ class MainWindow(QMainWindow):
         loop_a = self._player.loop_a
         loop_b = self._player.loop_b
         has_loop = loop_a is not None and loop_b is not None and loop_b > loop_a
-        has_bpm = self._player.metronome_bpm > 0
+        # Only offer the count-in export option when count-in is actually
+        # enabled -- metronome_bpm is always > 0 (clamped 20-300), so the
+        # old check surfaced the dialog on every single export.
+        has_bpm = self._player.count_in_enabled
 
         start_frame: int | None = None
         end_frame: int | None = None
@@ -1411,8 +1442,13 @@ class MainWindow(QMainWindow):
                 return
             if opts.get("loop_region") and has_loop:
                 sr = self._player.sample_rate
-                start_frame = int(loop_a * sr)
-                end_frame = int(loop_b * sr)
+                # loop_a/loop_b are in the *stretched* timeline (the loop
+                # frames are rescaled by _apply_stretched_stems), but the
+                # exporter reads the original on-disk WAVs. Map back to
+                # original time: original_t = stretched_t * speed.
+                speed = self._player.speed
+                start_frame = int(loop_a * speed * sr)
+                end_frame = int(loop_b * speed * sr)
             if opts.get("count_in"):
                 count_in_beats = self._player.count_in_beats
 

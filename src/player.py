@@ -361,7 +361,7 @@ class MultiTrackPlayer(QObject):
         self._volumes: dict[str, float] = {}  # Per-stem gain, 0.0–2.0
         self._master_volume: float = 1.0     # Master gain, 0.0–2.0
         self._applied_gains: dict[str, float] = {}  # Last gain per stem (for ramping)
-        self._active_stems_cache: list[str] | None = None
+        self._active_stems_cache: set[str] | None = None
 
         # A-B loop state.
         self._loop_a_frame: int | None = None
@@ -428,6 +428,10 @@ class MultiTrackPlayer(QObject):
         self._recording: bool = False
         self._recording_buffer: np.ndarray | None = None
         self._indata_capture: np.ndarray | None = None
+        # Input frames actually written to the buffer this take. Guards
+        # against saving a full-length silent WAV when playback is
+        # stopped before any input was captured (e.g. during count-in).
+        self._recording_frames_captured: int = 0
         self._input_device: int | None = None
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
@@ -592,9 +596,10 @@ class MultiTrackPlayer(QObject):
             return ""
         speed = self._playback_speed if self._playback_speed > 0 else 1.0
         # Frame is in the stretched timeline; chord onsets are in original
-        # audio time.  Divide by speed to map back (same convention as
-        # _recompute_beat_frames).
-        time_sec = frame / self._sample_rate / speed
+        # audio time. _recompute_beat_frames maps original time t to
+        # stretched frame t / speed * sr, so the inverse is
+        # frame / sr * speed.
+        time_sec = frame / self._sample_rate * speed
         idx = int(np.searchsorted(self._chord_times, time_sec, side="right")) - 1
         if idx < 0:
             return ""
@@ -759,6 +764,7 @@ class MultiTrackPlayer(QObject):
         self._recording_buffer = np.zeros(
             (self._total_frames, 2), dtype=np.float32
         )
+        self._recording_frames_captured = 0
 
     def set_recording_song_dir(self, song_dir: str | None) -> None:
         """Set the directory where recording takes are saved."""
@@ -767,10 +773,17 @@ class MultiTrackPlayer(QObject):
     def save_recording(self, song_dir: str) -> str | None:
         """Write the recording buffer to a WAV file in *song_dir*.
 
-        Returns the path to the saved file, or None if there is no recording.
+        Returns the path to the saved file, or None if there is no recording
+        or no input was ever captured (playback stopped during count-in, or
+        play was pressed and stopped without the input stream delivering
+        anything) -- saving would produce a full-length silent take that
+        eats one of the take slots.
         The take number auto-increments based on existing files.
         """
         if self._recording_buffer is None:
+            return None
+        if self._recording_frames_captured == 0:
+            self._recording_buffer = None
             return None
 
         buf = self._recording_buffer
@@ -793,21 +806,41 @@ class MultiTrackPlayer(QObject):
         """Add a recording take as a playable stem.
 
         Validates sample rate compatibility and forces stereo.
+
+        The stems dict is replaced, not mutated: the audio callback may
+        be iterating the old dict on the PortAudio thread. The active-
+        stems cache is invalidated so the new take is audible on the
+        next play without requiring a mute/solo toggle.
         """
         if data.shape[1] == 1:
             data = np.repeat(data, 2, axis=1)
-        self._stems[name] = data
-        self._original_stems[name] = data
+        stems = dict(self._stems)
+        stems[name] = data
+        self._stems = stems
+        originals = dict(self._original_stems)
+        originals[name] = data
+        self._original_stems = originals
         self._total_frames = max(self._total_frames, data.shape[0])
+        self._active_stems_cache = None
 
     def remove_recording_stem(self, name: str) -> None:
-        """Remove a recording stem and recalculate total frames."""
-        self._stems.pop(name, None)
-        self._original_stems.pop(name, None)
+        """Remove a recording stem and recalculate total frames.
+
+        Same copy-on-write discipline as ``add_recording_stem``: the
+        audio callback may be mid-iteration over the current dict, so
+        it is replaced rather than popped in place.
+        """
+        stems = dict(self._stems)
+        stems.pop(name, None)
+        self._stems = stems
+        originals = dict(self._original_stems)
+        originals.pop(name, None)
+        self._original_stems = originals
         self._muted_stems.discard(name)
         self._soloed_stems.discard(name)
         self._volumes.pop(name, None)
         self._nudge_offsets.pop(name, None)
+        self._active_stems_cache = None
         self._recalculate_total_frames()
 
     def nudge_stem(self, name: str, offset_ms: float) -> None:
@@ -862,11 +895,10 @@ class MultiTrackPlayer(QObject):
         )
         self._current_frame = min(self._current_frame, self._total_frames)
 
-    def load_stems(self, stem_paths: dict[str, str]) -> None:
-        """Load all stem WAV files into memory.
+    def _reset_song_state(self) -> None:
+        """Stop playback and clear all per-song state.
 
-        Args:
-            stem_paths: Dictionary mapping stem names to file paths.
+        Shared prologue of ``load_stems`` and ``unload``.
         """
         self.stop()
         self._pending_render_emit = None
@@ -895,6 +927,27 @@ class MultiTrackPlayer(QObject):
         self._recording = False
         self._recording_buffer = None
         self._nudge_offsets.clear()
+
+    def unload(self) -> None:
+        """Unload the current song entirely.
+
+        Close Song (and removing the currently loaded song) must leave
+        the player truly empty: previously only the UI was cleared, so
+        ``has_stems`` stayed True and global shortcuts (Space, R, loop
+        keys) kept operating on the invisible, closed song.
+        """
+        self._reset_song_state()
+        self._total_frames = 0
+        self._current_frame = 0
+        self.position_changed.emit(0.0)
+
+    def load_stems(self, stem_paths: dict[str, str]) -> None:
+        """Load all stem WAV files into memory.
+
+        Args:
+            stem_paths: Dictionary mapping stem names to file paths.
+        """
+        self._reset_song_state()
 
         max_frames = 0
         sample_rate = 0
@@ -1242,7 +1295,14 @@ class MultiTrackPlayer(QObject):
         Clamps *speed* to [0.5, 2.0]. Stretching runs in a background
         thread; the ``speed_changed`` signal fires when the stretched
         audio is ready.
+
+        Refused while a recording is in progress: the render swap
+        rescales the playhead against the new stem length while the
+        duplex stream keeps writing input at the old positions, which
+        scrambles the take.
         """
+        if self._recording:
+            return
         speed = max(0.5, min(speed, 2.0))
         if speed == self._playback_speed and self._stems_render_current():
             return
@@ -1255,7 +1315,12 @@ class MultiTrackPlayer(QObject):
         Clamps to [PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES]. Rendering
         runs in a background thread; ``pitch_changed`` fires when the
         transposed audio is ready (or immediately, on the fast path).
+
+        Refused while a recording is in progress, for the same reason
+        as ``set_speed``.
         """
+        if self._recording:
+            return
         try:
             semitones = int(semitones)
         except (TypeError, ValueError):
@@ -1742,14 +1807,23 @@ class MultiTrackPlayer(QObject):
 
         # -- Normal playback -------------------------------------------------
 
+        # Snapshot cross-thread state once per callback. The GUI thread
+        # replaces the stems dict (copy-on-write) and can null the loop
+        # frames at any moment (clear_loop); reading them repeatedly
+        # mid-callback risks a None arithmetic TypeError that aborts the
+        # stream.
+        stems = self._stems
+        loop_a = self._loop_a_frame
+        loop_b = self._loop_b_frame
+
         # If at or past end and not looping, stop playback.
         looping = (self._looping
-                   and self._loop_a_frame is not None
-                   and self._loop_b_frame is not None
-                   and self._loop_b_frame > self._loop_a_frame)
+                   and loop_a is not None
+                   and loop_b is not None
+                   and loop_b > loop_a)
         if self._current_frame >= self._total_frames:
             if looping:
-                self._current_frame = self._loop_a_frame
+                self._current_frame = loop_a
             else:
                 outdata.fill(0.0)
                 raise sd.CallbackStop
@@ -1758,18 +1832,20 @@ class MultiTrackPlayer(QObject):
         outdata.fill(0.0)
 
         # Determine which stems should be audible (cached between changes).
+        # Stored as a set so the per-segment membership tests below don't
+        # allocate.
         active_stems = self._active_stems_cache
         if active_stems is None:
             if self._soloed_stems:
-                active_stems = [
-                    name for name in self._stems
+                active_stems = {
+                    name for name in stems
                     if name in self._soloed_stems
-                ]
+                }
             else:
-                active_stems = [
-                    name for name in self._stems
+                active_stems = {
+                    name for name in stems
                     if name not in self._muted_stems
-                ]
+                }
             self._active_stems_cache = active_stems
 
         # Fill the output buffer, handling loop wraps as needed.
@@ -1778,7 +1854,7 @@ class MultiTrackPlayer(QObject):
 
         while remaining > 0:
             if looping:
-                boundary = self._loop_b_frame
+                boundary = loop_b
             else:
                 boundary = self._total_frames
 
@@ -1789,10 +1865,9 @@ class MultiTrackPlayer(QObject):
                 start = self._current_frame
                 end = start + frames_to_read
 
-                active_set = set(active_stems)
-                for name, stem_data in self._stems.items():
+                for name, stem_data in stems.items():
                     target = (self._volumes.get(name, 1.0) * self._master_volume
-                              if name in active_set else 0.0)
+                              if name in active_stems else 0.0)
                     prev = self._applied_gains.get(name, target)
                     if target == 0.0 and prev == 0.0:
                         continue
@@ -1839,6 +1914,7 @@ class MultiTrackPlayer(QObject):
                         self._recording_buffer[
                             start:start + actual
                         ] = chunk[:actual, :2]
+                        self._recording_frames_captured += actual
 
                 # Mix synced metronome for this segment before advancing.
                 if (self._metronome_enabled and self._beat_sync_enabled
@@ -1854,7 +1930,7 @@ class MultiTrackPlayer(QObject):
             # Check if we hit the boundary.
             if self._current_frame >= boundary:
                 if looping:
-                    self._current_frame = self._loop_a_frame
+                    self._current_frame = loop_a
                     if (self._count_in_enabled
                             and self._count_in_on_repeats):
                         self._arm_count_in()

@@ -141,6 +141,50 @@ class TestSongLibraryInit:
         lib = SongLibrary(data_dir=library_dir)
         assert len(lib.songs) == 0
 
+    def test_corrupt_index_is_preserved_as_bak(self, library_dir):
+        """A corrupt index must be kept for post-mortem, not destroyed."""
+        os.makedirs(library_dir, exist_ok=True)
+        json_path = os.path.join(library_dir, "library.json")
+        with open(json_path, "w") as f:
+            f.write("{not valid json")
+
+        SongLibrary(data_dir=library_dir)
+        bak = json_path + ".bak"
+        assert os.path.isfile(bak)
+        assert open(bak).read() == "{not valid json"
+
+    def test_rebuilds_from_disk_when_index_corrupt(self, library_dir):
+        """Songs whose dirs still hold an original.* file are recovered
+        even when the index is unreadable."""
+        songs_dir = os.path.join(library_dir, "songs")
+        os.makedirs(os.path.join(songs_dir, "abc123"), exist_ok=True)
+        with open(
+            os.path.join(songs_dir, "abc123", "original.mp3"), "wb"
+        ) as f:
+            f.write(b"audio")
+        # A dir with no original.* is skipped.
+        os.makedirs(os.path.join(songs_dir, "empty"), exist_ok=True)
+
+        json_path = os.path.join(library_dir, "library.json")
+        with open(json_path, "w") as f:
+            f.write("garbage")
+
+        lib = SongLibrary(data_dir=library_dir)
+        ids = {s.id for s in lib.songs}
+        assert ids == {"abc123"}
+        assert lib.songs[0].original_path.endswith("original.mp3")
+
+    def test_recovers_from_non_utf8_index(self, library_dir):
+        """A non-UTF-8 index (disk corruption) must not crash startup."""
+        os.makedirs(library_dir, exist_ok=True)
+        json_path = os.path.join(library_dir, "library.json")
+        with open(json_path, "wb") as f:
+            f.write(b"\xff\xfe\x00garbage")
+
+        lib = SongLibrary(data_dir=library_dir)
+        assert lib.songs == []
+        assert os.path.isfile(json_path + ".bak")
+
 
 class TestSongLibraryCRUD:
 

@@ -454,3 +454,48 @@ class TestShortcutFocusGuard:
             "src.ui.main_window.QApplication.focusWidget", return_value=w
         ):
             assert MainWindow._text_input_has_focus(stub) is True
+
+
+class TestExportDoubleStartGuard:
+    """A second export while one is running must be refused, not crash.
+
+    ExportWorker is parentless; reassigning self._export_worker would
+    drop the last reference to the live QThread and crash Qt.
+    """
+
+    def test_running_export_blocks_second(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.has_stems = True
+        stub._export_worker.isRunning.return_value = True
+
+        with patch(
+            "src.ui.main_window.QMessageBox.information"
+        ) as info, patch(
+            "src.ui.main_window.ExportWorker"
+        ) as worker_cls:
+            MainWindow._on_export(stub)
+
+        info.assert_called_once()
+        worker_cls.assert_not_called()
+
+    def test_no_running_export_proceeds_past_guard(self, app):
+        """With no worker running the guard is not the thing that stops
+        us -- has_stems True + a real song lookup would continue; here
+        we only assert the guard message is not shown."""
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._player.has_stems = True
+        stub._export_worker = None
+        stub._current_song_id = None  # get_song(None) -> stop later, no crash
+
+        with patch(
+            "src.ui.main_window.QMessageBox.information"
+        ) as info:
+            MainWindow._on_export(stub)
+
+        # The "already in progress" message must not have fired.
+        for call in info.call_args_list:
+            assert "already in progress" not in str(call)

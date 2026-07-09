@@ -170,21 +170,68 @@ class SongLibrary:
     def _load(self) -> None:
         """Read the JSON index from disk.
 
-        If the file is corrupted or contains malformed entries, starts
-        with an empty library rather than crashing.
+        If the file is corrupted, malformed, unreadable, or not valid
+        UTF-8, the bad index is preserved as ``library.json.bak`` and the
+        library is rebuilt by scanning ``songs/`` so imported stems that
+        still exist on disk are recovered instead of silently orphaned.
         """
         try:
             with open(self._json_path, encoding="utf-8") as f:
                 data = json.load(f)
             self._songs = [Song.from_dict(entry) for entry in data]
-        except (json.JSONDecodeError, TypeError, KeyError):
-            # Corrupted or malformed — start fresh and overwrite.
-            self._songs = []
+        except (
+            json.JSONDecodeError, TypeError, KeyError,
+            OSError, UnicodeDecodeError, ValueError,
+        ):
+            # Preserve the corrupt index for post-mortem instead of
+            # destroying it, then recover what we can from disk.
+            try:
+                os.replace(self._json_path, self._json_path + ".bak")
+            except OSError:
+                pass
+            self._songs = self._rebuild_from_disk()
             self._save()
+
+    def _rebuild_from_disk(self) -> list["Song"]:
+        """Reconstruct library entries by scanning the songs directory.
+
+        Used when the JSON index is lost or corrupt. Each ``songs/<id>/``
+        that contains an ``original.*`` file becomes a minimally-populated
+        Song; titles fall back to the id and metadata that only lived in
+        the index (artist, model) is left blank.
+        """
+        recovered: list[Song] = []
+        try:
+            entries = sorted(os.listdir(self._songs_dir))
+        except OSError:
+            return recovered
+        for song_id in entries:
+            song_dir = os.path.join(self._songs_dir, song_id)
+            if not os.path.isdir(song_dir):
+                continue
+            original = None
+            for fname in os.listdir(song_dir):
+                if fname.startswith("original."):
+                    original = os.path.join(song_dir, fname)
+                    break
+            if original is None:
+                continue
+            recovered.append(Song(
+                id=song_id,
+                title=song_id,
+                artist="",
+                original_path=original,
+                stems_path=song_dir,
+                model_used="",
+                date_added=datetime.now(timezone.utc).isoformat(),
+            ))
+        return recovered
 
     def _save(self) -> None:
         """Write the current song list to the JSON index atomically."""
         tmp_path = self._json_path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump([s.to_dict() for s in self._songs], f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, self._json_path)
