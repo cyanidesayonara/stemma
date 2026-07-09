@@ -593,6 +593,10 @@ class TestRecordingSave:
         player._recording_buffer = np.full(
             (44100, 2), 0.5, dtype=np.float32
         )
+        # Simulate input having been captured into the buffer (the
+        # callback increments this; without it save_recording treats
+        # the buffer as an untouched count-in remnant and skips it).
+        player._recording_frames_captured = 44100
 
         song_dir = str(tmp_path / "song")
         os.makedirs(song_dir)
@@ -629,6 +633,7 @@ class TestRecordingSave:
         buf = np.zeros((44100, 2), dtype=np.float32)
         buf[441:541] = 0.8
         player._recording_buffer = buf
+        player._recording_frames_captured = 44100
         player.set_latency_offset_ms(10.0)
 
         song_dir = str(tmp_path / "song")
@@ -765,6 +770,10 @@ class TestStopOnlyFinalization:
         player._recording_buffer = np.full(
             (44100, 2), 0.5, dtype=np.float32
         )
+        # Simulate input having been captured into the buffer (the
+        # callback increments this; without it save_recording treats
+        # the buffer as an untouched count-in remnant and skips it).
+        player._recording_frames_captured = 44100
         player._recording = True
         player._is_playing = True
         player.set_recording_song_dir(str(tmp_path))
@@ -783,6 +792,10 @@ class TestStopOnlyFinalization:
         player._recording_buffer = np.full(
             (44100, 2), 0.5, dtype=np.float32
         )
+        # Simulate input having been captured into the buffer (the
+        # callback increments this; without it save_recording treats
+        # the buffer as an untouched count-in remnant and skips it).
+        player._recording_frames_captured = 44100
         player._recording = True
         player._is_playing = True
         player.set_recording_song_dir(str(tmp_path))
@@ -1186,3 +1199,88 @@ class TestCallbackSafety:
         outdata = np.zeros((100, 2), dtype=np.float32)
         player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
         assert player._current_frame == 100
+
+
+class TestEmptyTakeGuard:
+    """stop() used to save a full-length all-zeros WAV when playback was
+    stopped before any input was captured (e.g. during count-in),
+    silently consuming one of the take slots."""
+
+    def test_save_skipped_when_no_frames_captured(
+        self, tmp_path, mock_stems,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+
+        path = player.save_recording(str(tmp_path))
+
+        assert path is None
+        assert player._recording_buffer is None
+        assert list(tmp_path.glob("*.wav")) == []
+
+    def test_save_proceeds_when_frames_captured(self, tmp_path, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._allocate_recording_buffer()
+        player._recording_buffer[:100] = 0.5
+        player._recording_frames_captured = 100
+
+        path = player.save_recording(str(tmp_path))
+
+        assert path is not None
+        assert os.path.isfile(path)
+
+    def test_allocate_resets_captured_counter(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording_frames_captured = 500
+        player._allocate_recording_buffer()
+        assert player._recording_frames_captured == 0
+
+
+class TestTransformGuardsDuringRecording:
+    """Speed/pitch changes are refused mid-recording: the render swap
+    rescales the playhead while the duplex stream keeps writing input
+    at the old positions, scrambling the take."""
+
+    def test_set_speed_refused_while_recording(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording = True
+        player.set_speed(0.5)
+        assert player.speed == 1.0
+
+    def test_set_pitch_refused_while_recording(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._recording = True
+        player.set_pitch(3)
+        assert player.pitch_semitones == 0
+
+
+class TestUnload:
+    """Close Song must leave the player truly empty -- previously only
+    the UI cleared, and Space kept playing the invisible song."""
+
+    def test_unload_clears_stems_and_state(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player._loop_a_frame = 100
+        player._loop_b_frame = 200
+        player._looping = True
+        player._pitch_semitones = 3
+
+        player.unload()
+
+        assert not player.has_stems
+        assert player._total_frames == 0
+        assert player._current_frame == 0
+        assert player.pitch_semitones == 0
+        assert player._loop_a_frame is None
+        assert not player._looping
+
+    def test_unload_on_empty_player_is_safe(self):
+        player = MultiTrackPlayer()
+        player.unload()
+        assert not player.has_stems

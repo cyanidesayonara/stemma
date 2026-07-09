@@ -2324,7 +2324,14 @@ class PlayerControls(QWidget):
             self._record_btn.blockSignals(False)
 
     def toggle_record(self) -> None:
-        """Toggle recording arm (for keyboard shortcut)."""
+        """Toggle recording arm (for keyboard shortcut).
+
+        setChecked works even on a disabled button, so the shortcut
+        must respect the disabled state itself -- otherwise R bypasses
+        the take-limit and speed/pitch guards that disable the button.
+        """
+        if not self._record_btn.isEnabled():
+            return
         self._record_btn.setChecked(not self._record_btn.isChecked())
 
     def add_recording_row(

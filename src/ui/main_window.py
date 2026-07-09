@@ -956,6 +956,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.song_removed.connect(self._on_song_removed)
         self._library_panel.previous_requested.connect(
             lambda: self._advance_song(-1)
         )
@@ -1124,6 +1125,11 @@ class MainWindow(QMainWindow):
             except ValueError:
                 display = stem_name
             self._add_recording_stem(stem_name, take_path, display)
+
+        # A song opened with the maximum number of takes must start with
+        # the record button disabled (previously only recording/deleting
+        # within the session refreshed this).
+        self._update_record_button_for_take_limit()
 
         # Restore saved state for recording stems.
         try:
@@ -1301,12 +1307,18 @@ class MainWindow(QMainWindow):
         self._update_record_button_for_take_limit()
 
     def _on_close_song(self) -> None:
-        """Stop playback and return to the empty logo state."""
-        self._player.stop()
+        """Unload the song and return to the empty logo state."""
+        self._player.unload()
         self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
+        self._library_panel.set_playing_song(None)
         self._current_song_id = None
         self.setWindowTitle("stemma")
+
+    def _on_song_removed(self, song_id: str) -> None:
+        """Unload the player if the removed song is the one loaded."""
+        if song_id == self._current_song_id:
+            self._on_close_song()
 
     def _on_import(self) -> None:
         """Open the import dialog."""

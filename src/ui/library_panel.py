@@ -362,6 +362,7 @@ class LibraryPanel(QWidget):
     """
 
     song_selected = Signal(str)
+    song_removed = Signal(str)  # emitted with the removed song's id
     repeat_mode_changed = Signal(str)
     shuffle_toggled = Signal(bool)
     previous_requested = Signal()
@@ -674,3 +675,9 @@ class LibraryPanel(QWidget):
                 if reply == QMessageBox.StandardButton.Yes:
                     self._library.remove_song(song_id)
                     self.refresh()
+                    # Let the main window unload the player if the
+                    # removed song is the one currently loaded --
+                    # otherwise it keeps playing from RAM and stopping
+                    # would try to save recordings into the deleted
+                    # directory.
+                    self.song_removed.emit(song_id)

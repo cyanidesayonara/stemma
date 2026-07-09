@@ -428,6 +428,10 @@ class MultiTrackPlayer(QObject):
         self._recording: bool = False
         self._recording_buffer: np.ndarray | None = None
         self._indata_capture: np.ndarray | None = None
+        # Input frames actually written to the buffer this take. Guards
+        # against saving a full-length silent WAV when playback is
+        # stopped before any input was captured (e.g. during count-in).
+        self._recording_frames_captured: int = 0
         self._input_device: int | None = None
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
@@ -760,6 +764,7 @@ class MultiTrackPlayer(QObject):
         self._recording_buffer = np.zeros(
             (self._total_frames, 2), dtype=np.float32
         )
+        self._recording_frames_captured = 0
 
     def set_recording_song_dir(self, song_dir: str | None) -> None:
         """Set the directory where recording takes are saved."""
@@ -768,10 +773,17 @@ class MultiTrackPlayer(QObject):
     def save_recording(self, song_dir: str) -> str | None:
         """Write the recording buffer to a WAV file in *song_dir*.
 
-        Returns the path to the saved file, or None if there is no recording.
+        Returns the path to the saved file, or None if there is no recording
+        or no input was ever captured (playback stopped during count-in, or
+        play was pressed and stopped without the input stream delivering
+        anything) -- saving would produce a full-length silent take that
+        eats one of the take slots.
         The take number auto-increments based on existing files.
         """
         if self._recording_buffer is None:
+            return None
+        if self._recording_frames_captured == 0:
+            self._recording_buffer = None
             return None
 
         buf = self._recording_buffer
@@ -883,11 +895,10 @@ class MultiTrackPlayer(QObject):
         )
         self._current_frame = min(self._current_frame, self._total_frames)
 
-    def load_stems(self, stem_paths: dict[str, str]) -> None:
-        """Load all stem WAV files into memory.
+    def _reset_song_state(self) -> None:
+        """Stop playback and clear all per-song state.
 
-        Args:
-            stem_paths: Dictionary mapping stem names to file paths.
+        Shared prologue of ``load_stems`` and ``unload``.
         """
         self.stop()
         self._pending_render_emit = None
@@ -916,6 +927,27 @@ class MultiTrackPlayer(QObject):
         self._recording = False
         self._recording_buffer = None
         self._nudge_offsets.clear()
+
+    def unload(self) -> None:
+        """Unload the current song entirely.
+
+        Close Song (and removing the currently loaded song) must leave
+        the player truly empty: previously only the UI was cleared, so
+        ``has_stems`` stayed True and global shortcuts (Space, R, loop
+        keys) kept operating on the invisible, closed song.
+        """
+        self._reset_song_state()
+        self._total_frames = 0
+        self._current_frame = 0
+        self.position_changed.emit(0.0)
+
+    def load_stems(self, stem_paths: dict[str, str]) -> None:
+        """Load all stem WAV files into memory.
+
+        Args:
+            stem_paths: Dictionary mapping stem names to file paths.
+        """
+        self._reset_song_state()
 
         max_frames = 0
         sample_rate = 0
@@ -1263,7 +1295,14 @@ class MultiTrackPlayer(QObject):
         Clamps *speed* to [0.5, 2.0]. Stretching runs in a background
         thread; the ``speed_changed`` signal fires when the stretched
         audio is ready.
+
+        Refused while a recording is in progress: the render swap
+        rescales the playhead against the new stem length while the
+        duplex stream keeps writing input at the old positions, which
+        scrambles the take.
         """
+        if self._recording:
+            return
         speed = max(0.5, min(speed, 2.0))
         if speed == self._playback_speed and self._stems_render_current():
             return
@@ -1276,7 +1315,12 @@ class MultiTrackPlayer(QObject):
         Clamps to [PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES]. Rendering
         runs in a background thread; ``pitch_changed`` fires when the
         transposed audio is ready (or immediately, on the fast path).
+
+        Refused while a recording is in progress, for the same reason
+        as ``set_speed``.
         """
+        if self._recording:
+            return
         try:
             semitones = int(semitones)
         except (TypeError, ValueError):
@@ -1870,6 +1914,7 @@ class MultiTrackPlayer(QObject):
                         self._recording_buffer[
                             start:start + actual
                         ] = chunk[:actual, :2]
+                        self._recording_frames_captured += actual
 
                 # Mix synced metronome for this segment before advancing.
                 if (self._metronome_enabled and self._beat_sync_enabled
