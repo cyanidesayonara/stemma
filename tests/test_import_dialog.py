@@ -159,6 +159,9 @@ class TestModelDownloadWhenMissing:
 
         md = MagicMock()
         dialog._model_manager.download_model.return_value = md
+        # The dialog now asks the manager (not a bare isfile) whether all
+        # model artifacts exist; report them missing.
+        dialog._model_manager.is_model_downloaded.return_value = False
 
         dialog._start_local_import(str(dummy))
 

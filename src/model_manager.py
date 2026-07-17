@@ -66,6 +66,7 @@ class ModelDownloader(QThread):
         *,
         url: str | None = None,
         file_name: str | None = None,
+        expected_md5_tail: str | None = None,
     ) -> None:
         super().__init__()
         self.model_name = model_name
@@ -73,6 +74,11 @@ class ModelDownloader(QThread):
         self._is_cancelled = False
         self._url = url
         self._file_name = file_name
+        # Optional integrity check: md5 of the file's last 10,000 KiB
+        # (UVR's model-hashing convention). Verified after the download
+        # completes; a mismatch removes the file and raises, so a swapped
+        # or corrupted upstream file can never be treated as cached.
+        self._expected_md5_tail = expected_md5_tail
         self._current_partial_path: str | None = None
 
     def cancel(self) -> None:
@@ -95,6 +101,29 @@ class ModelDownloader(QThread):
                 except OSError:
                     pass
             self.error.emit(str(exc))
+
+    def _verify_md5_tail(self, dest: str) -> None:
+        """Verify the downloaded file against the expected tail hash.
+
+        No-op when the downloader was created without an expected hash.
+        On mismatch the file is removed and an OSError raised so the
+        run() handler surfaces it via the error signal.
+        """
+        if not self._expected_md5_tail:
+            return
+        from src.mdx_separator import hash_model_file
+
+        actual = hash_model_file(dest)
+        if actual != self._expected_md5_tail:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            raise OSError(
+                f"Downloaded model failed integrity check "
+                f"(md5 {actual}, expected {self._expected_md5_tail}). "
+                "The upstream file may have changed; try again later."
+            )
 
     def _download_file(self, url: str, dest: str, on_progress) -> None:
         """Download *url* to *dest* atomically.
@@ -163,6 +192,7 @@ class ModelDownloader(QThread):
                     )
 
             self._download_file(self._url, dest, _on_progress)
+            self._verify_md5_tail(dest)
             self.progress.emit(100, "Download complete.")
             self.download_complete.emit(dest)
             return
@@ -243,6 +273,34 @@ class ModelManager(QObject):
         """
         name = "htdemucs_6s" if is_6_stem else "htdemucs"
         self._active_downloader = ModelDownloader(name, self.models_dir)
+        return self._active_downloader
+
+    def mdx_model_path(self, model_key: str = "mdx_inst_hq3") -> str:
+        """Return the expected local path to an MDX-Net ONNX model."""
+        from src.mdx_separator import MDX_MODELS
+
+        return os.path.join(self.models_dir, MDX_MODELS[model_key]["file"])
+
+    def is_mdx_model_downloaded(self, model_key: str = "mdx_inst_hq3") -> bool:
+        """Check whether the MDX-Net model exists on disk."""
+        return os.path.isfile(self.mdx_model_path(model_key))
+
+    def download_mdx_model(
+        self, model_key: str = "mdx_inst_hq3",
+    ) -> ModelDownloader:
+        """Create a downloader for an MDX-Net model (not started).
+
+        The downloader verifies the file against UVR's published tail
+        hash after the transfer.
+        """
+        from src.mdx_separator import MDX_MODELS
+
+        info = MDX_MODELS[model_key]
+        self._active_downloader = ModelDownloader(
+            model_key, self.models_dir,
+            url=info["url"], file_name=info["file"],
+            expected_md5_tail=info["md5_tail"],
+        )
         return self._active_downloader
 
     def beat_model_path(self) -> str:
