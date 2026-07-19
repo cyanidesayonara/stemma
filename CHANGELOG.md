@@ -4,9 +4,10 @@ All notable development sessions are documented here in reverse chronological or
 
 ---
 
-## 2026-07-17 -- v2.6.0 MDX-Net 2-stem GPU separation (v3.0 Phase 1)
+## 2026-07-17 -- v2.6.0 MDX-Net 2-stem GPU separation + background imports (v3.0 Phase 1)
 
 ### Done
+- **Background separation queue:** importing no longer blocks the app. After picking the file/model (and any first-time model download), the import dialog closes immediately and separation runs in a background queue. The library row shows live "Queued... / Separating... N%" progress, stays unselectable until its stems exist, and offers a right-click "Cancel separation". Failures roll the row back with a message; songs interrupted by an app crash are pruned on the next launch. Multiple imports queue serially.
 - **Second separation engine:** UVR's MDX-Net (Inst HQ 3) splits a song into vocals + backing. Unlike the HTDemucs export, MDX ONNX compiles on DirectML, so this path genuinely uses the GPU — verified on an RTX 4070 Ti at 73 ms/chunk (DML) vs 3.3 s (CPU), ~45x. A 72 s song separates in ~26 s end-to-end including one-time session setup; HTDemucs took minutes.
 - **New import option:** "2-stem fast (vocals + backing, GPU)" in the import dialog's model picker. Output maps to `vocals.wav` + `other.wav`, so the player, mixer, export, and recording features work unchanged.
 - **Engine details:** numpy/librosa STFT packing matching UVR's torch.stft conventions, classic context-trimmed windowing, DML→CPU fallback, secondary stem derived as mix − primary. No PyTorch. Cross-validated against HTDemucs stems of a real song: vocal-stem correlation 0.90.

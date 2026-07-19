@@ -88,6 +88,7 @@ stemma/
 │   ├── version.py             # __version__ string
 │   ├── separator.py           # HTDemucs 4/6-stem ONNX separation (CPU)
 │   ├── mdx_separator.py       # MDX-Net 2-stem ONNX separation (DirectML GPU)
+│   ├── separation_queue.py    # Background separation job queue (serial)
 │   ├── beat_detector.py       # BPM/key/chord detection + beat_this ONNX beat tracking
 │   ├── model_manager.py       # Download/cache ONNX models on first run
 │   ├── player.py              # Multi-track audio player (sounddevice)

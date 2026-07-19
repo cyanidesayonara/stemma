@@ -42,6 +42,9 @@ from src.ui.styles import DARK_COLORS, ON_ACCENT
 # Custom data roles for two-line display.
 _ARTIST_ROLE = Qt.ItemDataRole.UserRole + 1
 _TITLE_ROLE = Qt.ItemDataRole.UserRole + 2
+# Progress text while the song is still separating in the background
+# (e.g. "Separating... 42%"); unset/empty for ready songs.
+_PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 3
 
 _CTRL_ICON = 18  # Icon size for library control buttons.
 _CTRL_BTN = 28   # Button size for library control buttons.
@@ -286,6 +289,17 @@ class _SongDelegate(QStyledItemDelegate):
             title,
         )
 
+        # Background-separation progress, right-aligned in accent color
+        # (e.g. "Separating... 42%").
+        progress = index.data(_PROGRESS_ROLE)
+        if progress:
+            painter.setPen(QColor(self._accent_color))
+            painter.drawText(
+                title_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                progress,
+            )
+
         # Separator line at the bottom of each item.
         painter.setPen(QPen(self._separator_color, 1))
         y = option.rect.bottom()
@@ -363,6 +377,7 @@ class LibraryPanel(QWidget):
 
     song_selected = Signal(str)
     song_removed = Signal(str)  # emitted with the removed song's id
+    cancel_separation_requested = Signal(str)  # song_id still separating
     repeat_mode_changed = Signal(str)
     shuffle_toggled = Signal(bool)
     previous_requested = Signal()
@@ -374,6 +389,10 @@ class LibraryPanel(QWidget):
         self._repeat_mode: str = REPEAT_OFF
         self._shuffle_enabled: bool = False
         self._ctrl_accent: str = DARK_COLORS["accent"]
+        # song_id -> progress text for songs still separating in the
+        # background. Rows in this state are unselectable (their stems
+        # are half-written) and offer only "Cancel separation".
+        self._separating: dict[str, str] = {}
 
         self._setup_ui()
         self.refresh()
@@ -589,8 +608,53 @@ class LibraryPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, song.id)
             item.setData(_ARTIST_ROLE, song.artist)
             item.setData(_TITLE_ROLE, song.title)
+            self._apply_separating_state(item, song.id)
             self._list.addItem(item)
         self._apply_filter(self._search_edit.text())
+
+    # ------------------------------------------------------------------
+    # Background-separation state
+    # ------------------------------------------------------------------
+
+    def set_song_separating(self, song_id: str, text: str) -> None:
+        """Mark *song_id* as separating and show *text* on its row."""
+        self._separating[song_id] = text
+        item = self._item_for_song(song_id)
+        if item is not None:
+            self._apply_separating_state(item, song_id)
+
+    def clear_song_separating(self, song_id: str) -> None:
+        """Return *song_id*'s row to the normal, selectable state."""
+        self._separating.pop(song_id, None)
+        item = self._item_for_song(song_id)
+        if item is not None:
+            self._apply_separating_state(item, song_id)
+
+    def is_song_separating(self, song_id: str) -> bool:
+        """True while *song_id* is separating in the background."""
+        return song_id in self._separating
+
+    def _item_for_song(self, song_id: str) -> QListWidgetItem | None:
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == song_id:
+                return item
+        return None
+
+    def _apply_separating_state(self, item: QListWidgetItem, song_id: str) -> None:
+        """Sync an item's progress role and selectability with the state.
+
+        Separating rows are made unselectable at the Qt level: their
+        stems are half-written, so loading (or removing) them must be
+        impossible until the job ends.
+        """
+        text = self._separating.get(song_id)
+        item.setData(_PROGRESS_ROLE, text or None)
+        flags = item.flags()
+        if text:
+            item.setFlags(flags & ~Qt.ItemFlag.ItemIsSelectable)
+        else:
+            item.setFlags(flags | Qt.ItemFlag.ItemIsSelectable)
 
     def song_count(self) -> int:
         """Return the number of songs in the library."""
@@ -626,7 +690,9 @@ class LibraryPanel(QWidget):
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
-            if song_id:
+            # Separating rows are unselectable at the flag level; this
+            # guard covers programmatic setCurrentItem paths as well.
+            if song_id and not self.is_song_separating(song_id):
                 self.song_selected.emit(song_id)
                 self._remove_btn.setEnabled(True)
         else:
@@ -636,6 +702,16 @@ class LibraryPanel(QWidget):
         """Show a right-click context menu on the song list."""
         item = self._list.itemAt(pos)
         if item is None:
+            return
+        song_id = item.data(Qt.ItemDataRole.UserRole)
+        if song_id and self.is_song_separating(song_id):
+            # The only sensible action on a half-separated song is to
+            # abort the job (the main window rolls the row back).
+            menu = QMenu(self)
+            menu.addAction("Cancel separation").triggered.connect(
+                lambda: self.cancel_separation_requested.emit(song_id)
+            )
+            menu.exec(self._list.mapToGlobal(pos))
             return
         # Select the right-clicked item so _on_edit_song targets it,
         # not whatever was previously selected.
