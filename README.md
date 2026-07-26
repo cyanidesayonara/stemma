@@ -27,6 +27,7 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 - Automatic tempo and key detection; beat-synced metronome mode
 - High-accuracy beat/downbeat tracking via beat_this ONNX model (auto-downloaded)
 - Import from YouTube URL (bundled ffmpeg when available; otherwise ffmpeg on PATH)
+- Imports run in the background: the dialog closes as soon as separation starts, the library row shows live progress, and the app stays fully usable (multiple imports queue up)
 - Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers

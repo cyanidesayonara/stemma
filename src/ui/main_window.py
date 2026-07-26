@@ -51,6 +51,7 @@ from src.app_settings import (
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter
 from src.library import SongLibrary
+from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
 from src.player import (
     PITCH_MAX_SEMITONES,
@@ -127,11 +128,18 @@ class MainWindow(QMainWindow):
         self._shuffle_queue: list[str] = []
         self._volume_toast: QLabel | None = None
         self._volume_toast_timer: QTimer | None = None
+        self._separation_queue = SeparationQueue(self)
 
         self._settings = QSettings("stemma", "stemma")
         self._theme = self._settings.value("theme", "dark")
         if self._theme not in ("dark", "light"):
             self._theme = "dark"
+
+        # Remove library rows whose separation never finished (the app
+        # was closed or crashed mid-job): their dirs hold no stems, so
+        # the rows would be unplayable ghosts. Mirrors the import
+        # dialog's failure rollback, across process restarts.
+        self._prune_incomplete_songs()
 
         self._setup_ui()
         self._setup_menu()
@@ -962,6 +970,10 @@ class MainWindow(QMainWindow):
         if self._export_worker is not None and self._export_worker.isRunning():
             self._export_worker.wait(5000)
 
+        # Abort any background separation; interrupted songs are pruned
+        # from the library on the next launch (no stems on disk).
+        self._separation_queue.shutdown(5000)
+
         self._player.stop()
         # Cancel and drain stretch/peak workers *before* Qt tears down,
         # otherwise Python's atexit blocks in ThreadPoolExecutor.join()
@@ -980,6 +992,26 @@ class MainWindow(QMainWindow):
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
         self._library_panel.song_removed.connect(self._on_song_removed)
+        self._library_panel.cancel_separation_requested.connect(
+            self._separation_queue.cancel_song
+        )
+        self._separation_queue.job_queued.connect(
+            lambda sid: self._library_panel.set_song_separating(
+                sid, "Queued..."
+            )
+        )
+        self._separation_queue.job_started.connect(
+            lambda sid: self._library_panel.set_song_separating(
+                sid, "Separating..."
+            )
+        )
+        self._separation_queue.job_progress.connect(
+            self._on_separation_progress
+        )
+        self._separation_queue.job_finished.connect(
+            self._on_separation_finished
+        )
+        self._separation_queue.job_failed.connect(self._on_separation_failed)
         self._library_panel.previous_requested.connect(
             lambda: self._advance_song(-1)
         )
@@ -1360,9 +1392,67 @@ class MainWindow(QMainWindow):
             model_manager=self._model_manager,
             parent=self,
             file_path=file_path,
+            separation_queue=self._separation_queue,
         )
         if dialog.exec():
+            # The new row appears immediately; while its job runs it
+            # shows queue-driven progress and stays unselectable.
             self._library_panel.refresh()
+
+    # ------------------------------------------------------------------
+    # Background separation queue
+    # ------------------------------------------------------------------
+
+    def _prune_incomplete_songs(self) -> None:
+        """Remove library rows whose song dir contains no stems at all.
+
+        A row without stems can only come from a separation that never
+        finished (app closed or crashed mid-job); keeping it would show
+        an unplayable ghost entry.
+        """
+        for song in list(self._library.songs):
+            has_stems = any(
+                os.path.isfile(os.path.join(song.stems_path, f"{name}.wav"))
+                for name in ALL_STEM_NAMES
+            )
+            if not has_stems:
+                try:
+                    self._library.remove_song(song.id)
+                except KeyError:
+                    pass
+
+    def _on_separation_progress(
+        self, song_id: str, percent: int, _message: str,
+    ) -> None:
+        self._library_panel.set_song_separating(
+            song_id, f"Separating... {percent}%"
+        )
+
+    def _on_separation_finished(self, song_id: str, model_key: str) -> None:
+        """Job done: record the model and make the row selectable."""
+        try:
+            self._library.update_song(song_id, model_used=model_key)
+        except KeyError:
+            pass  # Row removed while the job was finishing.
+        self._library_panel.clear_song_separating(song_id)
+        self._library_panel.refresh()
+
+    def _on_separation_failed(self, song_id: str, message: str) -> None:
+        """Job failed or was cancelled: roll the library row back."""
+        self._library_panel.clear_song_separating(song_id)
+        if self._library.get_song(song_id) is not None:
+            try:
+                self._library.remove_song(song_id)
+            except KeyError:
+                pass
+        self._library_panel.refresh()
+        # User-initiated cancellations need no dialog; real failures do.
+        if "cancelled" not in message.lower():
+            QMessageBox.warning(
+                self,
+                "Import failed",
+                f"Stem separation did not complete:\n{message}",
+            )
 
     # ------------------------------------------------------------------
     # Drag-and-drop import

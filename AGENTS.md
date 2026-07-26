@@ -51,6 +51,7 @@ stemma/
     click_utils.py     # Metronome click sample generation
     separator.py       # HTDemucs 4/6-stem ONNX separation engine (CPU)
     mdx_separator.py   # MDX-Net 2-stem ONNX separation engine (DirectML GPU)
+    separation_queue.py # Background separation job queue (serial)
     beat_detector.py   # BPM/key/chord detection + beat_this ONNX beat tracking
     model_manager.py   # Download/cache ONNX models
     player.py          # Multi-track audio player

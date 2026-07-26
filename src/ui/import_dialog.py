@@ -113,6 +113,7 @@ class ImportDialog(QDialog):
         model_manager: ModelManager,
         parent=None,
         file_path: str = "",
+        separation_queue=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Import Song")
@@ -120,6 +121,13 @@ class ImportDialog(QDialog):
 
         self._library = library
         self._model_manager = model_manager
+        # When a SeparationQueue is provided (the main window always
+        # passes one), separation is handed off to it and the dialog
+        # closes immediately after acquisition + model download; the
+        # library row then shows live progress. Without a queue the
+        # dialog falls back to running the worker inline (blocking),
+        # which standalone/test usage relies on.
+        self._separation_queue = separation_queue
         self._worker: SeparatorWorker | MdxSeparatorWorker | None = None
         self._download_worker: _DownloadWorker | None = None
         self._metadata_worker: _MetadataWorker | None = None
@@ -514,15 +522,43 @@ class ImportDialog(QDialog):
         model_path: str,
         model_key: str,
     ) -> None:
-        """Run ONNX separation for a song that already has a model file."""
-        if model_key.startswith("mdx_"):
-            # MDX processes the track in small spectrogram windows; its
-            # peak memory is a few hundred MB regardless of track length,
-            # so the Demucs full-track RAM check doesn't apply.
-            self._progress_bar.setVisible(True)
-            self._status_label.setVisible(True)
-            self._button_box.setEnabled(False)
+        """Start separation: hand off to the queue, or run inline.
 
+        The RAM confirmation for the full-track Demucs engines happens
+        here in both cases -- it is a user prompt, so it must run while
+        the dialog is still up. MDX processes the track in small
+        spectrogram windows (a few hundred MB peak regardless of track
+        length), so the check doesn't apply to it.
+        """
+        if not model_key.startswith("mdx_"):
+            is_6_stem = model_key == "htdemucs_6s"
+            if not self._check_memory_ok(song.original_path, is_6_stem):
+                self._button_box.setEnabled(True)
+                return
+
+        if self._separation_queue is not None:
+            # Background path: enqueue and close. The song row is
+            # finalized (model_used) or rolled back by the main window
+            # when the queue reports the job's end; the dialog's own
+            # reject-time rollback must no longer touch it.
+            from src.separation_queue import SeparationJob
+
+            self._separation_queue.enqueue(SeparationJob(
+                song_id=song.id,
+                input_path=song.original_path,
+                output_dir=song.stems_path,
+                model_path=model_path,
+                model_key=model_key,
+            ))
+            self._import_song_id = None
+            self.accept()
+            return
+
+        self._progress_bar.setVisible(True)
+        self._status_label.setVisible(True)
+        self._button_box.setEnabled(False)
+
+        if model_key.startswith("mdx_"):
             self._worker = MdxSeparatorWorker(
                 input_path=song.original_path,
                 output_dir=song.stems_path,
@@ -530,20 +566,11 @@ class ImportDialog(QDialog):
                 model_key=model_key,
             )
         else:
-            is_6_stem = model_key == "htdemucs_6s"
-            if not self._check_memory_ok(song.original_path, is_6_stem):
-                self._button_box.setEnabled(True)
-                return
-
-            self._progress_bar.setVisible(True)
-            self._status_label.setVisible(True)
-            self._button_box.setEnabled(False)
-
             self._worker = SeparatorWorker(
                 input_path=song.original_path,
                 output_dir=song.stems_path,
                 model_path=model_path,
-                is_6_stem=is_6_stem,
+                is_6_stem=model_key == "htdemucs_6s",
             )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(
