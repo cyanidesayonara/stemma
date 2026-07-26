@@ -1,9 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- stemma icon — square, for .ico / taskbar / store tile.
-       Palatino italic 's' in turquoise on dark background.
-       The .ico and .png icons are generated from Pillow to match this design. -->
-  <rect width="256" height="256" rx="32" fill="#1e1e2e"/>
-  <text x="128" y="200" font-family="Palatino Linotype, Palatino, Georgia, serif"
-        font-size="280" font-style="italic" fill="#4fb8b8"
-        text-anchor="middle">s</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.00 512.00" width="512" height="512">
+  <rect width="512.0" height="512.0" rx="110.1" fill="#1e1e2e"/>
+  <line x1="251.4" y1="358.4" x2="251.4" y2="153.6" stroke="#cdd6f4" stroke-width="25.6" stroke-linecap="round"/>
+  <path d="M 251.4 153.6 C 333.3 153.6, 333.3 76.8, 425.0 76.8" fill="none" stroke="#4fb8b8" stroke-width="25.6" stroke-linecap="round"/>
+  <path d="M 251.4 153.6 C 333.3 153.6, 333.3 153.6, 425.0 153.6" fill="none" stroke="#e4ad6e" stroke-width="25.6" stroke-linecap="round"/>
+  <path d="M 251.4 153.6 C 333.3 153.6, 333.3 230.4, 425.0 230.4" fill="none" stroke="#bfa3dc" stroke-width="25.6" stroke-linecap="round"/>
+  <ellipse cx="179.2" cy="358.4" rx="76.8" ry="38.9" fill="#cdd6f4" transform="rotate(-20.0 179.2 358.4)"/>
 </svg>
