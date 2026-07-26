@@ -34,6 +34,7 @@ from src.downloader import (
 )
 from src.import_messages import format_import_error
 from src.library import Song, SongLibrary
+from src.mdx_separator import MdxSeparatorWorker
 from src.model_manager import ModelDownloader, ModelManager
 from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 from src.separator import (
@@ -119,12 +120,12 @@ class ImportDialog(QDialog):
 
         self._library = library
         self._model_manager = model_manager
-        self._worker: SeparatorWorker | None = None
+        self._worker: SeparatorWorker | MdxSeparatorWorker | None = None
         self._download_worker: _DownloadWorker | None = None
         self._metadata_worker: _MetadataWorker | None = None
         self._model_downloader: ModelDownloader | None = None
         self._import_song_id: str | None = None
-        self._pending_separation_is_6_stem: bool = False
+        self._pending_model_key: str = "htdemucs"
         self._selected_path: str = ""
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
 
@@ -195,9 +196,18 @@ class ImportDialog(QDialog):
         model_row = QHBoxLayout()
         model_row.addWidget(QLabel("Model:"))
         self._model_combo = QComboBox()
-        self._model_combo.addItem("4-stem (vocals, drums, bass, other)", False)
-        self._model_combo.addItem("6-stem (+ guitar, piano)", True)
-        self._model_combo.setToolTip("Choose separation model")
+        self._model_combo.addItem(
+            "4-stem (vocals, drums, bass, other)", "htdemucs"
+        )
+        self._model_combo.addItem("6-stem (+ guitar, piano)", "htdemucs_6s")
+        self._model_combo.addItem(
+            "2-stem fast (vocals + backing, GPU)", "mdx_inst_hq3"
+        )
+        self._model_combo.setToolTip(
+            "Choose separation model. 4/6-stem separate every instrument "
+            "(slow, CPU); 2-stem splits vocals from the backing track in "
+            "seconds using the GPU where available."
+        )
         model_row.addWidget(self._model_combo)
         layout.addLayout(model_row)
 
@@ -379,26 +389,52 @@ class ImportDialog(QDialog):
         self._import_song_id = song.id
 
         # Start separation.
-        is_6_stem = self._model_combo.currentData()
-        model_path = self._model_manager.model_path(is_6_stem=is_6_stem)
+        model_key = self._model_combo.currentData()
+        model_path = self._model_path_for(model_key)
 
-        if not os.path.isfile(model_path):
-            self._begin_model_download(song, is_6_stem)
+        if not self._model_downloaded_for(model_key):
+            self._begin_model_download(song, model_key)
             return
 
-        self._start_separation_worker(song, model_path, is_6_stem)
+        self._start_separation_worker(song, model_path, model_key)
 
-    def _begin_model_download(self, song: Song, is_6_stem: bool) -> None:
+    def _model_path_for(self, model_key: str) -> str:
+        """Resolve the on-disk ONNX path for a separation model key."""
+        if model_key.startswith("mdx_"):
+            return self._model_manager.mdx_model_path(model_key)
+        return self._model_manager.model_path(
+            is_6_stem=model_key == "htdemucs_6s"
+        )
+
+    def _model_downloaded_for(self, model_key: str) -> bool:
+        """True when all artifacts for *model_key* exist on disk.
+
+        Uses the manager checks rather than a bare isfile() so the
+        two-artifact HTDemucs models aren't treated as cached when only
+        the graph (and not the .onnx.data weights) survived.
+        """
+        if model_key.startswith("mdx_"):
+            return self._model_manager.is_mdx_model_downloaded(model_key)
+        return self._model_manager.is_model_downloaded(
+            is_6_stem=model_key == "htdemucs_6s"
+        )
+
+    def _begin_model_download(self, song: Song, model_key: str) -> None:
         """Download the ONNX model in the background, then run separation."""
-        self._pending_separation_is_6_stem = is_6_stem
+        self._pending_model_key = model_key
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
         self._status_label.setVisible(True)
         self._button_box.setEnabled(False)
 
-        self._model_downloader = self._model_manager.download_model(
-            is_6_stem=is_6_stem
-        )
+        if model_key.startswith("mdx_"):
+            self._model_downloader = self._model_manager.download_mdx_model(
+                model_key
+            )
+        else:
+            self._model_downloader = self._model_manager.download_model(
+                is_6_stem=model_key == "htdemucs_6s"
+            )
         self._model_downloader.progress.connect(self._on_progress)
         self._model_downloader.download_complete.connect(
             self._on_model_download_finished
@@ -408,7 +444,7 @@ class ImportDialog(QDialog):
 
     def _on_model_download_finished(self, _path: str) -> None:
         """Model file is on disk; continue with stem separation."""
-        is_6 = self._pending_separation_is_6_stem
+        model_key = self._pending_model_key
         self._model_downloader = None
 
         song_id = self._import_song_id
@@ -418,7 +454,7 @@ class ImportDialog(QDialog):
         if song is None:
             return
 
-        model_path = self._model_manager.model_path(is_6_stem=is_6)
+        model_path = self._model_path_for(model_key)
         if not os.path.isfile(model_path):
             try:
                 self._library.remove_song(song_id)
@@ -428,7 +464,7 @@ class ImportDialog(QDialog):
             self._on_error("Model file missing after download.")
             return
 
-        self._start_separation_worker(song, model_path, is_6)
+        self._start_separation_worker(song, model_path, model_key)
 
     def _on_model_download_error(self, message: str) -> None:
         """Show a readable download error and roll back the library entry."""
@@ -476,26 +512,42 @@ class ImportDialog(QDialog):
         self,
         song: Song,
         model_path: str,
-        is_6_stem: bool,
+        model_key: str,
     ) -> None:
         """Run ONNX separation for a song that already has a model file."""
-        if not self._check_memory_ok(song.original_path, is_6_stem):
-            self._button_box.setEnabled(True)
-            return
+        if model_key.startswith("mdx_"):
+            # MDX processes the track in small spectrogram windows; its
+            # peak memory is a few hundred MB regardless of track length,
+            # so the Demucs full-track RAM check doesn't apply.
+            self._progress_bar.setVisible(True)
+            self._status_label.setVisible(True)
+            self._button_box.setEnabled(False)
 
-        self._progress_bar.setVisible(True)
-        self._status_label.setVisible(True)
-        self._button_box.setEnabled(False)
+            self._worker = MdxSeparatorWorker(
+                input_path=song.original_path,
+                output_dir=song.stems_path,
+                model_path=model_path,
+                model_key=model_key,
+            )
+        else:
+            is_6_stem = model_key == "htdemucs_6s"
+            if not self._check_memory_ok(song.original_path, is_6_stem):
+                self._button_box.setEnabled(True)
+                return
 
-        self._worker = SeparatorWorker(
-            input_path=song.original_path,
-            output_dir=song.stems_path,
-            model_path=model_path,
-            is_6_stem=is_6_stem,
-        )
+            self._progress_bar.setVisible(True)
+            self._status_label.setVisible(True)
+            self._button_box.setEnabled(False)
+
+            self._worker = SeparatorWorker(
+                input_path=song.original_path,
+                output_dir=song.stems_path,
+                model_path=model_path,
+                is_6_stem=is_6_stem,
+            )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(
-            lambda _: self._on_finished(song.id, is_6_stem)
+            lambda _: self._on_finished(song.id, model_key)
         )
         self._worker.error.connect(self._on_error)
         self._worker.start()
@@ -534,15 +586,11 @@ class ImportDialog(QDialog):
         self._progress_bar.setValue(percent)
         self._status_label.setText(message)
 
-    def _on_finished(self, song_id: str, is_6_stem: bool) -> None:
+    def _on_finished(self, song_id: str, model_key: str) -> None:
         self._import_song_id = None
-        # Use the actual model that ran this separation, threaded through
-        # from _start_separation_worker. Reading
-        # _pending_separation_is_6_stem here was wrong: it is only set on
-        # the download path, so a cached-model import recorded whatever
-        # the previous download left behind.
-        model_used = "htdemucs_6s" if is_6_stem else "htdemucs"
-        self._library.update_song(song_id, model_used=model_used)
+        # The model key doubles as the stored model_used value; the
+        # demucs keys match the strings recorded by earlier versions.
+        self._library.update_song(song_id, model_used=model_key)
         self.accept()
 
     def _on_error(self, message: str) -> None:

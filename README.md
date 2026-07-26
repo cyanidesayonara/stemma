@@ -19,8 +19,8 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 
 ## Features
 
-- AI-powered stem separation using HTDemucs v4 (4-stem and 6-stem models)
-- ONNX Runtime inference; DirectML GPU acceleration is attempted per model with automatic CPU fallback (separation currently runs on CPU — see issue #125)
+- AI-powered stem separation: HTDemucs v4 (4-stem and 6-stem, CPU) and MDX-Net 2-stem (vocals + backing) that runs on the GPU via DirectML — seconds instead of minutes
+- ONNX Runtime inference with DirectML GPU acceleration where the model supports it, automatic CPU fallback otherwise (full multi-stem GPU is tracked in issue #125)
 - Multi-track player with per-stem mute/solo/volume controls
 - Audio post-processing: Wiener filter and soft gating for cleaner stems
 - Real-time chord detection (major/minor) with Viterbi smoothing, updated 4×/s during playback
@@ -106,3 +106,9 @@ Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bi
 ## License
 
 MIT
+
+## Credits
+
+- **HTDemucs v4** — Meta AI Research (MIT)
+- **MDX-Net models** — trained by the [Ultimate Vocal Remover](https://github.com/Anjok07/ultimatevocalremovergui) project and its developers (MIT); thank you to UVR for making them available
+- **beat_this** — beat/downbeat tracking model (ISMIR 2024, MIT)

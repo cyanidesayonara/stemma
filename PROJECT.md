@@ -86,7 +86,8 @@ stemma/
 │   ├── paths.py               # app_root(): frozen-build-aware root dir
 │   ├── qt_signal_utils.py     # PySide6 helpers (safe signal disconnect)
 │   ├── version.py             # __version__ string
-│   ├── separator.py           # ONNX Runtime stem separation
+│   ├── separator.py           # HTDemucs 4/6-stem ONNX separation (CPU)
+│   ├── mdx_separator.py       # MDX-Net 2-stem ONNX separation (DirectML GPU)
 │   ├── beat_detector.py       # BPM/key/chord detection + beat_this ONNX beat tracking
 │   ├── model_manager.py       # Download/cache ONNX models on first run
 │   ├── player.py              # Multi-track audio player (sounddevice)
@@ -260,9 +261,9 @@ stemma/
 Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118), pitch shift / key transposition (#117, shipped v2.4.0), Loop Trainer speed ramp (shipped v2.5.0).
 
 Open (all labeled `v3.0` on GitHub):
-- [ ] Experimental DSP extensions (#28)
-- [ ] Real-time streaming stem separation (#13)
-- [ ] GPU separation via DirectML re-export (#125)
+- [ ] Experimental DSP extensions (#28) — reframed by the v3.0 research as separation-quality tiers (MDX/SCNet/RoFormer), not bespoke DSP
+- [ ] Real-time streaming stem separation (#13) — reframed as progressive pre-separation with early playback; true live separation is not feasible on this stack
+- [ ] GPU separation via DirectML re-export (#125) — partially addressed in v2.6.0: MDX-Net 2-stem runs on DirectML; 4/6-stem HTDemucs on GPU still needs a model re-export
 
 For the live checklist, prefer `AGENTS.md` and the GitHub issue list over this section if they disagree.
 
