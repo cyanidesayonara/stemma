@@ -2043,6 +2043,8 @@ class PlayerControls(QWidget):
                 self._on_orphaned_detection_finished,
                 Qt.ConnectionType.QueuedConnection,
             )
+            if not old.isRunning():
+                self._reap_orphaned_detection_worker(old)
         else:
             old.setParent(None)
             old.deleteLater()
@@ -2050,6 +2052,10 @@ class PlayerControls(QWidget):
 
     def _on_orphaned_detection_finished(self) -> None:
         worker = self.sender()
+        self._reap_orphaned_detection_worker(worker)
+
+    def _reap_orphaned_detection_worker(self, worker) -> None:
+        """Release a stopped detection worker retained across replacement."""
         if worker in self._orphaned_workers:
             self._orphaned_workers.remove(worker)
             worker.setParent(None)

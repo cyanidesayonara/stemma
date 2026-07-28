@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from PySide6.QtCore import QObject, QSettings, QThread, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
 from src import player as player_module
@@ -627,6 +628,49 @@ class TestMainWindowAsyncLoading:
         gui_read.assert_not_called()
         assert len(workers) == 1
 
+    def test_close_saves_recording_without_reload_or_peak_work(self, window):
+        window._player._recording_buffer = np.zeros(
+            (32, 2), dtype=np.float32,
+        )
+        window._player._recording_frames_captured = 32
+        song_dir = window._library.get_song("a").stems_path
+        window._player.set_recording_song_dir(song_dir)
+        saved_path = os.path.join(song_dir, "recording_take1.wav")
+
+        def save_outgoing(_song_dir):
+            window._player._recording_buffer = None
+            return saved_path
+
+        with patch.object(
+            window._player, "stop", wraps=window._player.stop,
+        ) as stop, patch.object(
+            window._player, "save_recording", side_effect=save_outgoing,
+        ) as save_recording, patch.object(
+            main_window_module.sf, "read",
+            return_value=(
+                np.zeros((32, 2), dtype=np.float32),
+                44100,
+            ),
+        ) as gui_read, patch.object(
+            window._player_controls, "_do_recompute_peaks",
+        ) as recompute_peaks, patch.object(
+            window._separation_queue, "shutdown",
+        ), patch.object(
+            window, "_shutdown_stem_loads",
+        ), patch.object(
+            window._player, "shutdown",
+        ), patch.object(
+            window._player_controls, "shutdown",
+        ), patch.object(
+            main_window_module, "shutdown_peak_pool",
+        ):
+            window.closeEvent(QCloseEvent())
+
+        stop.assert_called_once_with()
+        save_recording.assert_called_once_with(song_dir)
+        gui_read.assert_not_called()
+        recompute_peaks.assert_not_called()
+
     @pytest.mark.parametrize("action", ["error", "close"])
     def test_failed_or_closed_song_can_be_selected_again(
         self, window, action,
@@ -786,6 +830,21 @@ class TestPeakGeneration:
 
 
 class TestDetectionGeneration:
+    def test_detach_reaps_worker_finishing_before_signal_connect(
+        self, window,
+    ):
+        controls = window._player_controls
+        worker = MagicMock()
+        worker.isRunning.side_effect = [True, False]
+        controls._detection_worker = worker
+
+        controls._detach_detection_worker()
+
+        assert worker not in controls._orphaned_workers
+        worker.finished.connect.assert_called_once()
+        worker.setParent.assert_called_once_with(None)
+        worker.deleteLater.assert_called_once_with()
+
     def test_late_detection_result_and_error_are_ignored(self, window):
         controls = window._player_controls
         window._player._stems = {

@@ -1032,7 +1032,11 @@ class MainWindow(QMainWindow):
         self._separation_queue.shutdown(5000)
         self._shutdown_stem_loads()
 
-        self._player.stop()
+        self._suppress_recording_reload = True
+        try:
+            self._player.stop()
+        finally:
+            self._suppress_recording_reload = False
         # Cancel and drain stretch/peak workers *before* Qt tears down,
         # otherwise Python's atexit blocks in ThreadPoolExecutor.join()
         # (librosa pitch/time-stretch is uninterruptible mid-call, so
