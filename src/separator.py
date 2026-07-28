@@ -25,6 +25,8 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.onnx_session import create_onnx_session
+
 
 # Stem names for each model variant.
 # HTDemucs natively outputs tensors in this exact order: 0=drums, 1=bass, etc.
@@ -220,41 +222,8 @@ class SeparatorWorker(QThread):
         return np.stack(resampled_channels)
 
     def _create_session(self):
-        """Create an ONNX Runtime inference session.
-
-        Attempts DirectML first for GPU acceleration.  Some devices list
-        ``DmlExecutionProvider`` but raise ``RUNTIME_EXCEPTION`` during
-        session init (e.g. certain integrated GPUs); in that case we retry
-        with CPU only.
-
-        Returns:
-            An onnxruntime.InferenceSession instance.
-        """
-        import onnxruntime as ort
-
-        if not os.path.isfile(self.model_path):
-            raise FileNotFoundError(
-                f"ONNX model file not found: {self.model_path}"
-            )
-
-        session_options = ort.SessionOptions()
-        available = set(ort.get_available_providers())
-
-        if "DmlExecutionProvider" in available:
-            try:
-                return ort.InferenceSession(
-                    self.model_path,
-                    sess_options=session_options,
-                    providers=["DmlExecutionProvider", "CPUExecutionProvider"],
-                )
-            except Exception:
-                pass
-
-        return ort.InferenceSession(
-            self.model_path,
-            sess_options=session_options,
-            providers=["CPUExecutionProvider"],
-        )
+        """Create a DML-first ONNX session with CPU fallback."""
+        return create_onnx_session(self.model_path)
 
     def _run_segmented_inference(
         self, audio: np.ndarray, session

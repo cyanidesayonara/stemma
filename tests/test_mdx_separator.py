@@ -39,6 +39,9 @@ class _IdentitySession:
     def get_inputs(self):
         return [self._Input()]
 
+    def get_providers(self):
+        return ["CPUExecutionProvider"]
+
     def run(self, _outputs, feeds):
         return [feeds["input"]]
 
@@ -123,6 +126,29 @@ class TestPipelineReconstruction:
 
 
 class TestFullRun:
+    @pytest.mark.parametrize(
+        ("provider", "expected_status"),
+        [
+            ("DmlExecutionProvider", "DirectML GPU"),
+            ("CPUExecutionProvider", "CPU fallback"),
+        ],
+    )
+    def test_progress_reports_selected_provider(
+        self, app, tmp_path, provider, expected_status,
+    ):
+        session = _IdentitySession()
+        session.get_providers = lambda: [provider]
+        worker, audio = _make_worker(tmp_path, session, seconds=0.1)
+        worker._load_audio = lambda: (audio, 44100)
+        worker._demix = lambda _audio, _session: np.zeros_like(audio)
+        worker._save = lambda _primary, _secondary: {}
+        messages = []
+        worker.progress.connect(lambda _pct, message: messages.append(message))
+
+        worker._separate()
+
+        assert any(expected_status in message for message in messages)
+
     def test_run_writes_both_stems_and_emits_finished(self, app, tmp_path):
         worker, audio = _make_worker(tmp_path, _IdentitySession())
         results = {}

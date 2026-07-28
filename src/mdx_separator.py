@@ -32,6 +32,8 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.onnx_session import create_onnx_session, session_provider_label
+
 SAMPLE_RATE = 44100
 
 # Registry of supported MDX models. Parameters come from UVR's model-data
@@ -77,38 +79,6 @@ def hash_model_file(path: str) -> str:
         except OSError:
             f.seek(0)
         return hashlib.md5(f.read()).hexdigest()
-
-
-def _create_session(model_path: str):
-    """Create an ONNX Runtime session, DirectML first with CPU fallback.
-
-    Same pattern as separator._create_session; unlike HTDemucs, MDX
-    graphs actually compile on DML, so the first branch is the one that
-    normally runs.
-    """
-    import onnxruntime as ort
-
-    if not os.path.isfile(model_path):
-        raise FileNotFoundError(f"ONNX model file not found: {model_path}")
-
-    session_options = ort.SessionOptions()
-    available = set(ort.get_available_providers())
-
-    if "DmlExecutionProvider" in available:
-        try:
-            return ort.InferenceSession(
-                model_path,
-                sess_options=session_options,
-                providers=["DmlExecutionProvider", "CPUExecutionProvider"],
-            )
-        except Exception:
-            pass
-
-    return ort.InferenceSession(
-        model_path,
-        sess_options=session_options,
-        providers=["CPUExecutionProvider"],
-    )
 
 
 class MdxSeparatorWorker(QThread):
@@ -162,6 +132,10 @@ class MdxSeparatorWorker(QThread):
 
         self.progress.emit(10, "Initializing MDX model...")
         session = self._create_session()
+        self.progress.emit(
+            12,
+            f"Using {session_provider_label(session)} for MDX separation.",
+        )
 
         self.progress.emit(15, "Separating (2-stem)...")
         primary = self._demix(audio, session)
@@ -200,7 +174,7 @@ class MdxSeparatorWorker(QThread):
         ]).astype(np.float32)
 
     def _create_session(self):
-        return _create_session(self.model_path)
+        return create_onnx_session(self.model_path)
 
     # ------------------------------------------------------------------
     # STFT packing (matches UVR's torch.stft usage)
