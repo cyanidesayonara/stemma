@@ -7,6 +7,7 @@ file and separated stems are stored.
 
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, asdict
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 
 
 _EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
+_GENERATED_SONG_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 @dataclass
@@ -89,6 +91,77 @@ class SongLibrary:
             raise ValueError(
                 f"Song directory is outside the library songs root: {path}"
             )
+
+    @staticmethod
+    def _normalized_path(path: str) -> str:
+        """Return a case-normalized absolute path for exact comparisons."""
+        return os.path.normcase(os.path.abspath(os.path.normpath(path)))
+
+    def _recover_staged_removal(self, song: Song) -> bool:
+        """Restore the newest valid interrupted-removal directory.
+
+        Returns False when valid staged data exists but cannot be restored
+        safely, preventing the stale JSON entry from being exposed to startup
+        pruning while its recovery data remains staged.
+        """
+        if not _GENERATED_SONG_ID_RE.fullmatch(song.id):
+            return True
+
+        canonical = os.path.join(self._songs_dir, song.id)
+        if (
+            self._normalized_path(song.stems_path)
+            != self._normalized_path(canonical)
+            or self._normalized_path(os.path.dirname(song.original_path))
+            != self._normalized_path(canonical)
+            or os.path.exists(canonical)
+        ):
+            return True
+
+        try:
+            entries = os.listdir(self._songs_dir)
+        except OSError:
+            return False
+
+        pattern = re.compile(
+            rf"^\.remove-{re.escape(song.id)}-([0-9a-f]{{32}})$"
+        )
+        original_name = os.path.basename(song.original_path)
+        candidates: list[tuple[int, str]] = []
+        for entry in entries:
+            if pattern.fullmatch(entry) is None:
+                continue
+            candidate = os.path.join(self._songs_dir, entry)
+            if (
+                not self._is_safe_song_dir(candidate)
+                or os.path.islink(candidate)
+                or not os.path.isdir(candidate)
+                or not os.path.isfile(os.path.join(candidate, original_name))
+            ):
+                continue
+            try:
+                modified = os.stat(
+                    candidate,
+                    follow_symlinks=False,
+                ).st_mtime_ns
+            except OSError:
+                continue
+            candidates.append((modified, candidate))
+
+        if not candidates:
+            return True
+
+        candidates.sort(reverse=True)
+        if (
+            len(candidates) > 1
+            and candidates[0][0] == candidates[1][0]
+        ):
+            return False
+
+        try:
+            os.replace(candidates[0][1], canonical)
+        except OSError:
+            return False
+        return True
 
     def add_song(
         self,
@@ -238,6 +311,7 @@ class SongLibrary:
             self._songs = [
                 song for song in loaded
                 if self._is_safe_song_dir(song.stems_path)
+                and self._recover_staged_removal(song)
             ]
         except (
             json.JSONDecodeError, TypeError, KeyError,

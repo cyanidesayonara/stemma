@@ -459,6 +459,104 @@ class TestSongLibraryCRUD:
             os.path.basename(song.original_path),
         ))
 
+    def test_restart_recovers_double_failed_removal(
+        self, library_dir, fake_audio, monkeypatch,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Recover On Restart",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        song_dir = song.stems_path
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        real_replace = os.replace
+        replace_calls = 0
+
+        def fail_restore(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("restore unavailable")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(library, "_save", fail_save)
+        monkeypatch.setattr("src.library.os.replace", fail_restore)
+
+        with pytest.raises(OSError, match="recovery"):
+            library.remove_song(song.id)
+
+        restarted = SongLibrary(library_dir)
+        recovered = restarted.get_song(song.id)
+
+        assert recovered is not None
+        assert recovered.stems_path == song_dir
+        assert os.path.isdir(song_dir)
+        assert os.path.isfile(recovered.original_path)
+        assert not any(
+            entry.startswith(f".remove-{song.id}-")
+            for entry in os.listdir(restarted._songs_dir)
+        )
+
+    def test_restart_restores_newest_valid_staged_directory(
+        self, library_dir, fake_audio,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Newest Recovery",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        old_stage = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-{'a' * 32}",
+        )
+        new_stage = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-{'b' * 32}",
+        )
+        shutil.copytree(song.stems_path, old_stage)
+        shutil.copytree(song.stems_path, new_stage)
+        with open(os.path.join(old_stage, "choice.txt"), "w") as f:
+            f.write("old")
+        with open(os.path.join(new_stage, "choice.txt"), "w") as f:
+            f.write("new")
+        os.utime(old_stage, ns=(1_000_000_000, 1_000_000_000))
+        os.utime(new_stage, ns=(2_000_000_000, 2_000_000_000))
+        shutil.rmtree(song.stems_path)
+
+        restarted = SongLibrary(library_dir)
+
+        assert restarted.get_song(song.id) is not None
+        with open(os.path.join(song.stems_path, "choice.txt")) as f:
+            assert f.read() == "new"
+        assert os.path.isdir(old_stage)
+        assert not os.path.exists(new_stage)
+
+    def test_restart_ignores_unrecognized_staged_directory(
+        self, library_dir, fake_audio,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Do Not Guess",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        unrelated = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-not-a-library-token",
+        )
+        os.replace(song.stems_path, unrelated)
+
+        restarted = SongLibrary(library_dir)
+
+        assert restarted.get_song(song.id) is not None
+        assert not os.path.exists(song.stems_path)
+        assert os.path.isdir(unrelated)
+
     def test_update_song(self, library, fake_audio):
         song = library.add_song(
             title="Original",
