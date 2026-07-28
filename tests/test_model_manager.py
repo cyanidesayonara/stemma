@@ -198,6 +198,24 @@ class TestDownloadFile:
         assert not os.path.exists(dest + ".part")
         assert dl._current_partial_path is None
 
+    def test_mdx_asset_request_uses_id_url_and_octet_stream_accept(self, tmp_dir):
+        from src.mdx_separator import MDX_MODELS
+
+        body = b"mdx-model"
+        manager = ModelManager(data_dir=tmp_dir)
+        downloader = manager.download_mdx_model()
+        downloader._expected_sha256 = hashlib.sha256(body).hexdigest()
+
+        with patch(
+            "src.model_manager.urllib.request.urlopen",
+            return_value=_FakeResponse(body),
+        ) as urlopen:
+            downloader.run()
+
+        request = urlopen.call_args.args[0]
+        assert request.full_url == MDX_MODELS["mdx_inst_hq3"]["url"]
+        assert request.get_header("Accept") == "application/octet-stream"
+
     def test_sha256_mismatch_removes_part_and_never_publishes(self, tmp_dir):
         body = b"corrupt-model"
         dl = ModelDownloader(

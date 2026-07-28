@@ -176,10 +176,11 @@ class TestSegmentedOverlapAdd:
                 return [spectral, temporal.astype(np.float32)]
 
         monkeypatch.setattr("src.separator.SEGMENT_SAMPLES", 16)
-        t = np.linspace(0.0, 4.0 * np.pi, 40, dtype=np.float32)
-        mono = np.sin(t).astype(np.float32)
-        mono[[0, -1]] = 0.0
+        t = np.linspace(0.0, 3.5 * np.pi, 40, dtype=np.float32)
+        mono = (0.25 + np.sin(t)).astype(np.float32)
         audio = np.stack([mono, mono * 0.5])
+        assert np.all(np.abs(audio[:, 0]) > 0.1)
+        assert np.all(np.abs(audio[:, -1]) > 0.1)
         session = FakeSession()
         worker = SeparatorWorker(
             input_path=sample_audio_path,
@@ -219,10 +220,16 @@ class TestSegmentedOverlapAdd:
 
         separated = saved["stems"]
         reconstructed = separated.sum(axis=0)
-        assert session.calls == 4
+        assert session.calls > 1
         assert separated.shape == (len(STEMS_4), 2, audio.shape[1])
         assert np.all(np.isfinite(separated))
         np.testing.assert_allclose(reconstructed, audio, atol=1e-6, rtol=1e-6)
+        np.testing.assert_allclose(reconstructed[:, 0], audio[:, 0], atol=1e-6)
+        np.testing.assert_allclose(
+            reconstructed[:, -1],
+            audio[:, -1],
+            atol=1e-6,
+        )
         for seam in (8, 16, 24):
             np.testing.assert_allclose(
                 reconstructed[:, seam - 1:seam + 1],

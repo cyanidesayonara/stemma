@@ -14,9 +14,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -56,12 +56,20 @@ jobs:
       - name: Validate frozen diagnostics
         shell: pwsh
         run: |
-          $diagnostics = & ".\dist\stemma\stemma.exe" --diagnostics | Out-String
-          $exitCode = $LASTEXITCODE
-          Write-Output $diagnostics
-          if ($exitCode -ne 0) {
-            throw "Frozen diagnostics failed with exit code $exitCode"
+          $diagnosticsPath = Join-Path $PWD "dist\frozen-diagnostics.txt"
+          $process = Start-Process `
+            -FilePath ".\dist\stemma\stemma.exe" `
+            -ArgumentList @("--diagnostics-file", $diagnosticsPath) `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Frozen diagnostics failed with exit code $($process.ExitCode)"
           }
+          if (!(Test-Path $diagnosticsPath)) {
+            throw "Frozen diagnostics did not create $diagnosticsPath"
+          }
+          $diagnostics = Get-Content $diagnosticsPath -Raw -Encoding utf8
+          Write-Output $diagnostics
           $required = @(
             'stemma version: \d+\.\d+\.\d+',
             'ONNX Runtime version: \S+',
@@ -92,7 +100,7 @@ jobs:
           Get-Content "dist/SHA256SUMS.txt"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/stemma.zip

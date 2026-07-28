@@ -90,7 +90,7 @@ def main() -> int:
 def _run() -> int:
     """Run diagnostics when requested, otherwise launch the normal GUI."""
     if diagnostics_requested(sys.argv):
-        return diagnostics_main()
+        return diagnostics_main(sys.argv)
     return main()
 
 

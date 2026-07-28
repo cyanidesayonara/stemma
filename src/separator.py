@@ -261,20 +261,27 @@ class SeparatorWorker(QThread):
         # 50% overlap: step by half a segment.
         step = SEGMENT_SAMPLES // 2
 
-        # Pad so the last segment fits fully.
-        pad_needed = 0
-        if total_samples > SEGMENT_SAMPLES:
-            # Number of steps to cover all samples.
-            n_steps = (total_samples - SEGMENT_SAMPLES + step - 1) // step + 1
-            required_length = (n_steps - 1) * step + SEGMENT_SAMPLES
-            pad_needed = required_length - total_samples
-        else:
-            # Single segment: pad to SEGMENT_SAMPLES.
-            pad_needed = SEGMENT_SAMPLES - total_samples
-            required_length = SEGMENT_SAMPLES
+        # Add half a segment of context at both ends. The Hann window is
+        # exactly zero at its endpoints, so placing real audio directly at
+        # those endpoints would erase the first and last samples. Context
+        # padding keeps every original sample under a positive window weight;
+        # it is trimmed after overlap-add normalization.
+        context = step
+        audio = np.pad(audio, ((0, 0), (context, context)))
+        working_samples = audio.shape[1]
 
-        if pad_needed > 0:
-            audio = np.pad(audio, ((0, 0), (0, pad_needed)))
+        # Pad the right side further so the last segment fits fully.
+        if working_samples > SEGMENT_SAMPLES:
+            n_steps = (
+                (working_samples - SEGMENT_SAMPLES + step - 1) // step + 1
+            )
+            required_length = (n_steps - 1) * step + SEGMENT_SAMPLES
+        else:
+            required_length = SEGMENT_SAMPLES
+        right_pad = required_length - working_samples
+
+        if right_pad > 0:
+            audio = np.pad(audio, ((0, 0), (0, right_pad)))
 
         padded_length = audio.shape[1]
 
@@ -319,11 +326,8 @@ class SeparatorWorker(QThread):
             for ch in range(2):
                 result[s, ch] /= weight
 
-        # Remove padding.
-        if pad_needed > 0:
-            result = result[:, :, :total_samples]
-
-        return result
+        # Remove left context and all right-side padding.
+        return result[:, :, context:context + total_samples]
 
     def _infer_segment(
         self, segment: np.ndarray, session
