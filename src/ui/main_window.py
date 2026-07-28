@@ -11,7 +11,7 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -139,6 +139,8 @@ class MainWindow(QMainWindow):
         self._pending_autoplay_song_id: str | None = None
         self._active_load_autoplay: tuple[int, str] | None = None
         self._session_restore_song_id: str | None = None
+        self._pending_restore_callbacks: list[tuple[object, object]] = []
+        self._suppress_recording_reload = False
 
         self._settings = QSettings("stemma", "stemma")
         self._theme = self._settings.value("theme", "dark")
@@ -753,9 +755,13 @@ class MainWindow(QMainWindow):
             self._session_restore_song_id = None
             return
 
-    def _apply_session_restore(self, song_id: str) -> None:
+    def _apply_session_restore(
+        self,
+        song_id: str,
+        generation: int,
+    ) -> None:
         """Apply saved controls after the matching song arrays are live."""
-        if self._current_song_id != song_id:
+        if not self._is_current_song_generation(generation, song_id):
             return
 
         # Stem mute/solo/volume
@@ -842,6 +848,9 @@ class MainWindow(QMainWindow):
         pitch_non_identity = pitch_semi != 0
 
         def _seek_after_render(_v: object = None, pos=position) -> None:
+            self._disconnect_pending_restore_callbacks()
+            if not self._is_current_song_generation(generation, song_id):
+                return
             self._player.seek(pos)
             # Ensure key label reflects pitch even if only speed_changed fired.
             self._player_controls._refresh_key_label()
@@ -853,20 +862,18 @@ class MainWindow(QMainWindow):
             # speed supersedes pitch when both are active.
             if speed_non_identity:
                 def _after_speed(_s: float) -> None:
-                    try:
-                        self._player.speed_changed.disconnect(_after_speed)
-                    except (TypeError, RuntimeError):
-                        pass
                     _seek_after_render()
                 self._player.speed_changed.connect(_after_speed)
+                self._pending_restore_callbacks.append(
+                    (self._player.speed_changed, _after_speed)
+                )
             else:
                 def _after_pitch(_p: int) -> None:
-                    try:
-                        self._player.pitch_changed.disconnect(_after_pitch)
-                    except (TypeError, RuntimeError):
-                        pass
                     _seek_after_render()
                 self._player.pitch_changed.connect(_after_pitch)
+                self._pending_restore_callbacks.append(
+                    (self._player.pitch_changed, _after_pitch)
+                )
 
             if pitch_non_identity:
                 self._player.set_pitch(pitch_semi)
@@ -980,6 +987,27 @@ class MainWindow(QMainWindow):
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
 
+    def _is_current_song_generation(
+        self,
+        generation: int,
+        song_id: str,
+    ) -> bool:
+        return (
+            generation == self._stem_load_generation
+            and song_id == self._current_song_id
+            and self._loading_song_id is None
+        )
+
+    def _disconnect_pending_restore_callbacks(self) -> None:
+        """Disconnect one-shot render callbacks from superseded restores."""
+        callbacks = self._pending_restore_callbacks
+        self._pending_restore_callbacks = []
+        for signal, callback in callbacks:
+            try:
+                signal.disconnect(callback)
+            except (TypeError, RuntimeError):
+                pass
+
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
         super().showEvent(event)
@@ -1021,6 +1049,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.song_removal_requested.connect(
+            self._on_song_removal_requested
+        )
         self._library_panel.song_removed.connect(self._on_song_removed)
         self._library_panel.cancel_separation_requested.connect(
             self._separation_queue.cancel_song
@@ -1090,9 +1121,13 @@ class MainWindow(QMainWindow):
         ):
             self._session_restore_song_id = None
 
-        self._player.stop()
-        self._invalidate_stem_load()
-        self._player.unload()
+        self._suppress_recording_reload = True
+        try:
+            self._player.stop()
+            self._invalidate_stem_load()
+            self._player.unload()
+        finally:
+            self._suppress_recording_reload = False
         self._current_song_id = None
         self._loading_song_id = song_id
         self._library_panel.set_playing_song(None)
@@ -1104,38 +1139,45 @@ class MainWindow(QMainWindow):
             self._active_load_autoplay = (generation, song_id)
 
         worker = StemLoadWorker(stem_paths)
-        worker.completed.connect(
-            lambda stems, sample_rate, gen=generation, sid=song_id,
-            names=source_stem_names: self._on_stem_load_completed(
-                gen, sid, names, stems, sample_rate,
-            )
-        )
-        worker.error.connect(
-            lambda message, gen=generation, sid=song_id:
-            self._on_stem_load_error(gen, sid, message)
-        )
-        worker.finished.connect(
-            lambda current=worker: self._on_stem_load_finished(current)
-        )
+        worker.generation = generation
+        worker.song_id = song_id
+        worker.source_stem_names = source_stem_names
+        worker.completed.connect(self._on_stem_load_completed)
+        worker.error.connect(self._on_stem_load_error)
+        worker.finished.connect(self._on_stem_load_finished)
         self._stem_load_worker = worker
         worker.start()
 
+    @Slot(dict, int)
     def _on_stem_load_completed(
         self,
-        generation: int,
-        song_id: str,
-        stem_names: tuple[str, ...],
         stems: dict,
         sample_rate: int,
     ) -> None:
-        """Apply arrays only when they belong to the latest selection."""
+        """Receive a worker result on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
+        self._handle_stem_load_completed(worker, stems, sample_rate)
+
+    def _handle_stem_load_completed(
+        self,
+        worker: StemLoadWorker,
+        stems: dict,
+        sample_rate: int,
+    ) -> None:
+        """Apply arrays only when their worker is still the active load."""
+        generation = worker.generation
+        song_id = worker.song_id
         if (
             generation != self._stem_load_generation
             or song_id != self._loading_song_id
+            or worker is not self._stem_load_worker
         ):
             return
         song = self._library.get_song(song_id)
         if song is None:
+            self._clear_missing_stem_load(generation, song_id)
             return
 
         self._player.apply_loaded_stems(stems, sample_rate)
@@ -1143,14 +1185,16 @@ class MainWindow(QMainWindow):
         self._loading_song_id = None
         self._library_panel.set_playing_song(song_id)
         self._restore_song_detection(song_id)
-        self._player_controls.set_stem_names(list(stem_names))
+        self._player_controls.set_stem_names(
+            list(worker.source_stem_names)
+        )
         self._player.set_recording_song_dir(song.stems_path)
         self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
         self._load_existing_recordings(song.stems_path)
 
         if self._session_restore_song_id == song_id:
             self._session_restore_song_id = None
-            self._apply_session_restore(song_id)
+            self._apply_session_restore(song_id, generation)
 
         if self._active_load_autoplay == (generation, song_id):
             self._active_load_autoplay = None
@@ -1197,16 +1241,26 @@ class MainWindow(QMainWindow):
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    def _on_stem_load_error(
+    @Slot(str)
+    def _on_stem_load_error(self, message: str) -> None:
+        """Receive a worker error on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
+        self._handle_stem_load_error(worker, message)
+
+    def _handle_stem_load_error(
         self,
-        generation: int,
-        song_id: str,
+        worker: StemLoadWorker,
         message: str,
     ) -> None:
-        """Surface a load failure only if its selection is still active."""
+        """Apply an error only for the current worker generation."""
+        generation = worker.generation
+        song_id = worker.song_id
         if (
             generation != self._stem_load_generation
             or song_id != self._loading_song_id
+            or worker is not self._stem_load_worker
         ):
             return
         self._loading_song_id = None
@@ -1217,13 +1271,18 @@ class MainWindow(QMainWindow):
         self._current_song_id = None
         self._player_controls.clear_song()
         self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
         self.setWindowTitle("stemma")
         QMessageBox.warning(
             self, "Load Song", f"Could not load this song:\n{message}",
         )
 
-    def _on_stem_load_finished(self, worker: StemLoadWorker) -> None:
-        """Release a completed active or orphaned stem-load worker."""
+    @Slot()
+    def _on_stem_load_finished(self) -> None:
+        """Release a completed worker on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
         if worker is self._stem_load_worker:
             self._stem_load_worker = None
         if worker in self._orphaned_stem_load_workers:
@@ -1233,6 +1292,7 @@ class MainWindow(QMainWindow):
 
     def _invalidate_stem_load(self) -> None:
         """Supersede the active load without waiting for its disk reads."""
+        self._disconnect_pending_restore_callbacks()
         self._stem_load_generation += 1
         self._loading_song_id = None
         self._active_load_autoplay = None
@@ -1258,6 +1318,43 @@ class MainWindow(QMainWindow):
             worker.setParent(None)
             worker.deleteLater()
         self._orphaned_stem_load_workers.clear()
+
+    def _drain_stem_loads_for_song(self, song_id: str) -> None:
+        """Drain readers for *song_id* before its directory is deleted."""
+        active = self._stem_load_worker
+        if active is not None and active.song_id == song_id:
+            self._invalidate_stem_load()
+        for worker in list(self._orphaned_stem_load_workers):
+            if worker.song_id != song_id:
+                continue
+            safe_disconnect(worker.completed)
+            safe_disconnect(worker.error)
+            safe_disconnect(worker.finished)
+            if worker.isRunning():
+                worker.wait()
+            self._orphaned_stem_load_workers.remove(worker)
+            worker.setParent(None)
+            worker.deleteLater()
+
+    def _clear_missing_stem_load(
+        self,
+        generation: int,
+        song_id: str,
+    ) -> None:
+        """Restore an empty usable UI if a loaded library row disappeared."""
+        if (
+            generation != self._stem_load_generation
+            or song_id != self._loading_song_id
+        ):
+            return
+        self._loading_song_id = None
+        self._active_load_autoplay = None
+        self._player.unload()
+        self._current_song_id = None
+        self._player_controls.clear_song()
+        self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
+        self.setWindowTitle("stemma")
 
     def _load_existing_recordings(self, song_dir: str) -> None:
         """Build mixer rows for recording takes already loaded by the worker.
@@ -1350,7 +1447,15 @@ class MainWindow(QMainWindow):
         if self._pending_autoplay_song_id == next_id:
             # Selecting the already-current row emits no selection signal.
             self._pending_autoplay_song_id = None
-            if self._current_song_id == next_id:
+            if (
+                self._loading_song_id == next_id
+                and self._stem_load_worker is not None
+            ):
+                self._active_load_autoplay = (
+                    self._stem_load_generation,
+                    next_id,
+                )
+            elif self._current_song_id == next_id:
                 self._player.play()
 
     def _get_next_song_id(self, direction: int = 1) -> str | None:
@@ -1409,6 +1514,8 @@ class MainWindow(QMainWindow):
 
     def _on_recording_saved(self, path: str) -> None:
         """Handle a newly saved recording: load it and add a UI row."""
+        if self._suppress_recording_reload:
+            return
         base = os.path.basename(path)
         stem_name = base.replace(".wav", "")
         try:
@@ -1484,12 +1591,23 @@ class MainWindow(QMainWindow):
         self._invalidate_stem_load()
         self._pending_autoplay_song_id = None
         self._session_restore_song_id = None
-        self._player.unload()
+        self._suppress_recording_reload = True
+        try:
+            self._player.unload()
+        finally:
+            self._suppress_recording_reload = False
         self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
         self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
         self._current_song_id = None
         self.setWindowTitle("stemma")
+
+    def _on_song_removal_requested(self, song_id: str) -> None:
+        """Stop and drain a song before its files are removed."""
+        if song_id in (self._current_song_id, self._loading_song_id):
+            self._on_close_song()
+        self._drain_stem_loads_for_song(song_id)
 
     def _on_song_removed(self, song_id: str) -> None:
         """Unload the player if the removed song is the one loaded."""

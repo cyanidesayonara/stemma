@@ -668,6 +668,8 @@ class PlayerControls(QWidget):
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
         self._pending_detect_args: tuple | None = None
+        self._pending_detect_generation: int | None = None
+        self._detection_generation = 0
         self._closing = False
         self._key_conf: str = ""
         self._bpm_conf: str = ""
@@ -708,7 +710,9 @@ class PlayerControls(QWidget):
         crashing with 'QThread: Destroyed while thread is still running'.
         """
         self._closing = True
+        self._detection_generation += 1
         self._pending_detect_args = None
+        self._pending_detect_generation = None
         downloader = self._beat_model_downloader
         self._beat_model_downloader = None
         if downloader is not None:
@@ -1271,6 +1275,7 @@ class PlayerControls(QWidget):
 
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
+        self._invalidate_detection()
         # Preserve mute/solo state from previous song
         saved_muted = set(self._player.muted_stems)
         saved_soloed = set(self._player.soloed_stems)
@@ -1984,6 +1989,8 @@ class PlayerControls(QWidget):
         self,
         start_sec: float | None = None,
         end_sec: float | None = None,
+        *,
+        _model_ready: bool = False,
     ) -> None:
         """Start background BPM/key detection.
 
@@ -1996,37 +2003,57 @@ class PlayerControls(QWidget):
         """
         if self._closing or not self._player.stems:
             return
+        self._detection_generation += 1
+        generation = self._detection_generation
+        self._pending_detect_args = None
+        self._pending_detect_generation = None
         self._detach_detection_worker()
 
         # Ensure beat_this model is available.
-        if (self._model_manager
+        if (not _model_ready
+                and self._model_manager
                 and not self._model_manager.is_beat_model_downloaded()):
             self._pending_detect_args = (start_sec, end_sec)
+            self._pending_detect_generation = generation
             self._start_beat_model_download()
             return
 
-        self._run_detection(start_sec, end_sec)
+        self._run_detection(
+            start_sec, end_sec, generation=generation,
+        )
+
+    def _invalidate_detection(self) -> None:
+        """Invalidate pending and active detection work for old stems."""
+        self._detection_generation += 1
+        self._pending_detect_args = None
+        self._pending_detect_generation = None
+        self._detach_detection_worker()
 
     def _detach_detection_worker(self) -> None:
         """Disconnect and orphan the current detection worker, if any."""
         if self._detection_worker is None:
             return
         old = self._detection_worker
-        for sig, slot in [
-            (old.completed, self._on_detect_completed),
-            (old.error, self._on_detect_error),
-            (old.finished, self._on_detect_finished),
-        ]:
-            try:
-                sig.disconnect(slot)
-            except RuntimeError:
-                pass
-        self._orphaned_workers.append(old)
-        old.finished.connect(
-            lambda w=old: self._orphaned_workers.remove(w)
-            if w in self._orphaned_workers else None
-        )
+        safe_disconnect(old.completed)
+        safe_disconnect(old.error)
+        safe_disconnect(old.finished)
+        if old.isRunning():
+            self._orphaned_workers.append(old)
+            old.finished.connect(
+                self._on_orphaned_detection_finished,
+                Qt.ConnectionType.QueuedConnection,
+            )
+        else:
+            old.setParent(None)
+            old.deleteLater()
         self._detection_worker = None
+
+    def _on_orphaned_detection_finished(self) -> None:
+        worker = self.sender()
+        if worker in self._orphaned_workers:
+            self._orphaned_workers.remove(worker)
+            worker.setParent(None)
+            worker.deleteLater()
 
     def _start_beat_model_download(self) -> None:
         """Download beat_this.onnx, then resume detection."""
@@ -2051,31 +2078,55 @@ class PlayerControls(QWidget):
         dl.start()
 
     def _on_beat_model_ready(self, path: str) -> None:
-        if self._closing:
+        downloader = self.sender()
+        if self._closing or downloader is not self._beat_model_downloader:
             return
         self._beat_model_downloader = None
         self._beat_model_path = path
         args = self._pending_detect_args or (None, None)
+        generation = self._pending_detect_generation
         self._pending_detect_args = None
-        self._run_detection(*args)
+        self._pending_detect_generation = None
+        if (
+            generation != self._detection_generation
+            or not self._player.stems
+        ):
+            return
+        self.start_detection(*args, _model_ready=True)
 
     def _on_beat_model_error(self, msg: str) -> None:
-        if self._closing:
+        downloader = self.sender()
+        if self._closing or downloader is not self._beat_model_downloader:
             return
         self._beat_model_downloader = None
         # Fall through without the model — librosa fallback.
         self._beat_model_path = None
         args = self._pending_detect_args or (None, None)
+        generation = self._pending_detect_generation
         self._pending_detect_args = None
-        self._run_detection(*args)
+        self._pending_detect_generation = None
+        if (
+            generation != self._detection_generation
+            or not self._player.stems
+        ):
+            return
+        self.start_detection(*args, _model_ready=True)
 
     def _run_detection(
         self,
         start_sec: float | None = None,
         end_sec: float | None = None,
+        *,
+        generation: int | None = None,
     ) -> None:
         """Launch the DetectionWorker with the current model path."""
-        if self._closing:
+        if generation is None:
+            generation = self._detection_generation
+        if (
+            self._closing
+            or generation != self._detection_generation
+            or not self._player.stems
+        ):
             return
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         dim_style = (
@@ -2099,6 +2150,7 @@ class PlayerControls(QWidget):
         worker.completed.connect(self._on_detect_completed)
         worker.error.connect(self._on_detect_error)
         worker.finished.connect(self._on_detect_finished)
+        worker._detection_generation = generation
         self._detection_worker = worker
         worker.start()
 
@@ -2169,6 +2221,8 @@ class PlayerControls(QWidget):
         self._update_sync_btn_state(len(beat_times) >= 2)
 
     def _on_detect_completed(self, result: DetectionResult) -> None:
+        if not self._is_active_detection_sender():
+            return
         # Store beat grid on the player.
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
 
@@ -2224,6 +2278,8 @@ class PlayerControls(QWidget):
             self._chord_timer.stop()
 
     def _on_detect_error(self, msg: str) -> None:
+        if not self._is_active_detection_sender():
+            return
         for lbl in (self._key_label, self._detected_bpm_label,
                      self._chord_label):
             lbl.setText("")
@@ -2233,15 +2289,23 @@ class PlayerControls(QWidget):
         self._chord_timer.stop()
 
     def _on_detect_finished(self) -> None:
-        # Only clear the reference if the sender is the active worker;
-        # orphaned workers must not null out a newer worker's reference.
-        if self.sender() is self._detection_worker:
+        if self._is_active_detection_sender():
             self._detection_worker = None
+
+    def _is_active_detection_sender(self) -> bool:
+        worker = self.sender()
+        return (
+            worker is self._detection_worker
+            and getattr(worker, "_detection_generation", None)
+            == self._detection_generation
+        )
 
     def _redetect_key_only(self) -> None:
         """Re-run detection but only update the key label."""
         if self._detection_worker is not None:
             return  # Already running.
+        self._detection_generation += 1
+        generation = self._detection_generation
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         self._key_label.setStyleSheet(
             f"background: {dim['surface0']}; "
@@ -2259,17 +2323,22 @@ class PlayerControls(QWidget):
         worker.completed.connect(self._on_key_only_completed)
         worker.error.connect(self._on_key_only_error)
         worker.finished.connect(self._on_detect_finished)
+        worker._detection_generation = generation
         self._detection_worker = worker
         worker.start()
 
     def _on_key_only_error(self, msg: str) -> None:
         """Clear the key badge if re-detection fails (was stuck on
         'detecting...' because no error handler was connected)."""
+        if not self._is_active_detection_sender():
+            return
         self._key_label.setText("")
         self._key_label.setStyleSheet("")
 
     def _on_key_only_completed(self, result: DetectionResult) -> None:
         """Update only the key label from a re-detection."""
+        if not self._is_active_detection_sender():
+            return
         if result.key:
             self._key_conf = result.key_confidence
             self._detected_key_raw = result.key
@@ -2284,6 +2353,8 @@ class PlayerControls(QWidget):
         """Re-run detection but only update the BPM label."""
         if self._detection_worker is not None:
             return  # Already running.
+        self._detection_generation += 1
+        generation = self._detection_generation
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         self._detected_bpm_label.setStyleSheet(
             f"background: {dim['surface0']}; "
@@ -2301,17 +2372,22 @@ class PlayerControls(QWidget):
         worker.completed.connect(self._on_bpm_only_completed)
         worker.error.connect(self._on_bpm_only_error)
         worker.finished.connect(self._on_detect_finished)
+        worker._detection_generation = generation
         self._detection_worker = worker
         worker.start()
 
     def _on_bpm_only_error(self, msg: str) -> None:
         """Clear the tempo badge if re-detection fails (was stuck on
         'detecting...' because no error handler was connected)."""
+        if not self._is_active_detection_sender():
+            return
         self._detected_bpm_label.setText("")
         self._detected_bpm_label.setStyleSheet("")
 
     def _on_bpm_only_completed(self, result: DetectionResult) -> None:
         """Update only the BPM label from a re-detection."""
+        if not self._is_active_detection_sender():
+            return
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
         self._update_sync_btn_state(len(result.beat_times) >= 2)
         if result.bpm > 0:

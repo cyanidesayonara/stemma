@@ -75,9 +75,19 @@ class StemLoadWorker(QThread):
     completed = Signal(dict, int)
     error = Signal(str)
 
-    def __init__(self, stem_paths: dict[str, str]) -> None:
+    def __init__(
+        self,
+        stem_paths: dict[str, str],
+        *,
+        generation: int = 0,
+        song_id: str = "",
+        source_stem_names: tuple[str, ...] = (),
+    ) -> None:
         super().__init__()
         self._stem_paths = dict(stem_paths)
+        self.generation = generation
+        self.song_id = song_id
+        self.source_stem_names = source_stem_names
 
     def run(self) -> None:
         try:
