@@ -18,14 +18,10 @@ Latest stable release: **v2.5.0**. The current `main` line targets
 ### Requirements
 
 - Windows 10/11
-- A DirectML-capable GPU is optional. The MDX two-stem mode reports whether
-  it selected DirectML or CPU fallback.
 
 ## Features
 
-- AI-powered stem separation: HTDemucs v4 (4-stem and 6-stem, CPU-only)
-  and MDX-Net 2-stem (vocals + backing), which uses DirectML when available
-  and explicitly reports CPU fallback
+- AI-powered HTDemucs v4 stem separation (4-stem and 6-stem, CPU-only)
 - ONNX Runtime inference without PyTorch; DirectML support for HTDemucs
   four/six-stem remains research in
   [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
@@ -35,7 +31,6 @@ Latest stable release: **v2.5.0**. The current `main` line targets
 - Automatic tempo and key detection; beat-synced metronome mode
 - Beat/downbeat tracking via the auto-downloaded beat_this ONNX model
 - Import from YouTube URL (bundled ffmpeg when available; otherwise ffmpeg on PATH)
-- Imports run in the background: the dialog closes as soon as separation starts, the library row shows live progress, and the app stays fully usable (multiple imports queue up)
 - Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
 - Export individual stems or custom mixes as WAV or MP3
 - Waveform visualization with click-to-seek, playback cursor, and loop markers
@@ -49,6 +44,17 @@ Latest stable release: **v2.5.0**. The current `main` line targets
 - Keyboard shortcuts for transport, stems, loop, speed, pitch, metronome, count-in, and recording; full list under **Help > Keyboard Shortcuts**
 - Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
+
+## v2.6.0 Target (Unreleased)
+
+The current source tree includes these v2.6.0 target features. They are not
+part of the stable v2.5.0 Store or portable downloads yet:
+
+- MDX-Net two-stem separation (vocals + backing) requests DirectML when
+  available and explicitly reports whether it selected DirectML GPU or CPU
+  fallback. HTDemucs four/six-stem remains CPU-only.
+- Imports run in the background: the dialog closes after separation is
+  queued, the library shows progress, and multiple imports run serially.
 
 ## Development Setup
 
