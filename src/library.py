@@ -168,10 +168,18 @@ class SongLibrary:
         self._songs.pop(song_index)
         try:
             self._save()
-        except Exception:
-            self._songs.insert(song_index, song)
+        except Exception as save_error:
             if staged_dir is not None:
-                os.replace(staged_dir, song.stems_path)
+                try:
+                    os.replace(staged_dir, song.stems_path)
+                except Exception as restore_error:
+                    raise OSError(
+                        f"Could not persist removal of song '{song.id}' "
+                        f"({save_error}); restoring its directory also "
+                        f"failed ({restore_error}). Song data is preserved "
+                        f"for recovery at: {staged_dir}"
+                    ) from save_error
+            self._songs.insert(song_index, song)
             raise
 
         if staged_dir is not None:

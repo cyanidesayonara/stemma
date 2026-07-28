@@ -409,6 +409,56 @@ class TestSongLibraryCRUD:
         assert os.path.isdir(song_dir)
         assert os.path.isfile(song.original_path)
 
+    def test_remove_save_and_restore_failure_preserves_staged_recovery(
+        self, library, fake_audio, monkeypatch,
+    ):
+        song = library.add_song(
+            title="Recover Me",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        song_dir = song.stems_path
+        songs_dir = library._songs_dir
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        real_replace = os.replace
+        replace_calls = 0
+
+        def fail_restore(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("restore unavailable")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(library, "_save", fail_save)
+        monkeypatch.setattr("src.library.os.replace", fail_restore)
+
+        with pytest.raises(OSError) as exc_info:
+            library.remove_song(song.id)
+
+        message = str(exc_info.value)
+        assert "index unavailable" in message
+        assert "restore unavailable" in message
+        assert exc_info.value.__cause__ is not None
+        assert "index unavailable" in str(exc_info.value.__cause__)
+        assert library.get_song(song.id) is None
+        assert not os.path.exists(song_dir)
+
+        staged = [
+            os.path.join(songs_dir, entry)
+            for entry in os.listdir(songs_dir)
+            if entry.startswith(f".remove-{song.id}-")
+        ]
+        assert len(staged) == 1
+        assert os.path.isdir(staged[0])
+        assert os.path.isfile(os.path.join(
+            staged[0],
+            os.path.basename(song.original_path),
+        ))
+
     def test_update_song(self, library, fake_audio):
         song = library.add_song(
             title="Original",
