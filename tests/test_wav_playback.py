@@ -59,3 +59,58 @@ def test_two_different_wavs_no_crash(app) -> None:
         pytest.skip("audio assets not present")
     play_wav_async(a)
     play_wav_async(b)
+
+
+class TestQtMultimediaOptional:
+    """The module must import even when QtMultimedia is unavailable.
+
+    In the packaged (MSIX) build QtMultimedia's backend DLLs were not
+    collected, so the top-level import raised. That ImportError escaped
+    play_wav_async into the logo widgets' exception guard, which is why
+    clicking a logo animated in silence while the splash -- which calls
+    winsound directly -- still played.
+    """
+
+    def test_module_imports_without_qtmultimedia(self):
+        import builtins
+        import importlib
+        import sys
+        from unittest.mock import patch
+
+        impl_name = "src.ui._wav_playback_impl"
+        saved_impl = sys.modules.pop(impl_name, None)
+        saved_qtmm = sys.modules.pop("PySide6.QtMultimedia", None)
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "PySide6.QtMultimedia":
+                raise ImportError("QtMultimedia unavailable (simulated)")
+            return real_import(name, *args, **kwargs)
+
+        try:
+            with patch.object(builtins, "__import__", fake_import):
+                mod = importlib.import_module(impl_name)
+            assert mod.QSoundEffect is None
+        finally:
+            sys.modules.pop(impl_name, None)
+            if saved_qtmm is not None:
+                sys.modules["PySide6.QtMultimedia"] = saved_qtmm
+            if saved_impl is not None:
+                sys.modules[impl_name] = saved_impl
+
+    def test_play_impl_uses_winsound_on_windows(self, tmp_path):
+        """On Windows the Qt path is never reached, so a missing
+        QtMultimedia cannot silence playback."""
+        from unittest.mock import patch
+
+        import src.ui._wav_playback_impl as impl
+
+        wav = tmp_path / "s.wav"
+        wav.write_bytes(b"RIFF....WAVEfmt ")
+        if not impl._HAS_WINSOUND:
+            import pytest
+            pytest.skip("winsound unavailable")
+        with patch.object(impl, "_play_winsound_fallback") as fallback:
+            impl.play_impl(wav)
+        fallback.assert_called_once()

@@ -19,6 +19,11 @@ ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all(
     "imageio_ffmpeg"
 )
 svg_datas, svg_binaries, svg_hiddenimports = collect_all("PySide6.QtSvg")
+# QtMultimedia needs its backend DLLs and plugins, not just the Python
+# binding: a bare hiddenimport left the module unimportable at runtime.
+mm_datas, mm_binaries, mm_hiddenimports = collect_all(
+    "PySide6.QtMultimedia"
+)
 
 # -- Analysis -----------------------------------------------------------------
 
@@ -31,6 +36,7 @@ a = Analysis(
         + sd2_binaries
         + ffmpeg_binaries
         + svg_binaries
+        + mm_binaries
     ),
     datas=[
         ("assets/icons", "assets/icons"),
@@ -40,7 +46,8 @@ a = Analysis(
     + sd_datas
     + sd2_datas
     + ffmpeg_datas
-    + svg_datas,
+    + svg_datas
+    + mm_datas,
     hiddenimports=[
         "onnxruntime",
         "lameenc",
@@ -59,7 +66,8 @@ a = Analysis(
     + sd_hiddenimports
     + sd2_hiddenimports
     + ffmpeg_hiddenimports
-    + svg_hiddenimports,
+    + svg_hiddenimports
+    + mm_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
