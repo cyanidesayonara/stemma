@@ -342,3 +342,45 @@ class TestPaintEvent:
         splash.start()
         splash.repaint()
         splash.close()
+
+
+class TestNoDoubleArpeggio:
+    """finish() must not replay the arpeggio over one already playing.
+
+    The restart branch exists for a startup where the event loop was
+    blocked so hard that no animation frame rendered. It used to trigger
+    on frame count alone, so a normal-but-quick startup (sound started on
+    frame 2, only a few frames drawn before finish) replayed the sound on
+    top of itself and snapped the letters back to the start mid-sequence.
+    """
+
+    @patch("src.ui.splash_screen.QApplication.processEvents")
+    def test_no_replay_when_sound_already_started(self, _pe, app):
+        splash = SplashScreen(theme="dark", play_sound=True)
+        splash.start()
+        # Sound went out on frame 2, but few frames have been painted.
+        splash._sound_played_on_frame2 = True
+        splash._anim_paint_count = 1
+        origin = splash._sound_start_ms
+
+        with patch.object(splash, "_replay_sound") as replay:
+            splash.finish(QWidget())
+
+        replay.assert_not_called()
+        # The animation origin must not move, or the letters restart.
+        assert splash._sound_start_ms == origin
+        splash.close()
+
+    @patch("src.ui.splash_screen.QApplication.processEvents")
+    def test_replays_when_nothing_rendered_and_no_sound(self, _pe, app):
+        """The genuine blocked-startup case still restarts."""
+        splash = SplashScreen(theme="dark", play_sound=True)
+        splash.start()
+        splash._sound_played_on_frame2 = False
+        splash._anim_paint_count = 0
+
+        with patch.object(splash, "_replay_sound") as replay:
+            splash.finish(QWidget())
+
+        replay.assert_called_once()
+        splash.close()

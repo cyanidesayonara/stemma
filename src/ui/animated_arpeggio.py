@@ -5,6 +5,7 @@ with animation: letters glow sequentially matching the Am7 arpeggio.
 Clickable as an Easter egg to replay with sound.
 """
 
+import logging
 import os
 
 from PySide6.QtCore import QByteArray, QElapsedTimer, QPointF, Qt, QTimer
@@ -178,11 +179,20 @@ class AnimatedArpeggioWidget(QWidget):
 
     def _do_play_sound(self) -> None:
         if not os.path.isfile(_AUDIO_PATH):
+            logging.getLogger(__name__).warning(
+                "logo sound missing: %s", _AUDIO_PATH
+            )
             return
         try:
             play_wav_async(_AUDIO_PATH)
         except Exception:
-            pass
+            # Never let a sound failure break the animation, but do not
+            # swallow it silently either: a bare pass here hid the
+            # click-plays-no-sound reports, because the Easter egg looked
+            # like it worked while playback had failed outright.
+            logging.getLogger(__name__).exception(
+                "logo sound playback failed for %s", _AUDIO_PATH
+            )
 
     @staticmethod
     def _render_base(theme: str) -> QPixmap:

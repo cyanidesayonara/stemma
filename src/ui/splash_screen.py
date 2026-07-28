@@ -181,7 +181,14 @@ class SplashScreen(QWidget):
 
         elapsed = self._clock.elapsed() if self._clock.isValid() else _MIN_DISPLAY_MS
 
-        if self._anim_paint_count < _MIN_ANIM_FRAMES:
+        # Only restart when the animation never actually ran. The old
+        # condition also fired when the splash had rendered a few frames
+        # and the sound was already playing, which replayed the arpeggio
+        # over itself and snapped the letters back to the start
+        # mid-sequence. _sound_played_on_frame2 records that the sound is
+        # already under way; it was previously written but never read.
+        if (self._anim_paint_count < _MIN_ANIM_FRAMES
+                and not self._sound_played_on_frame2):
             self._sound_start_ms = elapsed
             self._replay_sound()
 
