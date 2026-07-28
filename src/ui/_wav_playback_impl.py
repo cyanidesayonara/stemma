@@ -22,8 +22,18 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import QApplication
+
+# QtMultimedia is optional. On Windows playback goes through winsound
+# (see play_impl), so the Qt path is only a fallback -- but importing it
+# at module scope made the whole module unimportable in the packaged
+# build, where QtMultimedia's backend DLLs are not collected. That
+# ImportError propagated out of play_wav_async into the callers'
+# exception guard, so logo clicks animated in silence.
+try:
+    from PySide6.QtMultimedia import QSoundEffect
+except ImportError:  # pragma: no cover - depends on the bundle
+    QSoundEffect = None
 
 try:
     import winsound
@@ -91,6 +101,11 @@ def play_impl(path: Path) -> None:
     # builds where QSoundEffect sometimes silently fails to produce audio.
     if _HAS_WINSOUND:
         _play_winsound_fallback(path)
+        return
+
+    if QSoundEffect is None:
+        # No Qt multimedia in this build and no winsound (non-Windows):
+        # nothing can play, but the caller's animation still runs.
         return
 
     app = QApplication.instance()
