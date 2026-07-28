@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6.QtCore import QSettings, QThread, Qt, Signal
+from PySide6.QtCore import QSettings, QThread, Signal
 from PySide6.QtWidgets import QApplication
 
 from src.library import SongLibrary

@@ -237,7 +237,6 @@ def _draw_mute(p: QPainter, s: int) -> None:
 
 def _draw_solo(p: QPainter, s: int) -> None:
     """Headphones icon — solo."""
-    cx = s / 2.0
     m = s * 0.15
     # Arc for headband
     pen = QPen(p.brush().color(), s * 0.09)
@@ -1203,7 +1202,6 @@ class PlayerControls(QWidget):
         """Switch all theme-dependent visuals to *theme*."""
         self._theme = theme
         icon_color = QColor(colors["text"])
-        base_c = QColor(colors["base"])
 
         self._play_icon = _make_icon(_draw_play, icon_color)
         self._pause_icon = _make_icon(_draw_pause, icon_color)

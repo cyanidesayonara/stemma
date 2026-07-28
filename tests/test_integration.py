@@ -21,16 +21,15 @@ Skip hardware tests (no speakers needed):
 
 import os
 import json
-import time
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from src.library import SongLibrary, Song
+from src.library import SongLibrary
 from src.player import MultiTrackPlayer
 from src.separator import (
-    SeparatorWorker, SAMPLE_RATE, STEMS_4, STEMS_6,
+    SeparatorWorker, SAMPLE_RATE, STEMS_4,
 )
 from src.model_manager import ModelManager
 
@@ -459,7 +458,6 @@ class TestFullPipeline:
         assert os.path.isfile(song.original_path)
 
         # 2. Separate stems using the real model.
-        mm = ModelManager(data_dir=data_dir)
         # Use the real model from the project data dir.
         real_mm = ModelManager(
             data_dir=os.path.abspath(DATA_DIR)

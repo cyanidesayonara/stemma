@@ -777,12 +777,6 @@ class MainWindow(QMainWindow):
             volumes = json.loads(self._settings.value("session/volumes", "{}"))
         except (json.JSONDecodeError, TypeError):
             volumes = {}
-        try:
-            nudge_offsets = json.loads(
-                self._settings.value("session/nudge_offsets", "{}")
-            )
-        except (json.JSONDecodeError, TypeError):
-            nudge_offsets = {}
 
         self._player_controls.restore_stem_state(muted, soloed, volumes)
 

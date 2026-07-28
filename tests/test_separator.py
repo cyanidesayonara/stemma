@@ -151,6 +151,90 @@ class TestSeparatorResample:
         assert result.shape[0] == 2
 
 
+class TestSegmentedOverlapAdd:
+    """Exercise multi-chunk reconstruction without a real ONNX model."""
+
+    def test_fake_session_reconstructs_across_overlapping_seams(
+        self, tmp_dir, sample_audio_path, monkeypatch
+    ):
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, _outputs, feeds):
+                self.calls += 1
+                segment = feeds["input"][0]
+                temporal = np.repeat(
+                    (segment / len(STEMS_4))[np.newaxis, np.newaxis],
+                    len(STEMS_4),
+                    axis=1,
+                )
+                spectral = np.zeros(
+                    (1, len(STEMS_4), 4, 1, 1),
+                    dtype=np.float32,
+                )
+                return [spectral, temporal.astype(np.float32)]
+
+        monkeypatch.setattr("src.separator.SEGMENT_SAMPLES", 16)
+        t = np.linspace(0.0, 4.0 * np.pi, 40, dtype=np.float32)
+        mono = np.sin(t).astype(np.float32)
+        mono[[0, -1]] = 0.0
+        audio = np.stack([mono, mono * 0.5])
+        session = FakeSession()
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=tmp_dir,
+            model_path="fake_model.onnx",
+        )
+        monkeypatch.setattr(worker, "_load_audio", lambda: (audio, SAMPLE_RATE))
+        monkeypatch.setattr(worker, "_resample", lambda data, _sr: data)
+        monkeypatch.setattr(worker, "_create_session", lambda: session)
+        monkeypatch.setattr(
+            worker,
+            "_compute_stft_cac",
+            lambda _segment: np.zeros((4, 1, 1), dtype=np.float32),
+        )
+        monkeypatch.setattr(
+            worker,
+            "_compute_istft_cac",
+            lambda _spec, length: np.zeros((2, length), dtype=np.float32),
+        )
+        monkeypatch.setattr(worker, "_post_process", lambda stems: stems)
+
+        saved = {}
+
+        def save_stems(stems):
+            saved["stems"] = stems
+            return {name: f"{name}.wav" for name in STEMS_4}
+
+        monkeypatch.setattr(worker, "_save_stems", save_stems)
+        progress = []
+        completed = []
+        errors = []
+        worker.progress.connect(lambda pct, text: progress.append((pct, text)))
+        worker.finished.connect(completed.append)
+        worker.error.connect(errors.append)
+
+        worker.run()
+
+        separated = saved["stems"]
+        reconstructed = separated.sum(axis=0)
+        assert session.calls == 4
+        assert separated.shape == (len(STEMS_4), 2, audio.shape[1])
+        assert np.all(np.isfinite(separated))
+        np.testing.assert_allclose(reconstructed, audio, atol=1e-6, rtol=1e-6)
+        for seam in (8, 16, 24):
+            np.testing.assert_allclose(
+                reconstructed[:, seam - 1:seam + 1],
+                audio[:, seam - 1:seam + 1],
+                atol=1e-6,
+                rtol=1e-6,
+            )
+        assert not errors
+        assert progress[-1] == (100, "Done")
+        assert len(completed) == 1
+
+
 class TestSeparatorCreateSession:
     """Verify ONNX session creation."""
 

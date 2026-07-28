@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyle,
     QStyledItemDelegate,
-    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )

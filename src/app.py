@@ -1,9 +1,8 @@
 """QApplication setup for stemma."""
 
-import os
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.app_settings import normalize_output_device_setting
 from src.data_paths import resolve_data_dir

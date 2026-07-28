@@ -42,15 +42,19 @@ SAMPLE_RATE = 44100
 
 # Registry of supported MDX models. Parameters come from UVR's model-data
 # database keyed by the md5 of the file's last 10,000 KiB (UVR's hashing
-# convention); md5_tail lets the downloader verify integrity after the
-# transfer and guards against upstream file swaps.
+# convention). Downloads use the immutable GitHub release asset ID and a
+# reviewed full-file SHA-256 before publishing the model locally.
 MDX_MODELS: dict[str, dict] = {
     "mdx_inst_hq3": {
         "display_name": "MDX-Net Inst HQ 3",
         "file": "UVR-MDX-NET-Inst_HQ_3.onnx",
         "url": (
-            "https://github.com/TRvlvr/model_repo/releases/download/"
-            "all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx"
+            "https://api.github.com/repos/TRvlvr/model_repo/"
+            "releases/assets/112310332"
+        ),
+        "sha256": (
+            "317554b07fe1ea5279a77f2b1520a41e"
+            "a4b93432560c4ffd08792c30fddf9adc"
         ),
         "md5_tail": "55657dd70583b0fedfba5f67df11d711",
         "n_fft": 6144,

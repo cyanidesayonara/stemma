@@ -280,7 +280,6 @@ def build_lockup(dark: bool = True) -> str:
     mark_body, mw, mh = build_mark(dark=dark, with_staff=True)
 
     d, ww, wh = wordmark_path("stemma", px=400.0)
-    from PySide6.QtGui import QPainterPath  # noqa: PLC0415  (path bounds)
     # Scale the wordmark so its x-height era matches the chord height.
     target_h = mh * 0.30
     scale = target_h / wh

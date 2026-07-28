@@ -452,7 +452,7 @@ class TestBuildChordTemplates:
     def test_c_major_template(self):
         """C major template should have energy on C, E, G (indices 0, 4, 7)."""
         templates = _build_chord_templates()
-        c_major = [v for l, v in templates if l == "C"][0]
+        c_major = [values for label, values in templates if label == "C"][0]
         assert c_major[0] > 0   # C
         assert c_major[4] > 0   # E
         assert c_major[7] > 0   # G

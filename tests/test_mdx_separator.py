@@ -75,16 +75,35 @@ def _make_worker(tmp_path, session, seconds=3.0, sr=44100):
 class TestRegistry:
     def test_registry_entries_are_complete(self):
         for key, info in MDX_MODELS.items():
-            for field in ("file", "url", "md5_tail", "n_fft", "hop",
-                          "dim_f", "dim_t", "compensate", "primary_stem"):
+            for field in (
+                "file",
+                "url",
+                "sha256",
+                "md5_tail",
+                "n_fft",
+                "hop",
+                "dim_f",
+                "dim_t",
+                "compensate",
+                "primary_stem",
+            ):
                 assert field in info, f"{key} missing {field}"
             assert info["primary_stem"] in PRIMARY_TO_FILES
+
+    def test_mdx_asset_is_id_pinned_with_reviewed_sha256(self):
+        info = MDX_MODELS["mdx_inst_hq3"]
+        assert info["url"].endswith("/releases/assets/112310332")
+        assert info["sha256"] == (
+            "317554b07fe1ea5279a77f2b1520a41e"
+            "a4b93432560c4ffd08792c30fddf9adc"
+        )
 
     def test_hash_model_file_small_file(self, tmp_path):
         """Files under 10,000 KiB hash from the start (seek fallback)."""
         p = tmp_path / "m.onnx"
         p.write_bytes(b"model-bytes")
         import hashlib
+
         assert hash_model_file(str(p)) == hashlib.md5(b"model-bytes").hexdigest()
 
 
@@ -235,36 +254,45 @@ class TestFullRun:
 
 
 class TestDownloadVerification:
-    def test_md5_tail_mismatch_removes_file_and_errors(self, tmp_path):
+    def test_sha256_mismatch_removes_file_and_errors(self, tmp_path):
         """A downloaded MDX model failing the integrity check must be
         deleted and surfaced as an error, never kept as 'cached'."""
-        from src.model_manager import ModelDownloader
-        from unittest.mock import patch
         import io
+        from unittest.mock import patch
+
+        from src.model_manager import ModelDownloader
 
         class _Resp:
             headers = {"Content-Length": "9"}
+
             def read(self, n=-1):
                 return self._buf.read(n)
+
             def __enter__(self):
                 self._buf = io.BytesIO(b"bad-bytes")
                 return self
+
             def __exit__(self, *a):
                 return False
 
         dl = ModelDownloader(
-            "mdx_inst_hq3", str(tmp_path),
-            url="http://x/m.onnx", file_name="m.onnx",
-            expected_md5_tail="0" * 32,
+            "mdx_inst_hq3",
+            str(tmp_path),
+            url="http://x/m.onnx",
+            file_name="m.onnx",
+            expected_sha256="0" * 64,
         )
         errors = []
         dl.error.connect(lambda m: errors.append(m))
-        with patch("src.model_manager.urllib.request.urlopen",
-                   return_value=_Resp()):
+        with patch(
+            "src.model_manager.urllib.request.urlopen",
+            return_value=_Resp(),
+        ):
             dl.run()
 
-        assert errors and "integrity" in errors[0]
+        assert errors and "SHA-256" in errors[0]
         assert not os.path.exists(tmp_path / "m.onnx")
+        assert not os.path.exists(tmp_path / "m.onnx.part")
 
 
 # ---------------------------------------------------------------------------
@@ -301,5 +329,8 @@ def test_real_model_separates_tone(app, tmp_path):
     # nearly all the energy.
     other, _ = sf.read(results["other"], always_2d=True)
     vocals, _ = sf.read(results["vocals"], always_2d=True)
-    rms = lambda x: float(np.sqrt(np.mean(x ** 2)))
+
+    def rms(audio):
+        return float(np.sqrt(np.mean(audio ** 2)))
+
     assert rms(other) > 5 * rms(vocals)

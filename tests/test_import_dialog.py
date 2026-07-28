@@ -8,11 +8,10 @@ These tests verify that:
 """
 
 import os
-import shutil
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
 from src.library import SongLibrary

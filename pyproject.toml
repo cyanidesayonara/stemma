@@ -4,3 +4,12 @@ markers = [
     "slow: marks tests that take more than a few seconds (e.g. ONNX inference)",
     "hardware: marks tests that require audio hardware (speakers/soundcard)",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# Keep CI focused on syntax, undefined names, and unused/import correctness.
+select = ["E4", "E7", "E9", "F"]

@@ -1,11 +1,13 @@
 """Tests for the model download and cache manager."""
 
+import hashlib
 import io
 import os
 from unittest.mock import patch
 
 import pytest
 
+import src.model_manager as model_manager
 from src.model_manager import ModelDownloader, ModelManager, _MODEL_FILES
 
 
@@ -117,26 +119,111 @@ class TestModelFiles:
         assert _MODEL_FILES["htdemucs_6s"][0] == "htdemucs_6s.onnx"
         assert _MODEL_FILES["htdemucs_6s"][1] == "htdemucs_6s.onnx.data"
 
+    def test_htdemucs_urls_and_sha256_are_commit_pinned(self):
+        assert (
+            getattr(model_manager, "_REPO_REVISION", None)
+            == "ee08c547c91ef9f20ba19cf6ac2ed059ec9dcca0"
+        )
+        assert getattr(model_manager, "_MODEL_SHA256", None) == {
+            "htdemucs.onnx": (
+                "be6fa125c457bc4fcdba43b0506270b5e"
+                "d2113872748e8163de817f418db17bb"
+            ),
+            "htdemucs.onnx.data": (
+                "e523708037d55151ac03feae48c9dbea"
+                "b9908c086ed8e655e40b70dfaa66a3b8"
+            ),
+            "htdemucs_6s.onnx": (
+                "cd881678a816731121d476c83305663a"
+                "343b40b5e2c4e12b200ed220ba19808e"
+            ),
+            "htdemucs_6s.onnx.data": (
+                "3eae380175adb9112c8ea8d105730770"
+                "2dca09a82c2ede230897a0976c9a5461"
+            ),
+        }
+
+    def test_beat_model_url_and_sha256_are_commit_pinned(self):
+        url = getattr(model_manager, "_BEAT_THIS_URL", "")
+        assert "07ab790a9ec2eda8093d52d249e3ec4f0510ee72" in url
+        assert "refs/heads" not in url
+        assert getattr(model_manager, "_BEAT_THIS_SHA256", None) == (
+            "c5c1466e08abdb03fdeb50668a06f244"
+            "b787d564c212490482231a9cfbe9ccbd"
+        )
+
 
 class TestDownloadFile:
     """Exercise the atomic streaming download (previously untested)."""
 
-    def test_downloads_to_final_path_via_partial(self, tmp_dir):
-        dl = ModelDownloader("beat_this", tmp_dir,
-                             url="http://x/m.onnx", file_name="m.onnx")
+    def test_downloads_to_final_path_after_sha256_verification(self, tmp_dir):
+        body = b"onnx-bytes" * 5000
+        expected_sha256 = hashlib.sha256(body).hexdigest()
+        dl = ModelDownloader(
+            "beat_this",
+            tmp_dir,
+            url="http://x/m.onnx",
+            file_name="m.onnx",
+            expected_sha256=expected_sha256,
+        )
         os.makedirs(tmp_dir, exist_ok=True)
         dest = os.path.join(tmp_dir, "m.onnx")
-        body = b"onnx-bytes" * 5000
+        real_replace = os.replace
+        publications = []
 
-        with patch("src.model_manager.urllib.request.urlopen",
-                   return_value=_FakeResponse(body)):
-            dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
+        def publish(part, final):
+            assert part == dest + ".part"
+            assert not os.path.exists(final)
+            assert open(part, "rb").read() == body
+            publications.append((part, final))
+            real_replace(part, final)
 
+        with (
+            patch(
+                "src.model_manager.urllib.request.urlopen",
+                return_value=_FakeResponse(body),
+            ),
+            patch("src.model_manager.os.replace", side_effect=publish),
+        ):
+            dl._download_file(
+                "http://x/m.onnx",
+                dest,
+                lambda d, t: None,
+                expected_sha256=expected_sha256,
+            )
+
+        assert publications == [(dest + ".part", dest)]
         assert os.path.isfile(dest)
         assert open(dest, "rb").read() == body
-        # The .partial scratch file must not survive a success.
-        assert not os.path.exists(dest + ".partial")
+        assert not os.path.exists(dest + ".part")
         assert dl._current_partial_path is None
+
+    def test_sha256_mismatch_removes_part_and_never_publishes(self, tmp_dir):
+        body = b"corrupt-model"
+        dl = ModelDownloader(
+            "beat_this",
+            tmp_dir,
+            url="http://x/m.onnx",
+            file_name="m.onnx",
+            expected_sha256="0" * 64,
+        )
+        dest = os.path.join(tmp_dir, "m.onnx")
+        errors = []
+        completed = []
+        dl.error.connect(errors.append)
+        dl.download_complete.connect(completed.append)
+
+        with patch(
+            "src.model_manager.urllib.request.urlopen",
+            return_value=_FakeResponse(body),
+        ):
+            dl.run()
+
+        assert errors and "SHA-256" in errors[0]
+        assert hashlib.sha256(body).hexdigest() in errors[0]
+        assert completed == []
+        assert not os.path.exists(dest)
+        assert not os.path.exists(dest + ".part")
 
     def test_incomplete_download_raises_and_leaves_no_final_file(self, tmp_dir):
         """Server promises more bytes than it delivers -> error, and the
@@ -155,8 +242,7 @@ class TestDownloadFile:
         assert not os.path.exists(dest)
 
     def test_run_cleans_up_partial_on_error(self, tmp_dir):
-        """A mid-stream failure must leave neither the final nor the
-        .partial file, and must surface via the error signal."""
+        """A mid-stream failure leaves neither final nor .part file."""
         dl = ModelDownloader("beat_this", tmp_dir,
                              url="http://x/m.onnx", file_name="m.onnx")
         dest = os.path.join(tmp_dir, "models", "m.onnx")
@@ -171,7 +257,7 @@ class TestDownloadFile:
 
         assert errors and "connection reset" in errors[0]
         assert not os.path.exists(dest)
-        assert not os.path.exists(dest + ".partial")
+        assert not os.path.exists(dest + ".part")
 
     def test_cancel_mid_stream_stops_and_leaves_no_final_file(self, tmp_dir):
         dl = ModelDownloader("beat_this", tmp_dir,
@@ -189,6 +275,7 @@ class TestDownloadFile:
                                   _cancel_after_first_chunk)
 
         assert not os.path.exists(dest)
+        assert not os.path.exists(dest + ".part")
 
     def test_stale_partial_is_removed_before_new_download(self, tmp_dir):
         dl = ModelDownloader("beat_this", tmp_dir,
@@ -196,7 +283,7 @@ class TestDownloadFile:
         os.makedirs(tmp_dir, exist_ok=True)
         dest = os.path.join(tmp_dir, "m.onnx")
         # Leave a stale partial from a hypothetical previous run.
-        with open(dest + ".partial", "wb") as f:
+        with open(dest + ".part", "wb") as f:
             f.write(b"garbage-prefix")
 
         with patch("src.model_manager.urllib.request.urlopen",
@@ -204,6 +291,7 @@ class TestDownloadFile:
             dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
 
         assert open(dest, "rb").read() == b"fresh-bytes"
+        assert not os.path.exists(dest + ".part")
 
     def test_full_multi_artifact_download_completes(self, tmp_dir):
         """The two-artifact htdemucs path renames both files and emits
@@ -212,14 +300,27 @@ class TestDownloadFile:
         dl = ModelDownloader("htdemucs", manager_dir)
         done = []
         dl.download_complete.connect(lambda p: done.append(p))
+        body = b"data" * 100
+        fake_hashes = {
+            name: hashlib.sha256(body).hexdigest()
+            for name in _MODEL_FILES["htdemucs"]
+        }
 
-        with patch("src.model_manager.urllib.request.urlopen",
-                   side_effect=lambda *a, **k: _FakeResponse(b"data" * 100)):
+        with (
+            patch(
+                "src.model_manager.urllib.request.urlopen",
+                side_effect=lambda *a, **k: _FakeResponse(body),
+            ),
+            patch.dict(
+                "src.model_manager._MODEL_SHA256",
+                fake_hashes,
+            ),
+        ):
             dl.run()
 
         assert done and done[0].endswith("htdemucs.onnx")
         for fname in _MODEL_FILES["htdemucs"]:
             assert os.path.isfile(os.path.join(manager_dir, fname))
             assert not os.path.exists(
-                os.path.join(manager_dir, fname + ".partial")
+                os.path.join(manager_dir, fname + ".part")
             )
