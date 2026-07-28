@@ -4,6 +4,9 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
+Latest stable release: **v2.5.0**. The current `main` line targets
+**v2.6.0**, which is not released yet.
+
 ## Download
 
 **Microsoft Store (recommended):** [stemma on the Microsoft Store](https://apps.microsoft.com/detail/9p2w12l8f381)
@@ -15,17 +18,22 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 ### Requirements
 
 - Windows 10/11
-- NVIDIA GPU recommended (DirectML, falls back to CPU)
+- A DirectML-capable GPU is optional. The MDX two-stem mode reports whether
+  it selected DirectML or CPU fallback.
 
 ## Features
 
-- AI-powered stem separation: HTDemucs v4 (4-stem and 6-stem, CPU) and MDX-Net 2-stem (vocals + backing) that runs on the GPU via DirectML — seconds instead of minutes
-- ONNX Runtime inference with DirectML GPU acceleration where the model supports it, automatic CPU fallback otherwise (full multi-stem GPU is tracked in issue #125)
+- AI-powered stem separation: HTDemucs v4 (4-stem and 6-stem, CPU-only)
+  and MDX-Net 2-stem (vocals + backing), which uses DirectML when available
+  and explicitly reports CPU fallback
+- ONNX Runtime inference without PyTorch; DirectML support for HTDemucs
+  four/six-stem remains research in
+  [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
 - Multi-track player with per-stem mute/solo/volume controls
-- Audio post-processing: Wiener filter and soft gating for cleaner stems
+- Audio post-processing pipeline with Wiener filtering and soft gating
 - Real-time chord detection (major/minor) with Viterbi smoothing, updated 4×/s during playback
 - Automatic tempo and key detection; beat-synced metronome mode
-- High-accuracy beat/downbeat tracking via beat_this ONNX model (auto-downloaded)
+- Beat/downbeat tracking via the auto-downloaded beat_this ONNX model
 - Import from YouTube URL (bundled ffmpeg when available; otherwise ffmpeg on PATH)
 - Imports run in the background: the dialog closes as soon as separation starts, the library row shows live progress, and the app stays fully usable (multiple imports queue up)
 - Clear errors and progress when ONNX models download on first use; large-file warning before heavy imports
@@ -44,6 +52,10 @@ Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other
 
 ## Development Setup
 
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete setup,
+dependency-lock, validation, diagnostics, packaging, and contribution
+workflow.
+
 ```bash
 git clone https://github.com/cyanidesayonara/stemma.git
 cd stemma
@@ -61,16 +73,11 @@ python main.py
 ## Running Tests
 
 ```bash
-# Fast tests (~25 seconds, ~845 tests)
-pytest
-
-# Include ONNX inference tests (~20 seconds, needs model file)
-set STEMMA_TEST_SONG=path\to\song.mp3
-pytest -m slow
-
-# Include hardware playback test (~30 seconds, needs speakers)
-pytest -m hardware
+python -m pytest -m "not slow and not hardware"
 ```
+
+Slow-model and hardware commands are documented in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#testing).
 
 ## Keyboard Shortcuts
 
@@ -97,12 +104,19 @@ Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bi
 
 ## Project Documentation
 
-- **PROJECT.md** -- Full technical spec, module descriptions, and roadmap
-- **AGENTS.md** -- AI coding agent context (cross-tool standard)
-- **CHANGELOG.md** -- Development history
-- **docs/privacy-policy.md** -- Store privacy policy (Markdown)
-- **docs/privacy-policy-plain.txt** -- Same policy as plain text (Partner Center paste)
-- **assets/store_listing/** -- Store listing PNGs (poster/box: main + arpeggio SVGs; tiny icon: `icon_256.png`); see `scripts/generate_store_listing_assets.py`
+- [PROJECT.md](PROJECT.md) -- architecture and technical reference
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) -- setup, testing, lint,
+  diagnostics, packaging, and contribution workflow
+- [docs/ROADMAP.md](docs/ROADMAP.md) -- short release roadmap backed by
+  live GitHub issues
+- [CHANGELOG.md](CHANGELOG.md) -- shipped release notes
+- [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) -- historical
+  development-session record
+- [AGENTS.md](AGENTS.md) -- binding guidance for coding agents
+- [docs/store-listing.md](docs/store-listing.md) and
+  [docs/store-release-pipeline.md](docs/store-release-pipeline.md) --
+  Store copy and release operations
+- [docs/privacy-policy.md](docs/privacy-policy.md) -- Store privacy policy
 
 ## License
 

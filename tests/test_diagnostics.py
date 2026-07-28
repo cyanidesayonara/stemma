@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 
 _DIAGNOSTICS = {
-    "stemma_version": "2.2.0",
+    "stemma_version": "2.6.0",
     "onnxruntime_version": "1.24.4",
     "available_providers": [
         "DmlExecutionProvider",
@@ -29,7 +29,7 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
     diagnostics = collect_diagnostics()
 
     assert diagnostics == {
-        "stemma_version": "2.2.0",
+        "stemma_version": "2.6.0",
         "onnxruntime_version": "1.24.4",
         "available_providers": [
             "DmlExecutionProvider",
@@ -42,7 +42,7 @@ def test_format_diagnostics_is_human_readable():
     from src.diagnostics import format_diagnostics
 
     output = format_diagnostics({
-        "stemma_version": "2.2.0",
+        "stemma_version": "2.6.0",
         "onnxruntime_version": "1.24.4",
         "available_providers": [
             "DmlExecutionProvider",
@@ -51,7 +51,7 @@ def test_format_diagnostics_is_human_readable():
     })
 
     assert output.splitlines() == [
-        "stemma version: 2.2.0",
+        "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
@@ -90,7 +90,7 @@ def test_diagnostics_file_is_atomic_utf8_and_returns_success(
 
     assert result == 0
     assert output.read_text(encoding="utf-8").splitlines() == [
-        "stemma version: 2.2.0",
+        "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",

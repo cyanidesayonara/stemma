@@ -1,5 +1,5 @@
 # Regenerate on Windows with Python 3.12:
-# .venv\Scripts\python.exe -m piptools compile --allow-unsafe --generate-hashes --output-file=requirements-release.txt requirements-release.in
+# See docs/DEVELOPMENT.md for the canonical pip-compile command.
 -r requirements.txt
 
 # Release validation and packaging.

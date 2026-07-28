@@ -3,9 +3,8 @@
 Runs a UVR MDX-Net model to split a song into a primary stem and its
 complement (e.g. Instrumental + Vocals). Unlike the HTDemucs export,
 MDX-Net ONNX graphs initialize and run on the DirectML execution
-provider, so this path is GPU-accelerated on any DX12 device (~45x
-faster than CPU on an RTX 4070 Ti; a 4-minute song separates in
-seconds instead of minutes).
+provider when supported. Session creation falls back to CPU when needed,
+and separation progress reports the selected provider.
 
 The model operates on spectrogram chunks:
     input  [1, 4, dim_f, dim_t]  -- (L.re, L.im, R.re, R.im) x freq x time
