@@ -26,12 +26,17 @@ import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
 from src.onnx_session import create_onnx_session
+from src.separation_state import (
+    EXPECTED_STEMS,
+    clear_completion_marker,
+    write_completion_marker,
+)
 
 
 # Stem names for each model variant.
 # HTDemucs natively outputs tensors in this exact order: 0=drums, 1=bass, etc.
-STEMS_4 = ("drums", "bass", "other", "vocals")
-STEMS_6 = ("drums", "bass", "other", "vocals", "guitar", "piano")
+STEMS_4 = EXPECTED_STEMS["htdemucs"]
+STEMS_6 = EXPECTED_STEMS["htdemucs_6s"]
 
 # HTDemucs expects audio at this sample rate.
 SAMPLE_RATE = 44100
@@ -126,6 +131,11 @@ class SeparatorWorker(QThread):
     def stems(self) -> tuple[str, ...]:
         """Return the stem names for the active model variant."""
         return STEMS_6 if self.is_6_stem else STEMS_4
+
+    @property
+    def model_key(self) -> str:
+        """Return the persisted model key for this worker."""
+        return "htdemucs_6s" if self.is_6_stem else "htdemucs"
 
     def cancel(self) -> None:
         """Request cancellation of the running separation."""
@@ -457,6 +467,7 @@ class SeparatorWorker(QThread):
             Mapping of stem name to file path.
         """
         os.makedirs(self.output_dir, exist_ok=True)
+        clear_completion_marker(self.output_dir)
         result_files = {}
 
         for i, stem_name in enumerate(self.stems):
@@ -466,4 +477,5 @@ class SeparatorWorker(QThread):
             sf.write(out_path, stem_audio, SAMPLE_RATE, subtype="PCM_16")
             result_files[stem_name] = out_path
 
+        write_completion_marker(self.output_dir, self.model_key)
         return result_files

@@ -1,5 +1,6 @@
 """Tests for the stem separation engine."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -331,6 +332,15 @@ class TestSeparatorSaveStems:
             audio, sr = sf.read(result[stem_name])
             assert sr == 44100
             assert audio.shape == (44100, 2)
+        marker = os.path.join(worker.output_dir, ".separation-complete.json")
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state == {
+            "version": 1,
+            "model": "htdemucs",
+            "stems": list(STEMS_4),
+        }
+        assert not os.path.exists(marker + ".tmp")
 
     def test_saves_6_stems(self, tmp_dir, sample_audio_path):
         worker = SeparatorWorker(
@@ -346,6 +356,45 @@ class TestSeparatorSaveStems:
         for stem_name in STEMS_6:
             assert stem_name in result
             assert os.path.isfile(result[stem_name])
+        marker = os.path.join(worker.output_dir, ".separation-complete.json")
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state == {
+            "version": 1,
+            "model": "htdemucs_6s",
+            "stems": list(STEMS_6),
+        }
+
+    def test_failed_stem_write_removes_stale_completion_marker(
+        self, tmp_dir, sample_audio_path, monkeypatch,
+    ):
+        output_dir = os.path.join(tmp_dir, "output")
+        os.makedirs(output_dir)
+        marker = os.path.join(output_dir, ".separation-complete.json")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("{}")
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=output_dir,
+            model_path="fake_model.onnx",
+        )
+        separated = np.zeros((4, 2, 100), dtype=np.float32)
+        real_write = sf.write
+        calls = 0
+
+        def fail_second_write(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("write failed")
+            return real_write(*args, **kwargs)
+
+        monkeypatch.setattr("src.separator.sf.write", fail_second_write)
+
+        with pytest.raises(OSError, match="write failed"):
+            worker._save_stems(separated)
+
+        assert not os.path.exists(marker)
 
 
 class TestMemoryEstimation:

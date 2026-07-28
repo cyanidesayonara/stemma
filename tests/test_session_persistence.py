@@ -2,11 +2,13 @@
 
 import json
 import os
+import threading
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QThread, Qt, Signal
 from PySide6.QtWidgets import QApplication
 
 from src.library import SongLibrary
@@ -68,6 +70,26 @@ def _make_song_with_stems(library, tmp_path, title="Test Song"):
         )
     library.update_song(song.id, model_used="htdemucs")
     return song
+
+
+class _FakeBeatModelDownloader(QThread):
+    """Cancellable downloader thread with the production signal contract."""
+
+    download_complete = Signal(str)
+    error = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+        self.started_running = threading.Event()
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        self.started_running.set()
+        while not self.cancelled:
+            self.msleep(1)
 
 
 # -----------------------------------------------------------------------
@@ -188,6 +210,41 @@ class TestRestoreLoopState:
         assert player.loop_a is None
         assert player.loop_b is None
         assert player.looping is False
+
+
+class TestPlayerControlsShutdown:
+    """Closing controls must drain an active beat-model download."""
+
+    def test_shutdown_cancels_download_and_blocks_late_callbacks(
+        self, controls, player, qapp,
+    ):
+        downloader = _FakeBeatModelDownloader()
+        manager = MagicMock()
+        manager.beat_model_path.return_value = "beat_this.onnx"
+        manager.is_beat_model_downloaded.return_value = False
+        manager.download_beat_model.return_value = downloader
+        player._stems = {
+            "vocals": np.zeros((100, 2), dtype=np.float32),
+        }
+        controls.set_model_manager(manager)
+
+        with patch.object(controls, "_run_detection") as run_detection:
+            controls.start_detection(1.0, 2.0)
+            assert downloader.started_running.wait(timeout=1.0)
+            try:
+                controls.shutdown()
+                downloader.download_complete.emit("beat_this.onnx")
+                downloader.error.emit("late failure")
+                qapp.processEvents()
+
+                assert downloader.cancelled
+                assert not downloader.isRunning()
+                assert controls._beat_model_downloader is None
+                assert controls._pending_detect_args is None
+                run_detection.assert_not_called()
+            finally:
+                downloader.cancel()
+                downloader.wait(1000)
 
 
 # -----------------------------------------------------------------------

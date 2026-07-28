@@ -534,11 +534,15 @@ def detect_bpm_and_key(
         else:
             mono[:arr.shape[0]] += arr
 
-    # Slice to A-B region if specified.
+    # Slice to A-B region if specified. Keep the exact frame-derived offset
+    # so detector timestamps can be converted back to absolute song time.
+    slice_start_sec = 0.0
     if start_sec is not None and end_sec is not None and end_sec > start_sec:
         s = int(start_sec * sample_rate)
         e = int(end_sec * sample_rate)
-        mono = mono[max(0, s):min(len(mono), e)]
+        slice_start = max(0, s)
+        slice_start_sec = slice_start / sample_rate
+        mono = mono[slice_start:min(len(mono), e)]
 
     # Normalise to prevent clipping.
     peak = np.max(np.abs(mono))
@@ -580,6 +584,16 @@ def detect_bpm_and_key(
 
     # Chord detection.
     chord_sequence = _detect_chords(mono, sample_rate)
+
+    if slice_start_sec:
+        beat_times = [time + slice_start_sec for time in beat_times]
+        downbeat_times = [
+            time + slice_start_sec for time in downbeat_times
+        ]
+        chord_sequence = [
+            (time + slice_start_sec, chord)
+            for time, chord in chord_sequence
+        ]
 
     return DetectionResult(
         bpm=bpm,

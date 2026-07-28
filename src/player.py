@@ -1954,7 +1954,32 @@ class MultiTrackPlayer(QObject):
                     if (self._count_in_enabled
                             and self._count_in_on_repeats):
                         self._arm_count_in()
-                        break
+                        if self._count_in_remaining > 0:
+                            beat_interval = int(
+                                60.0 / self._metronome_bpm
+                                * self._sample_rate
+                            )
+                            ci_frames = min(
+                                remaining,
+                                self._count_in_remaining,
+                            )
+                            click_len = len(self._click_buf)
+                            count_in_output = outdata[
+                                buf_offset:buf_offset + ci_frames
+                            ]
+                            self._mix_count_in(
+                                count_in_output,
+                                ci_frames,
+                                beat_interval,
+                                click_len,
+                            )
+                            self._count_in_remaining -= ci_frames
+                            buf_offset += ci_frames
+                            remaining -= ci_frames
+                            if self._count_in_remaining <= 0:
+                                self._count_in_remaining = 0
+                                self._count_in_beat = 0
+                                self._metronome_phase = 0
                 else:
                     break
 

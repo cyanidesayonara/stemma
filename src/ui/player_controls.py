@@ -37,6 +37,7 @@ from src.player import (
     SPEED_PRESETS,
     MultiTrackPlayer,
 )
+from src.qt_signal_utils import safe_disconnect
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.styles import (
@@ -664,6 +665,7 @@ class PlayerControls(QWidget):
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
         self._pending_detect_args: tuple | None = None
+        self._closing = False
         self._key_conf: str = ""
         self._bpm_conf: str = ""
         self._detected_key_raw: str = ""
@@ -696,6 +698,17 @@ class PlayerControls(QWidget):
         running parentless QThread to be reaped at interpreter exit,
         crashing with 'QThread: Destroyed while thread is still running'.
         """
+        self._closing = True
+        self._pending_detect_args = None
+        downloader = self._beat_model_downloader
+        self._beat_model_downloader = None
+        if downloader is not None:
+            safe_disconnect(downloader.download_complete)
+            safe_disconnect(downloader.error)
+            downloader.cancel()
+            if downloader.isRunning():
+                downloader.wait()
+
         self._pitch_debounce.stop()
         self._speed_debounce.stop()
         self._cleanup_peak_thread()
@@ -1947,7 +1960,7 @@ class PlayerControls(QWidget):
         If the beat_this ONNX model has not been downloaded yet, it is
         fetched first and detection resumes on completion.
         """
-        if not self._player.stems:
+        if self._closing or not self._player.stems:
             return
         self._detach_detection_worker()
 
@@ -2004,6 +2017,8 @@ class PlayerControls(QWidget):
         dl.start()
 
     def _on_beat_model_ready(self, path: str) -> None:
+        if self._closing:
+            return
         self._beat_model_downloader = None
         self._beat_model_path = path
         args = self._pending_detect_args or (None, None)
@@ -2011,6 +2026,8 @@ class PlayerControls(QWidget):
         self._run_detection(*args)
 
     def _on_beat_model_error(self, msg: str) -> None:
+        if self._closing:
+            return
         self._beat_model_downloader = None
         # Fall through without the model — librosa fallback.
         self._beat_model_path = None
@@ -2024,6 +2041,8 @@ class PlayerControls(QWidget):
         end_sec: float | None = None,
     ) -> None:
         """Launch the DetectionWorker with the current model path."""
+        if self._closing:
+            return
         dim = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         dim_style = (
             f"background: {dim['surface0']}; "

@@ -10,6 +10,7 @@ overlap pipeline must reconstruct the input waveform almost exactly.
 That validates the packing/windowing math independently of any model.
 """
 
+import json
 import os
 
 import numpy as np
@@ -162,6 +163,14 @@ class TestFullRun:
         assert set(results) == {"vocals", "other"}
         for path in results.values():
             assert os.path.isfile(path)
+        marker = os.path.join(worker.output_dir, ".separation-complete.json")
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state == {
+            "version": 1,
+            "model": "mdx_inst_hq3",
+            "stems": ["vocals", "other"],
+        }
         # Identity model: primary (Instrumental -> other.wav) carries the
         # mix; secondary (vocals) = mix - primary*compensate is small.
         other, _ = sf.read(results["other"], always_2d=True)
@@ -193,6 +202,36 @@ class TestFullRun:
         worker.error.connect(lambda m: errors.append(m))
         worker.run()
         assert errors and "not found" in errors[0]
+
+    def test_failed_stem_write_removes_stale_completion_marker(
+        self, app, tmp_path, monkeypatch,
+    ):
+        worker, audio = _make_worker(
+            tmp_path, _IdentitySession(), seconds=0.1,
+        )
+        os.makedirs(worker.output_dir)
+        marker = os.path.join(
+            worker.output_dir,
+            ".separation-complete.json",
+        )
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("{}")
+        real_write = sf.write
+        calls = 0
+
+        def fail_second_write(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("write failed")
+            return real_write(*args, **kwargs)
+
+        monkeypatch.setattr("src.mdx_separator.sf.write", fail_second_write)
+
+        with pytest.raises(OSError, match="write failed"):
+            worker._save(audio, np.zeros_like(audio))
+
+        assert not os.path.exists(marker)
 
 
 class TestDownloadVerification:

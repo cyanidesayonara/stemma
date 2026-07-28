@@ -308,6 +308,74 @@ class TestDetectBpmAndKey:
         )
         assert 80 < result.bpm < 160
 
+    def test_ab_region_timestamps_use_actual_absolute_slice_start(
+        self, monkeypatch,
+    ):
+        """Region-relative detector times are shifted into song time."""
+        sample_rate = 10
+        stereo = np.ones((100, 2), dtype=np.float32)
+        monkeypatch.setattr(
+            "src.beat_detector._detect_beats_librosa",
+            lambda *_args: (
+                [0.25, 0.75, 1.25, 1.75],
+                [0.25, 1.25],
+                120.0,
+            ),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._detect_key",
+            lambda *_args: ("C major", 0.9),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._detect_chords",
+            lambda *_args: [(0.5, "C"), (1.5, "G")],
+        )
+
+        result = detect_bpm_and_key(
+            {"mix": stereo},
+            sample_rate,
+            start_sec=2.75,
+            end_sec=8.0,
+        )
+
+        # int(2.75 * 10) selects frame 27, so the actual offset is 2.7 s.
+        assert result.beat_times == pytest.approx([2.95, 3.45, 3.95, 4.45])
+        assert result.downbeat_times == pytest.approx([2.95, 3.95])
+        assert [time for time, _ in result.chord_sequence] == pytest.approx(
+            [3.2, 4.2]
+        )
+        assert result.bpm == 120.0
+        assert result.key == "C major"
+
+    def test_ab_region_negative_start_clamps_timestamp_offset(
+        self, monkeypatch,
+    ):
+        """A negative requested start uses the actual zero slice boundary."""
+        stereo = np.ones((60, 2), dtype=np.float32)
+        monkeypatch.setattr(
+            "src.beat_detector._detect_beats_librosa",
+            lambda *_args: ([0.5], [0.5], 100.0),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._detect_key",
+            lambda *_args: ("", 0.0),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._detect_chords",
+            lambda *_args: [(0.75, "Am")],
+        )
+
+        result = detect_bpm_and_key(
+            {"mix": stereo},
+            10,
+            start_sec=-1.0,
+            end_sec=4.0,
+        )
+
+        assert result.beat_times == [0.5]
+        assert result.downbeat_times == [0.5]
+        assert result.chord_sequence == [(0.75, "Am")]
+
     def test_ab_region_too_short(self):
         """A-B region shorter than _MIN_DURATION returns empty result."""
         mono = _click_track(120.0, duration=10.0)

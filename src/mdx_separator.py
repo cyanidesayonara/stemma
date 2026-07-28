@@ -33,6 +33,10 @@ import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
 from src.onnx_session import create_onnx_session, session_provider_label
+from src.separation_state import (
+    clear_completion_marker,
+    write_completion_marker,
+)
 
 SAMPLE_RATE = 44100
 
@@ -106,6 +110,7 @@ class MdxSeparatorWorker(QThread):
         self.input_path = input_path
         self.output_dir = output_dir
         self.model_path = model_path
+        self.model_key = model_key
         self.params = MDX_MODELS[model_key]
         self._is_cancelled = False
 
@@ -285,6 +290,7 @@ class MdxSeparatorWorker(QThread):
         self, primary: np.ndarray, secondary: np.ndarray,
     ) -> dict[str, str]:
         os.makedirs(self.output_dir, exist_ok=True)
+        clear_completion_marker(self.output_dir)
         primary_file, secondary_file = PRIMARY_TO_FILES[
             self.params["primary_stem"]
         ]
@@ -293,4 +299,5 @@ class MdxSeparatorWorker(QThread):
             path = os.path.join(self.output_dir, f"{name}.wav")
             sf.write(path, data.T, SAMPLE_RATE, subtype="PCM_16")
             result[name] = path
+        write_completion_marker(self.output_dir, self.model_key)
         return result

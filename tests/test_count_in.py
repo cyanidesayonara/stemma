@@ -267,6 +267,37 @@ class TestCountInLoopRepeat:
 
         assert loop_player._count_in_remaining > 0
 
+    def test_repeat_count_in_mixes_into_same_callback_tail(
+        self, loop_player,
+    ):
+        """The callback tail after loop B immediately carries count-in audio."""
+        loop_player.set_count_in_enabled(True)
+        loop_player.set_count_in_on_repeats(True)
+        loop_player.set_metronome_bpm(120.0)
+        loop_player.set_metronome_volume(1.0)
+        loop_player._is_playing = True
+
+        frames_before_wrap = 100
+        callback_frames = 512
+        loop_player._current_frame = (
+            loop_player._loop_b_frame - frames_before_wrap
+        )
+        outdata = np.zeros((callback_frames, 2), dtype=np.float32)
+
+        loop_player._audio_callback(
+            outdata,
+            callback_frames,
+            {},
+            sd.CallbackFlags(),
+        )
+
+        tail_frames = callback_frames - frames_before_wrap
+        beat_interval = int(60.0 / 120.0 * 44100)
+        initial_count_in = loop_player.count_in_beats * beat_interval
+        assert np.max(np.abs(outdata[frames_before_wrap:])) > 0.01
+        assert loop_player._count_in_remaining == initial_count_in - tail_frames
+        assert loop_player.is_playing
+
     def test_no_repeat_count_in_when_disabled(self, loop_player):
         """With on_repeats disabled, loop wrap should not arm count-in."""
         loop_player.set_count_in_enabled(True)

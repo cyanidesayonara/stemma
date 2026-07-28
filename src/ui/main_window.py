@@ -58,6 +58,7 @@ from src.player import (
     PITCH_MIN_SEMITONES,
     MultiTrackPlayer,
 )
+from src.separation_state import separation_is_complete
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -1404,18 +1405,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _prune_incomplete_songs(self) -> None:
-        """Remove library rows whose song dir contains no stems at all.
+        """Remove library rows whose expected separation is incomplete.
 
-        A row without stems can only come from a separation that never
-        finished (app closed or crashed mid-job); keeping it would show
-        an unplayable ghost entry.
+        New jobs require valid atomic completion state. Markerless songs
+        from older versions remain compatible when every stem expected by
+        their persisted model is present.
         """
         for song in list(self._library.songs):
-            has_stems = any(
-                os.path.isfile(os.path.join(song.stems_path, f"{name}.wav"))
-                for name in ALL_STEM_NAMES
-            )
-            if not has_stems:
+            if not separation_is_complete(
+                song.stems_path,
+                song.model_used,
+            ):
                 try:
                     self._library.remove_song(song.id)
                 except KeyError:

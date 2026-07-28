@@ -13,6 +13,9 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 
 
+_EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
+
+
 @dataclass
 class Song:
     """Metadata for a single imported song."""
@@ -52,6 +55,7 @@ class SongLibrary:
         self._songs: list[Song] = []
 
         os.makedirs(self._songs_dir, exist_ok=True)
+        self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
 
         if os.path.isfile(self._json_path):
             self._load()
@@ -69,6 +73,22 @@ class SongLibrary:
             if song.id == song_id:
                 return song
         return None
+
+    def _is_safe_song_dir(self, path: str) -> bool:
+        """Return whether *path* resolves below this library's songs root."""
+        try:
+            candidate = os.path.normcase(os.path.realpath(path))
+            common = os.path.commonpath([self._songs_root, candidate])
+        except (OSError, TypeError, ValueError):
+            return False
+        return candidate != self._songs_root and common == self._songs_root
+
+    def _require_safe_song_dir(self, path: str) -> None:
+        """Reject paths that could make a destructive operation escape."""
+        if not self._is_safe_song_dir(path):
+            raise ValueError(
+                f"Song directory is outside the library songs root: {path}"
+            )
 
     def add_song(
         self,
@@ -101,7 +121,7 @@ class SongLibrary:
             internal_path = os.path.join(song_dir, f"original{ext}")
             shutil.copy2(original_path, internal_path)
         except OSError:
-            if os.path.isdir(song_dir):
+            if self._is_safe_song_dir(song_dir) and os.path.isdir(song_dir):
                 shutil.rmtree(song_dir, ignore_errors=True)
             raise
 
@@ -119,7 +139,8 @@ class SongLibrary:
             self._save()
         except OSError:
             self._songs = [s for s in self._songs if s.id != song_id]
-            shutil.rmtree(song_dir, ignore_errors=True)
+            if self._is_safe_song_dir(song_dir):
+                shutil.rmtree(song_dir, ignore_errors=True)
             raise
         return song
 
@@ -133,11 +154,29 @@ class SongLibrary:
         if song is None:
             raise KeyError(f"Song '{song_id}' not found")
 
+        self._require_safe_song_dir(song.stems_path)
+        song_index = self._songs.index(song)
+        staged_dir = None
         if os.path.isdir(song.stems_path):
-            shutil.rmtree(song.stems_path)
+            staged_dir = os.path.join(
+                self._songs_dir,
+                f".remove-{song.id}-{uuid.uuid4().hex}",
+            )
+            self._require_safe_song_dir(staged_dir)
+            os.replace(song.stems_path, staged_dir)
 
-        self._songs = [s for s in self._songs if s.id != song_id]
-        self._save()
+        self._songs.pop(song_index)
+        try:
+            self._save()
+        except Exception:
+            self._songs.insert(song_index, song)
+            if staged_dir is not None:
+                os.replace(staged_dir, song.stems_path)
+            raise
+
+        if staged_dir is not None:
+            self._require_safe_song_dir(staged_dir)
+            shutil.rmtree(staged_dir)
 
     def update_song(self, song_id: str, **fields: str) -> Song:
         """Update one or more fields on an existing song.
@@ -155,12 +194,21 @@ class SongLibrary:
         if song is None:
             raise KeyError(f"Song '{song_id}' not found")
 
-        fields.pop("id", None)
-        for key, value in fields.items():
-            if hasattr(song, key):
-                setattr(song, key, value)
+        updates = {
+            key: value
+            for key, value in fields.items()
+            if key in _EDITABLE_METADATA_FIELDS
+        }
+        previous = {key: getattr(song, key) for key in updates}
+        for key, value in updates.items():
+            setattr(song, key, value)
 
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            for key, value in previous.items():
+                setattr(song, key, value)
+            raise
         return song
 
     # ------------------------------------------------------------------
@@ -178,7 +226,11 @@ class SongLibrary:
         try:
             with open(self._json_path, encoding="utf-8") as f:
                 data = json.load(f)
-            self._songs = [Song.from_dict(entry) for entry in data]
+            loaded = [Song.from_dict(entry) for entry in data]
+            self._songs = [
+                song for song in loaded
+                if self._is_safe_song_dir(song.stems_path)
+            ]
         except (
             json.JSONDecodeError, TypeError, KeyError,
             OSError, UnicodeDecodeError, ValueError,
@@ -207,7 +259,10 @@ class SongLibrary:
             return recovered
         for song_id in entries:
             song_dir = os.path.join(self._songs_dir, song_id)
-            if not os.path.isdir(song_dir):
+            if (
+                not self._is_safe_song_dir(song_dir)
+                or not os.path.isdir(song_dir)
+            ):
                 continue
             original = None
             for fname in os.listdir(song_dir):
