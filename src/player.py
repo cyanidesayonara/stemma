@@ -42,6 +42,51 @@ PITCH_MAX_SEMITONES = 7
 RECORDING_STEM_PREFIX = "recording_take"
 
 
+def read_stem_files(
+    stem_paths: dict[str, str],
+) -> tuple[dict[str, np.ndarray], int]:
+    """Read stem WAV files without mutating a player.
+
+    The complete mapping is returned only after every file has loaded and
+    all sample rates match, so callers can apply the result atomically.
+    """
+    stems: dict[str, np.ndarray] = {}
+    sample_rate = 0
+
+    for name, path in stem_paths.items():
+        data, stem_sample_rate = sf.read(
+            path, always_2d=True, dtype="float32",
+        )
+        if sample_rate == 0:
+            sample_rate = stem_sample_rate
+        elif stem_sample_rate != sample_rate:
+            raise ValueError(f"Sample rate mismatch in stem '{name}'")
+
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)
+        stems[name] = data
+
+    return stems, sample_rate
+
+
+class StemLoadWorker(QThread):
+    """Read a complete set of stem files away from the GUI thread."""
+
+    completed = Signal(dict, int)
+    error = Signal(str)
+
+    def __init__(self, stem_paths: dict[str, str]) -> None:
+        super().__init__()
+        self._stem_paths = dict(stem_paths)
+
+    def run(self) -> None:
+        try:
+            stems, sample_rate = read_stem_files(self._stem_paths)
+            self.completed.emit(stems, sample_rate)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 def next_take_number(song_dir: str) -> int:
     """Return the next recording take number for *song_dir*."""
     existing = glob.glob(os.path.join(song_dir, f"{RECORDING_STEM_PREFIX}*.wav"))
@@ -956,28 +1001,21 @@ class MultiTrackPlayer(QObject):
         Args:
             stem_paths: Dictionary mapping stem names to file paths.
         """
+        stems, sample_rate = read_stem_files(stem_paths)
+        self.apply_loaded_stems(stems, sample_rate)
+
+    def apply_loaded_stems(
+        self,
+        stems: dict[str, np.ndarray],
+        sample_rate: int,
+    ) -> None:
+        """Atomically replace live player state with preloaded stem arrays."""
         self._reset_song_state()
-
-        max_frames = 0
-        sample_rate = 0
-
-        for name, path in stem_paths.items():
-            # read returns (samples, channels)
-            data, sr = sf.read(path, always_2d=True, dtype='float32')
-            if sample_rate == 0:
-                sample_rate = sr
-            elif sr != sample_rate:
-                raise ValueError(f"Sample rate mismatch in stem '{name}'")
-
-            # Force stereo if mono.
-            if data.shape[1] == 1:
-                data = np.repeat(data, 2, axis=1)
-
-            self._stems[name] = data
-            max_frames = max(max_frames, data.shape[0])
-
+        self._stems = dict(stems)
         self._sample_rate = sample_rate
-        self._total_frames = max_frames
+        self._total_frames = max(
+            (data.shape[0] for data in stems.values()), default=0,
+        )
         self._current_frame = 0
         self._original_stems = dict(self._stems)
         self._click_buf = self._generate_click(self._sample_rate)

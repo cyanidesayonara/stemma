@@ -650,9 +650,12 @@ class PlayerControls(QWidget):
         self._peaks_timer = QTimer(self)
         self._peaks_timer.setSingleShot(True)
         self._peaks_timer.setInterval(_PEAK_DEBOUNCE_MS)
-        self._peaks_timer.timeout.connect(self._do_recompute_peaks)
+        self._peaks_timer.timeout.connect(self._start_peak_computation)
 
         self._peak_future: Future | None = None
+        self._peak_future_generation: int | None = None
+        self._peak_generation = 0
+        self._peak_refresh_pending = False
         self._peak_poll_timer = QTimer(self)
         self._peak_poll_timer.setInterval(16)  # ~60fps poll
         self._peak_poll_timer.timeout.connect(self._poll_peak_future)
@@ -680,13 +683,19 @@ class PlayerControls(QWidget):
 
     def _cleanup_peak_thread(self) -> None:
         """Wait for any pending peak computation before destruction."""
+        self._peak_generation += 1
+        self._peak_refresh_pending = False
         self._peaks_timer.stop()
         self._peak_poll_timer.stop()
         if self._peak_future is not None and not self._peak_future.done():
             self._peak_future.result(timeout=2)
         self._peak_future = None
+        self._peak_future_generation = None
         if self._detection_worker is not None:
-            self._detection_worker.wait(2000)
+            safe_disconnect(self._detection_worker.completed)
+            safe_disconnect(self._detection_worker.error)
+            safe_disconnect(self._detection_worker.finished)
+            self._detection_worker.wait()
             self._detection_worker = None
 
     def shutdown(self) -> None:
@@ -714,7 +723,7 @@ class PlayerControls(QWidget):
         self._cleanup_peak_thread()
         # Join any orphaned detection workers still finishing up.
         for worker in list(self._orphaned_workers):
-            worker.wait(2000)
+            worker.wait()
         self._orphaned_workers.clear()
 
     def _setup_ui(self) -> None:
@@ -1327,11 +1336,14 @@ class PlayerControls(QWidget):
                 if name in saved_soloed:
                     row.set_soloed(True)
             self._do_recompute_peaks()
+        else:
+            self._do_recompute_peaks()
 
     def clear_song(self) -> None:
         """Return to the empty logo state."""
         self._detach_detection_worker()
         self.set_stem_names([])
+        self._hint_label.setText("Drop an audio file or use File > Import")
         self._waveform.set_loading(False)
         self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
         self._waveform.set_position(0.0)
@@ -1362,6 +1374,11 @@ class PlayerControls(QWidget):
         self._beat_nudge_spin.blockSignals(True)
         self._beat_nudge_spin.setValue(0)
         self._beat_nudge_spin.blockSignals(False)
+
+    def show_loading(self, title: str) -> None:
+        """Show an intentional empty-state message while stems load."""
+        self.clear_song()
+        self._hint_label.setText(f"Loading {title}...")
 
     def restore_stem_state(
         self,
@@ -1500,22 +1517,30 @@ class PlayerControls(QWidget):
         Rapid calls (e.g. dragging a volume slider) are batched so that
         only the final state triggers the expensive numpy computation.
         """
+        self._peak_generation += 1
         self._peaks_timer.start()
 
     def _do_recompute_peaks(self) -> None:
-        """Dispatch waveform peak computation to a background thread."""
+        """Invalidate peak work and dispatch an immediate recomputation."""
+        self._peak_generation += 1
+        self._start_peak_computation()
+
+    def _start_peak_computation(self) -> None:
+        """Dispatch peak computation for the current generation."""
         self._peaks_timer.stop()
+
+        if self._peak_future is not None and not self._peak_future.done():
+            self._peak_refresh_pending = True
+            return
+
         stems = self._player.stems
         if not stems:
+            self._peak_refresh_pending = False
             self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
             return
 
-        # If a previous computation is still running, let the debounce
-        # timer re-fire after the current one finishes.
-        if self._peak_future is not None and not self._peak_future.done():
-            self._peaks_timer.start()
-            return
-
+        self._peak_refresh_pending = False
+        self._peak_future_generation = self._peak_generation
         self._peak_future = _get_peak_pool().submit(
             _compute_peaks_bg,
             stems=stems,
@@ -1531,14 +1556,23 @@ class PlayerControls(QWidget):
             return
         self._peak_poll_timer.stop()
         future = self._peak_future
+        future_generation = self._peak_future_generation
         self._peak_future = None
-        if future.cancelled() or future.exception():
-            return
-        try:
-            main_peaks, stem_peaks = future.result()
-        except Exception:
-            return
-        self._on_peaks_computed(main_peaks, stem_peaks)
+        self._peak_future_generation = None
+        stale = future_generation != self._peak_generation
+        failed = future.cancelled() or future.exception() is not None
+        if not stale and not failed:
+            try:
+                main_peaks, stem_peaks = future.result()
+            except Exception:
+                failed = True
+            else:
+                self._on_peaks_computed(main_peaks, stem_peaks)
+
+        refresh = stale or self._peak_refresh_pending
+        self._peak_refresh_pending = False
+        if refresh:
+            self._start_peak_computation()
 
     def _on_peaks_computed(self, main_peaks: np.ndarray,
                            stem_peaks: dict) -> None:
