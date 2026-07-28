@@ -286,7 +286,6 @@ def build_lockup(dark: bool = True) -> str:
     gap = mw * 0.045
     # The path is drawn from a baseline at y=0 with negative-up glyphs;
     # shift so its bounding box starts at the origin before scaling.
-    from PySide6.QtGui import QFont, QPainterPath as _P  # noqa: F401
     # Recompute bounds to place the glyphs.
     import re as _re
     xs = [float(v) for v in _re.findall(r"-?\d+\.\d+", d)][0::2]
