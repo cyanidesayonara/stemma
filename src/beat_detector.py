@@ -16,6 +16,8 @@ import librosa
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
+from src.onnx_session import create_onnx_session
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -56,30 +58,6 @@ _BT_BORDER = 6          # overlap frames discarded at chunk boundaries
 _BEAT_THRESHOLD = 0.3
 _DOWNBEAT_THRESHOLD = 0.15  # Lower: downbeat activations are weaker
 _BEAT_MIN_DIST = 6          # ~120 ms at 50 fps
-
-
-def _create_onnx_session(model_path: str):
-    """Create an ONNX Runtime session with DML-first / CPU fallback."""
-    import onnxruntime as ort
-
-    opts = ort.SessionOptions()
-    available = set(ort.get_available_providers())
-
-    if "DmlExecutionProvider" in available:
-        try:
-            return ort.InferenceSession(
-                model_path,
-                sess_options=opts,
-                providers=["DmlExecutionProvider", "CPUExecutionProvider"],
-            )
-        except Exception:
-            pass
-
-    return ort.InferenceSession(
-        model_path,
-        sess_options=opts,
-        providers=["CPUExecutionProvider"],
-    )
 
 
 def _peak_pick(logits: np.ndarray, threshold: float,
@@ -184,7 +162,7 @@ def _detect_beats_onnx(
         audio_mono = librosa.resample(audio_mono, orig_sr=sr, target_sr=_BT_SR)
 
     spec = _bt_spectrogram(audio_mono)  # (frames, 128)
-    session = _create_onnx_session(model_path)
+    session = create_onnx_session(model_path)
     beat_logits, db_logits = _bt_chunked_inference(spec, session)
 
     beat_probs = _sigmoid(beat_logits)
@@ -556,11 +534,15 @@ def detect_bpm_and_key(
         else:
             mono[:arr.shape[0]] += arr
 
-    # Slice to A-B region if specified.
+    # Slice to A-B region if specified. Keep the exact frame-derived offset
+    # so detector timestamps can be converted back to absolute song time.
+    slice_start_sec = 0.0
     if start_sec is not None and end_sec is not None and end_sec > start_sec:
         s = int(start_sec * sample_rate)
         e = int(end_sec * sample_rate)
-        mono = mono[max(0, s):min(len(mono), e)]
+        slice_start = max(0, s)
+        slice_start_sec = slice_start / sample_rate
+        mono = mono[slice_start:min(len(mono), e)]
 
     # Normalise to prevent clipping.
     peak = np.max(np.abs(mono))
@@ -602,6 +584,16 @@ def detect_bpm_and_key(
 
     # Chord detection.
     chord_sequence = _detect_chords(mono, sample_rate)
+
+    if slice_start_sec:
+        beat_times = [time + slice_start_sec for time in beat_times]
+        downbeat_times = [
+            time + slice_start_sec for time in downbeat_times
+        ]
+        chord_sequence = [
+            (time + slice_start_sec, chord)
+            for time, chord in chord_sequence
+        ]
 
     return DetectionResult(
         bpm=bpm,

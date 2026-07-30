@@ -4,6 +4,10 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 
 **Personal-use tool. No cloud, no subscriptions, no command line needed.**
 
+Latest stable release: **v2.5.0**. The current source tree targets
+**v2.6.0**, which is not released. Release notes live in `CHANGELOG.md`;
+future scope lives in `docs/ROADMAP.md`.
+
 ---
 
 ## Concept
@@ -21,10 +25,10 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 |---|---|---|
 | **Name** | stemma (always lowercase) | |
 | **Platform** | Windows desktop only | No mobile/web for now |
-| **GPU** | NVIDIA RTX 4070 Ti | DirectML acceleration via ONNX Runtime |
-| **Stems** | 4-stem and 6-stem models | Both available per song |
+| **Acceleration** | DirectML when supported | MDX two-stem selects DirectML or reports CPU fallback; HTDemucs four/six-stem remains CPU-only |
+| **Stems** | 2-stem, 4-stem, and 6-stem models | Selected per import |
 | **Distribution** | Microsoft Store (primary); portable `stemma.zip` + `stemma.msix` on GitHub Releases | Models download on first run |
-| **Python** | 3.14 | All deps confirmed compatible (March 2026) |
+| **Python** | 3.14 local, 3.12 CI/release | See `docs/DEVELOPMENT.md` |
 
 ---
 
@@ -34,28 +38,29 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 |---|---|---|
 | **Language** | Python 3.14 | Rich audio ecosystem |
 | **GUI** | PySide6 (Qt 6) | Modern look, powerful widgets, LGPL |
-| **Inference** | ONNX Runtime + DirectML | Lean (~50MB), GPU-accelerated, no PyTorch bloat |
-| **Stem Models** | HTDemucs v4 ONNX | 4-stem + 6-stem, downloaded on first run (~80-300MB) |
-| **Audio Playback** | `sounddevice` + `soundfile` | Low-latency multi-track mixing via NumPy |
+| **Inference** | ONNX Runtime DirectML | No PyTorch; shared DirectML-first session setup with CPU fallback |
+| **Stem Models** | HTDemucs v4 and MDX-Net ONNX | Downloaded and checksum-verified on first use |
+| **Audio Playback** | `sounddevice` + `soundfile` | Callback-based multi-track mixing via NumPy |
 | **Audio Processing** | `numpy` | Efficient buffer manipulation |
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
-| **Packaging** | PyInstaller | One-folder (COLLECT) build shipped as `stemma.zip` + `stemma.msix` (~150-250MB without models) |
-| **Future** | `librosa` / other | Key transposition (pitch-shift); tempo stretch is implemented via librosa |
+| **Packaging** | PyInstaller | One-folder (COLLECT) build shipped as `stemma.zip` + `stemma.msix` |
+| **Time/pitch processing** | `librosa` | Offline render from original buffers avoids compounding transformations |
 
 ### Why HTDemucs v4?
 
 - **Developer**: Meta AI Research — MIT license (fully open, free)
-- **Quality**: State-of-the-art SDR (Signal-to-Distortion Ratio)
 - **4-stem**: Vocals, Drums, Bass, Other
 - **6-stem variant**: Adds Guitar + Piano (exactly what we need)
-- **Speed**: ~30-60 seconds for a 4-min song on GPU; ~5-15 min on CPU
-- **Model size**: ~80MB (quantized) to ~300MB (full)
+- **Runtime constraint**: the current exports execute on CPU; a
+  DirectML-compatible re-export is tracked in
+  [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
 
 ### Why ONNX Runtime over PyTorch?
 
-- PyTorch adds ~2GB+ to the installer — ONNX Runtime is ~50MB
-- DirectML provider gives native GPU acceleration on Windows (no CUDA toolkit needed)
+- ONNX Runtime avoids shipping the PyTorch training/runtime stack
+- DirectML gives MDX a Windows GPU path without a CUDA toolkit and preserves
+  a CPU fallback on unsupported systems
 - Proven approach: Intel's OpenVINO Audacity plugin and others use the same pattern
 - Models are converted once from PyTorch → ONNX format and hosted on HuggingFace
 
@@ -65,87 +70,21 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 
 ```
 stemma/
-├── main.py                    # App entry point
-├── stemma.spec                # PyInstaller one-folder (COLLECT) build spec
-├── requirements.txt
-├── requirements-dev.txt       # Dev/build deps (pyinstaller)
-├── pyproject.toml             # pytest config
-├── README.md
-├── LICENSE                    # MIT
-├── .gitignore
-├── .github/workflows/ci.yml      # CI: fast tests on every push
-├── .github/workflows/release.yml # Build one-folder app -> stemma.zip + stemma.msix, GitHub Release on v* tags
+├── main.py                 # diagnostics dispatch or Qt startup
 ├── src/
-│   ├── __init__.py
-│   ├── app.py                 # QApplication setup
-│   ├── app_settings.py        # Typed QSettings (audio device, import/export defaults)
-│   ├── data_paths.py          # Per-user data directory resolution
-│   ├── import_messages.py     # User-facing text for import/download failures
-│   ├── metronome.py           # Tap tempo helper for metronome UI
-│   ├── click_utils.py         # Metronome click sample generation
-│   ├── paths.py               # app_root(): frozen-build-aware root dir
-│   ├── qt_signal_utils.py     # PySide6 helpers (safe signal disconnect)
-│   ├── version.py             # __version__ string
-│   ├── separator.py           # HTDemucs 4/6-stem ONNX separation (CPU)
-│   ├── mdx_separator.py       # MDX-Net 2-stem ONNX separation (DirectML GPU)
-│   ├── separation_queue.py    # Background separation job queue (serial)
-│   ├── beat_detector.py       # BPM/key/chord detection + beat_this ONNX beat tracking
-│   ├── model_manager.py       # Download/cache ONNX models on first run
-│   ├── player.py              # Multi-track audio player (sounddevice)
-│   ├── library.py             # Song library (JSON-based)
-│   ├── exporter.py            # Export stems as WAV/MP3
-│   ├── downloader.py          # YouTube audio download (yt-dlp)
-│   ├── post_processing.py     # Wiener filter + soft gate
-│   ├── waveform.py            # Waveform peak computation (numpy)
-│   └── ui/
-│       ├── __init__.py
-│       ├── main_window.py     # Main window, session restore, shortcuts, drag-and-drop
-│       ├── player_controls.py # Transport, waveform, metronome, count-in, stem mixer
-│       ├── waveform_widget.py # Waveform display (QPainter)
-│       ├── library_panel.py   # Song list with remove
-│       ├── import_dialog.py   # Import songs + YouTube URL + model download
-│       ├── preferences_dialog.py  # Data dir, audio device, defaults
-│       ├── audio_sync.py      # Splash/logo audio-visual timing constants
-│       ├── animated_logo.py   # Animated main logo (notes + waves, click Easter egg)
-│       ├── animated_arpeggio.py # Animated footer arpeggio logo (letter glow, click Easter egg)
-│       ├── splash_screen.py   # Animated startup splash with arpeggio logo
-│       ├── wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
-│       ├── _wav_playback_impl.py  # QSoundEffect + winsound fallback
-│       └── styles.py          # Dark / light themes
-├── tests/                     # 32 test files (825 fast tests; not all listed here)
-│   ├── conftest.py            # Shared fixtures
-│   ├── test_separator.py      # 22 tests
-│   ├── test_beat_detector.py  # BPM/key/chord detection + beat tracking
-│   ├── test_model_manager.py  # 9 tests
-│   ├── test_player.py         # Player, A-B loop, metronome-related behaviour
-│   ├── test_library.py        # 22 tests
-│   ├── test_library_playback.py
-│   ├── test_downloader.py     # 26 tests
-│   ├── test_exporter.py       # 18 tests
-│   ├── test_post_processing.py # 17 tests
-│   ├── test_waveform.py       # 9 tests
-│   ├── test_waveform_widget.py # 7 tests
-│   ├── test_import_dialog.py
-│   ├── test_import_messages.py
-│   ├── test_data_paths.py
-│   ├── test_app_settings.py
-│   ├── test_metronome.py
-│   ├── test_count_in.py
-│   ├── test_pitch_shift.py
-│   ├── test_pitch_shift_ui.py
-│   ├── test_theme.py
-│   └── test_integration.py    # includes slow + hardware markers
-└── data/                      # Created at runtime
-    ├── library.json
-    ├── models/                # Downloaded ONNX models cached here
-    └── songs/{song-id}/
-        ├── original.mp3
-        ├── vocals.wav
-        ├── drums.wav
-        ├── bass.wav
-        ├── guitar.wav         # (6-stem only)
-        ├── piano.wav          # (6-stem only)
-        └── other.wav
+│   ├── separator.py        # HTDemucs four/six-stem engine
+│   ├── mdx_separator.py    # MDX two-stem engine
+│   ├── onnx_session.py     # shared DirectML-first session policy
+│   ├── separation_queue.py # serialized background jobs
+│   ├── player.py           # multi-track audio engine
+│   ├── library.py          # persistent song index and recovery
+│   ├── beat_detector.py    # beat, tempo, key, and chord analysis
+│   └── ui/                 # Qt presentation and interaction
+├── tests/                  # fast, slow-model, and hardware-marked tests
+├── scripts/                # assets, version sync, model cache, MSIX build
+├── docs/                   # development, roadmap, Store, policy, history
+├── stemma.spec             # PyInstaller one-folder build
+└── msix/AppxManifest.xml   # Desktop Bridge package identity
 ```
 
 ---
@@ -153,11 +92,25 @@ stemma/
 ## Module Specifications
 
 ### `separator.py` — Stem Separation Engine
-- Loads HTDemucs ONNX model via `onnxruntime.InferenceSession`
-- Uses DirectML execution provider for GPU acceleration
+- Loads HTDemucs ONNX through the shared session factory
+- Uses CPU inference because the current four/six-stem exports do not compile
+  for DirectML
 - Handles STFT/iSTFT pre/post-processing in NumPy (stripped from ONNX model)
 - Runs in background `QThread`, emits progress signals
 - Supports both `htdemucs` (4-stem) and `htdemucs_6s` (6-stem)
+
+### `mdx_separator.py` — Two-Stem Separation Engine
+- Produces vocals and backing (`other`) stems
+- Requests DirectML through the shared session factory, falls back to CPU
+  on session-init failure, and reports the selected provider in progress
+- Handles STFT packing, windowing, context trim, and reconstruction without
+  PyTorch
+
+### `onnx_session.py` — Execution-Provider Policy
+- Keeps the heavy ONNX Runtime import deferred until inference/diagnostics
+- Configures DirectML for sequential execution with memory patterns disabled
+- Retries with CPU when DirectML session creation fails
+- Supplies a stable user-facing provider label
 
 ### `beat_detector.py` — Musical Analysis
 - BPM detection and beat/downbeat tracking via the `beat_this` ONNX model (chunked inference)
@@ -167,15 +120,17 @@ stemma/
 
 ### `model_manager.py` — Model Download & Cache
 - Checks if ONNX model files exist under the app data directory (`models/`)
-- `ModelDownloader` (`QThread`): downloads from HuggingFace on first run (~80-300MB per model)
+- `ModelDownloader` (`QThread`): downloads immutable model artifacts on first run
+- Verifies reviewed SHA-256 values before atomically publishing cached files
 - Signals: `progress`, **`download_complete(str)`** (model path; not named `finished`, to avoid shadowing `QThread.finished`), `error`
-- Manages both 4-stem and 6-stem model files
+- Manages HTDemucs, MDX, and beat_this model files
 
 ### `import_messages.py` — Import Error Text
 - `format_import_error(message)` maps raw exceptions to short, readable strings (disk full, permission, network, SSL, HTTP/404, timeout, cancel, truncation)
 
 ### `player.py` — Multi-Track Audio Player
-- Loads stem WAVs as NumPy arrays
+- Keeps a synchronous stem-loading API while exposing separate read/apply
+  steps for background UI loading
 - `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output; optional metronome click mix; optional count-in pre-roll before advancing `_current_frame`
 - API: `play()`, `pause()`, `stop()`, `seek()`, `set_mute()`, `set_solo()`, `set_volume()`
 - Per-stem volume control (0.0-2.0)
@@ -187,10 +142,14 @@ stemma/
 
 ### `library.py` — Song Library
 - JSON song index: `{id, title, artist, stems_path, model_used, date_added}`
-- CRUD operations on the song list
-- `add_song`: on `OSError` during file copy or index save, removes the partial per-song directory and does not leave a half-added entry
-- Atomic writes via `os.replace()` to prevent corruption
-- Graceful recovery from corrupted JSON
+- Restricts destructive operations to this library's `songs/` root and
+  rejects unsafe persisted paths
+- Rolls back memory and disk state when persistence fails
+- Uses atomic writes, preserves a corrupt index, and rebuilds from safe
+  on-disk song directories
+- Treats a model-specific atomic completion marker plus the expected stem
+  set as authoritative for new separation jobs; legacy complete songs remain
+  compatible
 
 ### `exporter.py` — Stem Export
 - Export individual stems or custom mix (with current mute/solo state) as WAV or MP3
@@ -209,12 +168,25 @@ stemma/
 - Respects mute/solo state (same logic as audio callback)
 
 ### UI Modules
-- **`main_window.py`** — Left panel: song library list. Center: player controls + stem mixer. Menu: File / Edit (Preferences) / Help (Keyboard Shortcuts, About). Keyboard shortcuts. Window geometry/state and **session persistence** (last song, position, mixer, loop, speed, metronome, count-in) via QSettings. Drag-and-drop audio import. Connects **`playback_failed`** and startup warning when no audio output devices exist.
-- **`player_controls.py`** — Transport (Play/Pause/Stop/Record + time display). Waveform with click-to-seek, cursor, A-B loop markers. A-B loop controls (Set A/Set B/Loop toggle/Clear). Metronome row (BPM, tap, toggle, volume). Count-in row (toggle, beats, loop-repeat option). Per-stem row: label + Mute + Solo + volume slider. Color-coded stems. Recording stem rows (`RecordingStemRow`) with delete button. Waveform recomputes on mute/solo/volume changes. Playback speed presets.
+- **`main_window.py`** — Coordinates the library, player, separation queue,
+  session restore, navigation, and generation-safe asynchronous stem reads.
+  Only the current `(song, generation)` may update player/UI state or surface
+  an error.
+- **`player_controls.py`** — Composition facade over `transport_bar.py`,
+  `stem_mixer.py`, `practice_rack.py`, and `song_info_bar.py`. Coordinates
+  transport, waveform, mixer, loops, rendered speed/pitch, metronome/count-in,
+  recording, and musical-analysis controls while preserving the current visual
+  layout. Waveform-peak work also uses generations so stale futures cannot
+  overwrite current state.
 - **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
 - **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
-- **`import_dialog.py`** — File browser or YouTube URL, metadata fields, model variant (4/6 stem). If ONNX is missing, downloads model with progress; on any failure before successful import completion, removes the new library row. Large file (100 MiB+) confirmation. **Retry import** after errors. Workers cancelled and rolled back on dialog reject.
-- **`preferences_dialog.py`** — Data directory, output device, input device (recording), latency compensation, default import model, export format and MP3 bitrate
+- **`import_dialog.py`** — File browser or YouTube URL, metadata fields, and
+  2/4/6-stem model selection. Missing models download with progress; failures
+  roll back the library row. Demucs imports perform preflight memory
+  confirmation before persistence. Workers cancel and drain on rejection.
+- **`preferences_dialog.py`** — Data directory, output/input devices,
+  manual recording timing offset, default import model, export format, and
+  MP3 bitrate
 
 ### `downloader.py` — YouTube Audio Download
 - URL validation for youtube.com, youtu.be, music.youtube.com
@@ -222,58 +194,46 @@ stemma/
 - Audio download as MP3 (bestaudio + FFmpegExtractAudio, 320kbps)
 - Prefers bundled ffmpeg via imageio-ffmpeg when available; falls back to ffmpeg on PATH
 - Progress callback support for UI integration
-- **`styles.py`** — Dark and light themes (Catppuccin-inspired), good contrast
+- **`styles.py`** — Shared dark/light theme tokens and stylesheets
 
 ---
 
-## Implementation Phases
+## Cross-Cutting Design Constraints
 
-### Phase 1 — MVP (complete)
-- [x] Project setup (GitHub repo, deps, structure)
-- [x] Model manager (download ONNX models on first run)
-- [x] Stem separation engine (ONNX Runtime + DirectML)
-- [x] Multi-track player with mute/solo
-- [x] Song library (import, list, remove)
-- [x] Export stems as WAV
-- [x] UI: main window, player controls, library panel, import dialog
-- [x] Dark theme styling
-- [x] Integration test suite (13 tests including hardware playback)
-- [x] Overlap-add Hann windowing (click-free segment boundaries)
+### Threading and lifecycle
 
-### Phase 2 — Polish (complete)
-- [x] MP3 export support (lameenc, 320kbps)
-- [x] Separation progress bar (in import dialog)
-- [x] Keyboard shortcuts (Space=play/pause, S=stop, arrows=seek, Ctrl+1-6=mute stems, A/B/L=loop)
-- [x] Per-stem volume sliders (0-200%)
-- [x] Window state persistence (QSettings)
-- [x] Audio post-processing (Wiener filter + soft gating)
-- [x] Error handling & edge cases (JSON recovery, thread cleanup, stream safety)
-- [x] CI pipeline (GitHub Actions, fast tests on every push)
+- The PortAudio callback must not perform disk I/O, allocate large buffers,
+  or invoke Qt.
+- QThreads and futures are disconnected, cancelled where supported, retained
+  while running, and drained before Qt teardown.
+- Song loading, detection, and waveform peaks use monotonic generations.
+  Results are applied only when their generation and song identity still
+  match current state.
+- Separation jobs run serially so concurrent imports do not multiply model
+  memory usage.
 
-### Phase 3 — Advanced (complete)
-- [x] YouTube URL import (yt-dlp)
-- [x] Tempo change (time-stretch) in player via librosa
-- [x] Waveform visualization
-- [x] A-B loop repeat
-- [x] Error handling: model download in import, friendly messages, library rollback, playback / no-device warnings (#73)
-- [x] PyInstaller packaging + GitHub Release workflow (#56)
+### Persistence and recovery
 
-### Post-2.0 backlog (see GitHub issues)
-Shipped in 2.x: session persistence (#55), metronome (#57), count-in (#78), recording (#79), animated startup (#76), MSIX / Store (#74), UI redesign and export extras (#92, #97, #98, #99, #100), release tooling (tag-driven `version.py` + manifest sync, CI on tags), automatic BPM/key detection and beat-synced metronome (#42), time signature detection and real-time chord display (#118), pitch shift / key transposition (#117, shipped v2.4.0), Loop Trainer speed ramp (shipped v2.5.0).
+- User data and model caches live in a writable per-user directory.
+- JSON and completion-marker writes use temporary files plus atomic replace.
+- Corrupt metadata is preserved for diagnosis; recovery only trusts paths
+  below the library root.
+- QSettings stores preferences and per-song session state. Loading applies
+  that state only after the matching asynchronous stem load completes.
 
-Open (all labeled `v3.0` on GitHub):
-- [ ] Experimental DSP extensions (#28) — reframed by the v3.0 research as separation-quality tiers (MDX/SCNet/RoFormer), not bespoke DSP
-- [ ] Real-time streaming stem separation (#13) — reframed as progressive pre-separation with early playback; true live separation is not feasible on this stack
-- [ ] GPU separation via DirectML re-export (#125) — partially addressed in v2.6.0: MDX-Net 2-stem runs on DirectML; 4/6-stem HTDemucs on GPU still needs a model re-export
+### Release integrity
 
-For the live checklist, prefer `AGENTS.md` and the GitHub issue list over this section if they disagree.
+- Source and manifest versions describe the current branch build. Tag builds
+  still run `scripts/sync_release_version.ps1` before packaging.
+- Runtime/build dependencies are locked with hashes for Windows/Python 3.12.
+- Model downloads are pinned and checksum-verified.
+- Release builds run Ruff, fast tests, PyInstaller, frozen diagnostics, MSIX
+  packaging, and checksum generation.
+- A GitHub Release is the authority for what shipped; code present on `main`
+  is not by itself a release claim.
 
-### Release 1.1.0 (shipped)
-- Session persistence across restarts (#55).
-- Metronome: BPM 20--300, tap tempo, mix in callback (#57).
-- Count-in: optional beats before playback; optional before each loop repeat (#78).
-- Loop UX: Stop and seek respect the A-B region while looping is on.
-- Help > Keyboard Shortcuts dialog.
+Development and release commands are in `docs/DEVELOPMENT.md` and
+`docs/store-release-pipeline.md`.
 
 ---
 
@@ -290,15 +250,15 @@ For the live checklist, prefer `AGENTS.md` and the GitHub issue list over this s
 
 ---
 
-## Performance Expectations
+## Current Limitations
 
-| Scenario | Expected Speed (4-min song) |
-|---|---|
-| GPU (DirectML, RTX 4070 Ti) | ~30-60 seconds |
-| CPU fallback | ~5-15 minutes |
-
-## Audio Quality Notes
-
-- Bass and drums separate cleanly (primary use case supported)
-- Guitar separation (6-stem) is good but not perfect — some bleed is normal
-- For practice/busking purposes, quality is more than sufficient
+- Separation time depends on track length, model, hardware, drivers, and
+  execution provider; no fixed timing is promised.
+- MDX two-stem can use DirectML. HTDemucs four/six-stem is CPU-only with the
+  current model exports.
+- Stem isolation is model-dependent and can contain bleed or artifacts; the
+  post-processing stage reduces some artifacts but does not guarantee a
+  quality level.
+- Recording alignment depends on the user's audio hardware and configured
+  manual offset; the application does not promise automatic latency
+  calibration.

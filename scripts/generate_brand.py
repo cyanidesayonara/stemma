@@ -280,14 +280,12 @@ def build_lockup(dark: bool = True) -> str:
     mark_body, mw, mh = build_mark(dark=dark, with_staff=True)
 
     d, ww, wh = wordmark_path("stemma", px=400.0)
-    from PySide6.QtGui import QPainterPath  # noqa: PLC0415  (path bounds)
     # Scale the wordmark so its x-height era matches the chord height.
     target_h = mh * 0.30
     scale = target_h / wh
     gap = mw * 0.045
     # The path is drawn from a baseline at y=0 with negative-up glyphs;
     # shift so its bounding box starts at the origin before scaling.
-    from PySide6.QtGui import QFont, QPainterPath as _P  # noqa: F401
     # Recompute bounds to place the glyphs.
     import re as _re
     xs = [float(v) for v in _re.findall(r"-?\d+\.\d+", d)][0::2]

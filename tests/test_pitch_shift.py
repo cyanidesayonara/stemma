@@ -655,8 +655,6 @@ class TestStretchErrorBeatsReset:
         but, without the _recompute_beat_frames() call, the stale indices
         remain -- making the metronome click in the wrong places.
         """
-        sr = loaded_player._sample_rate
-
         # Set up a beat grid at 0.5x speed (indices are 2× the 1.0x values).
         loaded_player._beat_times = [0.5, 1.0]
         loaded_player._playback_speed = 0.5

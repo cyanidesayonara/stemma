@@ -25,11 +25,18 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.onnx_session import create_onnx_session
+from src.separation_state import (
+    EXPECTED_STEMS,
+    clear_completion_marker,
+    write_completion_marker,
+)
+
 
 # Stem names for each model variant.
 # HTDemucs natively outputs tensors in this exact order: 0=drums, 1=bass, etc.
-STEMS_4 = ("drums", "bass", "other", "vocals")
-STEMS_6 = ("drums", "bass", "other", "vocals", "guitar", "piano")
+STEMS_4 = EXPECTED_STEMS["htdemucs"]
+STEMS_6 = EXPECTED_STEMS["htdemucs_6s"]
 
 # HTDemucs expects audio at this sample rate.
 SAMPLE_RATE = 44100
@@ -124,6 +131,11 @@ class SeparatorWorker(QThread):
     def stems(self) -> tuple[str, ...]:
         """Return the stem names for the active model variant."""
         return STEMS_6 if self.is_6_stem else STEMS_4
+
+    @property
+    def model_key(self) -> str:
+        """Return the persisted model key for this worker."""
+        return "htdemucs_6s" if self.is_6_stem else "htdemucs"
 
     def cancel(self) -> None:
         """Request cancellation of the running separation."""
@@ -220,41 +232,8 @@ class SeparatorWorker(QThread):
         return np.stack(resampled_channels)
 
     def _create_session(self):
-        """Create an ONNX Runtime inference session.
-
-        Attempts DirectML first for GPU acceleration.  Some devices list
-        ``DmlExecutionProvider`` but raise ``RUNTIME_EXCEPTION`` during
-        session init (e.g. certain integrated GPUs); in that case we retry
-        with CPU only.
-
-        Returns:
-            An onnxruntime.InferenceSession instance.
-        """
-        import onnxruntime as ort
-
-        if not os.path.isfile(self.model_path):
-            raise FileNotFoundError(
-                f"ONNX model file not found: {self.model_path}"
-            )
-
-        session_options = ort.SessionOptions()
-        available = set(ort.get_available_providers())
-
-        if "DmlExecutionProvider" in available:
-            try:
-                return ort.InferenceSession(
-                    self.model_path,
-                    sess_options=session_options,
-                    providers=["DmlExecutionProvider", "CPUExecutionProvider"],
-                )
-            except Exception:
-                pass
-
-        return ort.InferenceSession(
-            self.model_path,
-            sess_options=session_options,
-            providers=["CPUExecutionProvider"],
-        )
+        """Create a DML-first ONNX session with CPU fallback."""
+        return create_onnx_session(self.model_path)
 
     def _run_segmented_inference(
         self, audio: np.ndarray, session
@@ -282,20 +261,27 @@ class SeparatorWorker(QThread):
         # 50% overlap: step by half a segment.
         step = SEGMENT_SAMPLES // 2
 
-        # Pad so the last segment fits fully.
-        pad_needed = 0
-        if total_samples > SEGMENT_SAMPLES:
-            # Number of steps to cover all samples.
-            n_steps = (total_samples - SEGMENT_SAMPLES + step - 1) // step + 1
-            required_length = (n_steps - 1) * step + SEGMENT_SAMPLES
-            pad_needed = required_length - total_samples
-        else:
-            # Single segment: pad to SEGMENT_SAMPLES.
-            pad_needed = SEGMENT_SAMPLES - total_samples
-            required_length = SEGMENT_SAMPLES
+        # Add half a segment of context at both ends. The Hann window is
+        # exactly zero at its endpoints, so placing real audio directly at
+        # those endpoints would erase the first and last samples. Context
+        # padding keeps every original sample under a positive window weight;
+        # it is trimmed after overlap-add normalization.
+        context = step
+        audio = np.pad(audio, ((0, 0), (context, context)))
+        working_samples = audio.shape[1]
 
-        if pad_needed > 0:
-            audio = np.pad(audio, ((0, 0), (0, pad_needed)))
+        # Pad the right side further so the last segment fits fully.
+        if working_samples > SEGMENT_SAMPLES:
+            n_steps = (
+                (working_samples - SEGMENT_SAMPLES + step - 1) // step + 1
+            )
+            required_length = (n_steps - 1) * step + SEGMENT_SAMPLES
+        else:
+            required_length = SEGMENT_SAMPLES
+        right_pad = required_length - working_samples
+
+        if right_pad > 0:
+            audio = np.pad(audio, ((0, 0), (0, right_pad)))
 
         padded_length = audio.shape[1]
 
@@ -340,11 +326,8 @@ class SeparatorWorker(QThread):
             for ch in range(2):
                 result[s, ch] /= weight
 
-        # Remove padding.
-        if pad_needed > 0:
-            result = result[:, :, :total_samples]
-
-        return result
+        # Remove left context and all right-side padding.
+        return result[:, :, context:context + total_samples]
 
     def _infer_segment(
         self, segment: np.ndarray, session
@@ -488,6 +471,7 @@ class SeparatorWorker(QThread):
             Mapping of stem name to file path.
         """
         os.makedirs(self.output_dir, exist_ok=True)
+        clear_completion_marker(self.output_dir)
         result_files = {}
 
         for i, stem_name in enumerate(self.stems):
@@ -497,4 +481,5 @@ class SeparatorWorker(QThread):
             sf.write(out_path, stem_audio, SAMPLE_RATE, subtype="PCM_16")
             result_files[stem_name] = out_path
 
+        write_completion_marker(self.output_dir, self.model_key)
         return result_files

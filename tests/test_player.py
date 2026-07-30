@@ -823,7 +823,6 @@ class TestRecordingStemMethods:
     def test_add_recording_stem(self, mock_stems):
         player = MultiTrackPlayer()
         player.load_stems(mock_stems)
-        old_total = player._total_frames
 
         longer_data = np.ones((88200, 2), dtype=np.float32) * 0.1
         player.add_recording_stem("recording_take1", longer_data)
@@ -1007,12 +1006,10 @@ class TestNudgeStem:
         player.load_stems(mock_stems)
 
         player.nudge_stem("vocals", 50.0)
-        after_50 = player._stems["vocals"].copy()
 
         player.nudge_stem("vocals", 100.0)
         after_100 = player._stems["vocals"].copy()
 
-        delta_frames = int(50.0 / 1000.0 * 44100)
         total_zeroed = int(100.0 / 1000.0 * 44100)
         np.testing.assert_array_equal(
             after_100[:total_zeroed],

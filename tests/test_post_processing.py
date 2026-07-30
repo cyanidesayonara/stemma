@@ -1,7 +1,6 @@
 """Tests for audio post-processing filters."""
 
 import numpy as np
-import pytest
 
 from src.post_processing import wiener_filter, soft_gate, _CHUNK_SAMPLES
 from src.separator import SAMPLE_RATE

@@ -6,6 +6,7 @@ or error(str) exactly once), so queue behavior is tested without audio
 or models.
 """
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -350,22 +351,108 @@ class TestMainWindowGlue:
         stub._library.remove_song.assert_called_once_with("s1")
         mb.warning.assert_not_called()
 
-    def test_prune_removes_stemless_songs(self, app, tmp_path):
+    def test_prune_removes_partial_and_invalid_marked_songs(
+        self, app, tmp_path,
+    ):
         from src.ui.main_window import MainWindow
 
-        good = MagicMock()
-        good.id = "good"
-        good.stems_path = str(tmp_path / "good")
-        os.makedirs(good.stems_path)
-        open(os.path.join(good.stems_path, "vocals.wav"), "wb").close()
+        partial = MagicMock()
+        partial.id = "partial"
+        partial.model_used = "htdemucs"
+        partial.stems_path = str(tmp_path / "partial")
+        os.makedirs(partial.stems_path)
+        open(os.path.join(partial.stems_path, "vocals.wav"), "wb").close()
 
-        ghost = MagicMock()
-        ghost.id = "ghost"
-        ghost.stems_path = str(tmp_path / "ghost")
-        os.makedirs(ghost.stems_path)
+        invalid = MagicMock()
+        invalid.id = "invalid"
+        invalid.model_used = "htdemucs"
+        invalid.stems_path = str(tmp_path / "invalid")
+        os.makedirs(invalid.stems_path)
+        for stem in ("drums", "bass", "other", "vocals"):
+            open(os.path.join(invalid.stems_path, f"{stem}.wav"), "wb").close()
+        with open(
+            os.path.join(invalid.stems_path, ".separation-complete.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("{invalid")
+
+        marked_partial = MagicMock()
+        marked_partial.id = "marked-partial"
+        marked_partial.model_used = ""
+        marked_partial.stems_path = str(tmp_path / "marked-partial")
+        os.makedirs(marked_partial.stems_path)
+        open(
+            os.path.join(marked_partial.stems_path, "vocals.wav"),
+            "wb",
+        ).close()
+        with open(
+            os.path.join(
+                marked_partial.stems_path,
+                ".separation-complete.json",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({
+                "version": 1,
+                "model": "mdx_inst_hq3",
+                "stems": ["vocals", "other"],
+            }, f)
 
         stub = MagicMock()
-        stub._library.songs = [good, ghost]
+        stub._library.songs = [partial, invalid, marked_partial]
         MainWindow._prune_incomplete_songs(stub)
 
-        stub._library.remove_song.assert_called_once_with("ghost")
+        assert stub._library.remove_song.call_args_list == [
+            (("partial",), {}),
+            (("invalid",), {}),
+            (("marked-partial",), {}),
+        ]
+
+    def test_prune_preserves_complete_legacy_song(self, app, tmp_path):
+        from src.ui.main_window import MainWindow
+
+        legacy = MagicMock()
+        legacy.id = "legacy"
+        legacy.model_used = "htdemucs"
+        legacy.stems_path = str(tmp_path / "legacy")
+        os.makedirs(legacy.stems_path)
+        for stem in ("drums", "bass", "other", "vocals"):
+            open(os.path.join(legacy.stems_path, f"{stem}.wav"), "wb").close()
+
+        stub = MagicMock()
+        stub._library.songs = [legacy]
+        MainWindow._prune_incomplete_songs(stub)
+
+        stub._library.remove_song.assert_not_called()
+
+    def test_prune_preserves_valid_marked_song(self, app, tmp_path):
+        from src.ui.main_window import MainWindow
+
+        completed = MagicMock()
+        completed.id = "completed"
+        completed.model_used = ""
+        completed.stems_path = str(tmp_path / "completed")
+        os.makedirs(completed.stems_path)
+        for stem in ("vocals", "other"):
+            open(
+                os.path.join(completed.stems_path, f"{stem}.wav"),
+                "wb",
+            ).close()
+        with open(
+            os.path.join(completed.stems_path, ".separation-complete.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({
+                "version": 1,
+                "model": "mdx_inst_hq3",
+                "stems": ["vocals", "other"],
+            }, f)
+
+        stub = MagicMock()
+        stub._library.songs = [completed]
+        MainWindow._prune_incomplete_songs(stub)
+
+        stub._library.remove_song.assert_not_called()

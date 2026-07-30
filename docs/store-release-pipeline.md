@@ -4,7 +4,7 @@
 
 Pushing a version tag matching `v*` triggers `.github/workflows/release.yml`:
 
-1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v2.0.3` becomes app `2.0.3` and MSIX `2.0.3.0`). The commit on `main` can still say `2.0.2` until the next housekeeping commit; the **tag build** is the source of truth for shipped bits.
+1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v2.6.0` becomes app `2.6.0` and MSIX `2.6.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
 2. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
 3. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
 4. **GitHub Release** -- attaches `stemma.zip` and `stemma.msix`.
@@ -19,7 +19,7 @@ Public download URL pattern (public repo):
 
 `https://github.com/<owner>/<repo>/releases/download/<tag>/stemma.msix`
 
-Example: `https://github.com/cyanidesayonara/stemma/releases/download/v2.0.3/stemma.msix`
+Example: `https://github.com/cyanidesayonara/stemma/releases/download/v2.5.0/stemma.msix`
 
 ## Optional: Partner Center API / GitHub Action
 
@@ -44,7 +44,9 @@ This repo includes `.github/workflows/partner-center-submit.yml`, a **manual** w
 To align repo files with a would-be tag before committing:
 
 ```powershell
-.\scripts\sync_release_version.ps1 -Tag v2.0.3
+.\scripts\sync_release_version.ps1 -Tag v2.6.0
 ```
 
-Then commit `src/version.py` and `msix/AppxManifest.xml` if you want `main` to match the next release before the tag exists.
+This updates local build metadata only; it does not publish v2.6.0. Commit
+`src/version.py` and `msix/AppxManifest.xml` when the branch build target
+changes.

@@ -14,21 +14,23 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-release.txt
 
       - name: Sync version from tag
         shell: pwsh
         run: .\scripts\sync_release_version.ps1 -Tag "${{ github.ref_name }}"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+        run: python -m pip install --require-hashes -r requirements-release.txt
+
+      - name: Run Ruff
+        run: python -m ruff check .
 
       - name: Run fast tests
         # Same offscreen rationale as ci.yml: keep Qt off the hosted
@@ -38,7 +40,7 @@ jobs:
         run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120
 
       - name: Build executable
-        run: pyinstaller stemma.spec
+        run: python -m PyInstaller --clean --noconfirm stemma.spec
 
       - name: Verify build
         shell: pwsh
@@ -51,6 +53,34 @@ jobs:
           $files = (Get-ChildItem "dist/stemma" -Recurse).Count
           Write-Output "Total files in bundle: $files"
 
+      - name: Validate frozen diagnostics
+        shell: pwsh
+        run: |
+          $diagnosticsPath = Join-Path $PWD "dist\frozen-diagnostics.txt"
+          $process = Start-Process `
+            -FilePath ".\dist\stemma\stemma.exe" `
+            -ArgumentList @("--diagnostics-file", $diagnosticsPath) `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Frozen diagnostics failed with exit code $($process.ExitCode)"
+          }
+          if (!(Test-Path $diagnosticsPath)) {
+            throw "Frozen diagnostics did not create $diagnosticsPath"
+          }
+          $diagnostics = Get-Content $diagnosticsPath -Raw -Encoding utf8
+          Write-Output $diagnostics
+          $required = @(
+            'stemma version: \d+\.\d+\.\d+',
+            'ONNX Runtime version: \S+',
+            'DmlExecutionProvider'
+          )
+          foreach ($pattern in $required) {
+            if ($diagnostics -notmatch $pattern) {
+              throw "Frozen diagnostics missing required output: $pattern"
+            }
+          }
+
       - name: Create zip archive
         shell: pwsh
         run: Compress-Archive -Path "dist/stemma/*" -DestinationPath "dist/stemma.zip"
@@ -59,12 +89,23 @@ jobs:
         shell: pwsh
         run: .\scripts\build_msix.ps1 -Output "dist/stemma.msix"
 
+      - name: Create release checksums
+        shell: pwsh
+        run: |
+          $entries = foreach ($path in @("dist/stemma.zip", "dist/stemma.msix")) {
+            $hash = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($path))"
+          }
+          Set-Content -Path "dist/SHA256SUMS.txt" -Value $entries -Encoding ascii
+          Get-Content "dist/SHA256SUMS.txt"
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/stemma.zip
             dist/stemma.msix
+            dist/SHA256SUMS.txt
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

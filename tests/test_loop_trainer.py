@@ -10,7 +10,6 @@ Covers:
     wraps; song load resets the trainer; session state round-trips.
 """
 
-import os
 from unittest.mock import patch
 
 import numpy as np
@@ -94,7 +93,6 @@ class TestLoopWrapSignal:
         loaded._loop_wrap_count = 5
         loaded._loop_wrap_seen = 5
         # Reload.
-        import soundfile as sf
         loaded._reset_song_state()
         assert loaded._loop_wrap_count == 0
         assert loaded._loop_wrap_seen == 0
@@ -119,7 +117,7 @@ class TestTrainerRamp:
     def test_enable_drops_to_start_speed_with_loop(self, controls, loaded):
         self._make_loop(controls)
         controls._trainer_start_speed = 0.75
-        with patch.object(loaded, "set_speed") as ss:
+        with patch.object(loaded, "set_speed"):
             # Route through the combo the way the UI does.
             with patch.object(controls, "_set_speed_preset") as sp:
                 controls._on_trainer_toggled(True)

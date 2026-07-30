@@ -3,9 +3,8 @@
 Runs a UVR MDX-Net model to split a song into a primary stem and its
 complement (e.g. Instrumental + Vocals). Unlike the HTDemucs export,
 MDX-Net ONNX graphs initialize and run on the DirectML execution
-provider, so this path is GPU-accelerated on any DX12 device (~45x
-faster than CPU on an RTX 4070 Ti; a 4-minute song separates in
-seconds instead of minutes).
+provider when supported. Session creation falls back to CPU when needed,
+and separation progress reports the selected provider.
 
 The model operates on spectrogram chunks:
     input  [1, 4, dim_f, dim_t]  -- (L.re, L.im, R.re, R.im) x freq x time
@@ -32,19 +31,29 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.onnx_session import create_onnx_session, session_provider_label
+from src.separation_state import (
+    clear_completion_marker,
+    write_completion_marker,
+)
+
 SAMPLE_RATE = 44100
 
 # Registry of supported MDX models. Parameters come from UVR's model-data
 # database keyed by the md5 of the file's last 10,000 KiB (UVR's hashing
-# convention); md5_tail lets the downloader verify integrity after the
-# transfer and guards against upstream file swaps.
+# convention). Downloads use the immutable GitHub release asset ID and a
+# reviewed full-file SHA-256 before publishing the model locally.
 MDX_MODELS: dict[str, dict] = {
     "mdx_inst_hq3": {
         "display_name": "MDX-Net Inst HQ 3",
         "file": "UVR-MDX-NET-Inst_HQ_3.onnx",
         "url": (
-            "https://github.com/TRvlvr/model_repo/releases/download/"
-            "all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx"
+            "https://api.github.com/repos/TRvlvr/model_repo/"
+            "releases/assets/112310332"
+        ),
+        "sha256": (
+            "317554b07fe1ea5279a77f2b1520a41e"
+            "a4b93432560c4ffd08792c30fddf9adc"
         ),
         "md5_tail": "55657dd70583b0fedfba5f67df11d711",
         "n_fft": 6144,
@@ -79,38 +88,6 @@ def hash_model_file(path: str) -> str:
         return hashlib.md5(f.read()).hexdigest()
 
 
-def _create_session(model_path: str):
-    """Create an ONNX Runtime session, DirectML first with CPU fallback.
-
-    Same pattern as separator._create_session; unlike HTDemucs, MDX
-    graphs actually compile on DML, so the first branch is the one that
-    normally runs.
-    """
-    import onnxruntime as ort
-
-    if not os.path.isfile(model_path):
-        raise FileNotFoundError(f"ONNX model file not found: {model_path}")
-
-    session_options = ort.SessionOptions()
-    available = set(ort.get_available_providers())
-
-    if "DmlExecutionProvider" in available:
-        try:
-            return ort.InferenceSession(
-                model_path,
-                sess_options=session_options,
-                providers=["DmlExecutionProvider", "CPUExecutionProvider"],
-            )
-        except Exception:
-            pass
-
-    return ort.InferenceSession(
-        model_path,
-        sess_options=session_options,
-        providers=["CPUExecutionProvider"],
-    )
-
-
 class MdxSeparatorWorker(QThread):
     """Background thread that runs MDX-Net 2-stem separation.
 
@@ -136,6 +113,7 @@ class MdxSeparatorWorker(QThread):
         self.input_path = input_path
         self.output_dir = output_dir
         self.model_path = model_path
+        self.model_key = model_key
         self.params = MDX_MODELS[model_key]
         self._is_cancelled = False
 
@@ -162,6 +140,10 @@ class MdxSeparatorWorker(QThread):
 
         self.progress.emit(10, "Initializing MDX model...")
         session = self._create_session()
+        self.progress.emit(
+            12,
+            f"Using {session_provider_label(session)} for MDX separation.",
+        )
 
         self.progress.emit(15, "Separating (2-stem)...")
         primary = self._demix(audio, session)
@@ -200,7 +182,7 @@ class MdxSeparatorWorker(QThread):
         ]).astype(np.float32)
 
     def _create_session(self):
-        return _create_session(self.model_path)
+        return create_onnx_session(self.model_path)
 
     # ------------------------------------------------------------------
     # STFT packing (matches UVR's torch.stft usage)
@@ -311,6 +293,7 @@ class MdxSeparatorWorker(QThread):
         self, primary: np.ndarray, secondary: np.ndarray,
     ) -> dict[str, str]:
         os.makedirs(self.output_dir, exist_ok=True)
+        clear_completion_marker(self.output_dir)
         primary_file, secondary_file = PRIMARY_TO_FILES[
             self.params["primary_stem"]
         ]
@@ -319,4 +302,5 @@ class MdxSeparatorWorker(QThread):
             path = os.path.join(self.output_dir, f"{name}.wav")
             sf.write(path, data.T, SAMPLE_RATE, subtype="PCM_16")
             result[name] = path
+        write_completion_marker(self.output_dir, self.model_key)
         return result

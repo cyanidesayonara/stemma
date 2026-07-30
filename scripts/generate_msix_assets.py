@@ -12,7 +12,6 @@ Output: assets/msix/
 """
 
 import os
-import sys
 
 from PIL import Image
 
@@ -62,7 +61,7 @@ def main() -> None:
     wide = _make_wide(src, 310, 150)
     wide_path = os.path.join(_OUT, "Wide310x150Logo.scale-100.png")
     wide.save(wide_path)
-    print(f"  Wide310x150Logo.scale-100.png (310x150)")
+    print("  Wide310x150Logo.scale-100.png (310x150)")
 
     print(f"\nGenerated {len(_SQUARE_ASSETS) + 1} assets in {_OUT}")
 

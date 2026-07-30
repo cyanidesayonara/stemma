@@ -98,14 +98,15 @@ class TestSongLibraryInit:
 
     def test_loads_existing_library(self, library_dir):
         # Pre-populate library.json.
-        os.makedirs(library_dir, exist_ok=True)
+        song_dir = os.path.join(library_dir, "songs", "existing")
+        os.makedirs(song_dir, exist_ok=True)
         json_path = os.path.join(library_dir, "library.json")
         existing = [{
             "id": "existing",
             "title": "Old Song",
             "artist": "Old Artist",
-            "original_path": "old.wav",
-            "stems_path": "/data/songs/existing",
+            "original_path": os.path.join(song_dir, "original.wav"),
+            "stems_path": song_dir,
             "model_used": "htdemucs",
             "date_added": "2026-01-01T00:00:00",
         }]
@@ -184,6 +185,84 @@ class TestSongLibraryInit:
         lib = SongLibrary(data_dir=library_dir)
         assert lib.songs == []
         assert os.path.isfile(json_path + ".bak")
+
+
+class TestSongLibraryPathSafety:
+    def test_rejects_loaded_traversal_path_without_touching_target(
+        self, library_dir,
+    ):
+        songs_dir = os.path.join(library_dir, "songs")
+        external_dir = os.path.join(library_dir, "external")
+        os.makedirs(songs_dir, exist_ok=True)
+        os.makedirs(external_dir)
+        marker = os.path.join(external_dir, "keep.txt")
+        with open(marker, "w") as f:
+            f.write("keep")
+        entry = {
+            "id": "unsafe-traversal",
+            "title": "Unsafe",
+            "artist": "Artist",
+            "original_path": os.path.join(external_dir, "original.wav"),
+            "stems_path": os.path.join(songs_dir, "..", "external"),
+            "model_used": "htdemucs",
+            "date_added": "2026-01-01T00:00:00",
+        }
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([entry], f)
+
+        library = SongLibrary(library_dir)
+
+        assert library.songs == []
+        assert os.path.isfile(marker)
+
+    def test_rejects_loaded_external_absolute_path_without_touching_target(
+        self, library_dir, tmp_path,
+    ):
+        os.makedirs(os.path.join(library_dir, "songs"), exist_ok=True)
+        external_dir = tmp_path / "external"
+        external_dir.mkdir()
+        marker = external_dir / "keep.txt"
+        marker.write_text("keep")
+        entry = {
+            "id": "unsafe-absolute",
+            "title": "Unsafe",
+            "artist": "Artist",
+            "original_path": str(external_dir / "original.wav"),
+            "stems_path": str(external_dir),
+            "model_used": "htdemucs",
+            "date_added": "2026-01-01T00:00:00",
+        }
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([entry], f)
+
+        library = SongLibrary(library_dir)
+
+        assert library.songs == []
+        assert marker.is_file()
+
+    def test_remove_refuses_runtime_external_song_path(
+        self, library, tmp_path,
+    ):
+        external_dir = tmp_path / "external"
+        external_dir.mkdir()
+        marker = external_dir / "keep.txt"
+        marker.write_text("keep")
+        unsafe = Song(
+            id="unsafe",
+            title="Unsafe",
+            artist="Artist",
+            original_path=str(external_dir / "original.wav"),
+            stems_path=str(external_dir),
+            model_used="htdemucs",
+            date_added="2026-01-01T00:00:00",
+        )
+        library._songs.append(unsafe)
+
+        with pytest.raises(ValueError, match="outside"):
+            library.remove_song(unsafe.id)
+
+        assert library.get_song(unsafe.id) is unsafe
+        assert marker.is_file()
 
 
 class TestSongLibraryCRUD:
@@ -308,6 +387,176 @@ class TestSongLibraryCRUD:
         with pytest.raises(KeyError):
             library.remove_song("nonexistent")
 
+    def test_remove_save_failure_restores_entry_and_directory(
+        self, library, fake_audio, monkeypatch,
+    ):
+        song = library.add_song(
+            title="Keep Me",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        song_dir = song.stems_path
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        monkeypatch.setattr(library, "_save", fail_save)
+
+        with pytest.raises(OSError, match="index unavailable"):
+            library.remove_song(song.id)
+
+        assert library.get_song(song.id) is song
+        assert os.path.isdir(song_dir)
+        assert os.path.isfile(song.original_path)
+
+    def test_remove_save_and_restore_failure_preserves_staged_recovery(
+        self, library, fake_audio, monkeypatch,
+    ):
+        song = library.add_song(
+            title="Recover Me",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        song_dir = song.stems_path
+        songs_dir = library._songs_dir
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        real_replace = os.replace
+        replace_calls = 0
+
+        def fail_restore(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("restore unavailable")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(library, "_save", fail_save)
+        monkeypatch.setattr("src.library.os.replace", fail_restore)
+
+        with pytest.raises(OSError) as exc_info:
+            library.remove_song(song.id)
+
+        message = str(exc_info.value)
+        assert "index unavailable" in message
+        assert "restore unavailable" in message
+        assert exc_info.value.__cause__ is not None
+        assert "index unavailable" in str(exc_info.value.__cause__)
+        assert library.get_song(song.id) is None
+        assert not os.path.exists(song_dir)
+
+        staged = [
+            os.path.join(songs_dir, entry)
+            for entry in os.listdir(songs_dir)
+            if entry.startswith(f".remove-{song.id}-")
+        ]
+        assert len(staged) == 1
+        assert os.path.isdir(staged[0])
+        assert os.path.isfile(os.path.join(
+            staged[0],
+            os.path.basename(song.original_path),
+        ))
+
+    def test_restart_recovers_double_failed_removal(
+        self, library_dir, fake_audio, monkeypatch,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Recover On Restart",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        song_dir = song.stems_path
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        real_replace = os.replace
+        replace_calls = 0
+
+        def fail_restore(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("restore unavailable")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(library, "_save", fail_save)
+        monkeypatch.setattr("src.library.os.replace", fail_restore)
+
+        with pytest.raises(OSError, match="recovery"):
+            library.remove_song(song.id)
+
+        restarted = SongLibrary(library_dir)
+        recovered = restarted.get_song(song.id)
+
+        assert recovered is not None
+        assert recovered.stems_path == song_dir
+        assert os.path.isdir(song_dir)
+        assert os.path.isfile(recovered.original_path)
+        assert not any(
+            entry.startswith(f".remove-{song.id}-")
+            for entry in os.listdir(restarted._songs_dir)
+        )
+
+    def test_restart_restores_newest_valid_staged_directory(
+        self, library_dir, fake_audio,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Newest Recovery",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        old_stage = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-{'a' * 32}",
+        )
+        new_stage = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-{'b' * 32}",
+        )
+        shutil.copytree(song.stems_path, old_stage)
+        shutil.copytree(song.stems_path, new_stage)
+        with open(os.path.join(old_stage, "choice.txt"), "w") as f:
+            f.write("old")
+        with open(os.path.join(new_stage, "choice.txt"), "w") as f:
+            f.write("new")
+        os.utime(old_stage, ns=(1_000_000_000, 1_000_000_000))
+        os.utime(new_stage, ns=(2_000_000_000, 2_000_000_000))
+        shutil.rmtree(song.stems_path)
+
+        restarted = SongLibrary(library_dir)
+
+        assert restarted.get_song(song.id) is not None
+        with open(os.path.join(song.stems_path, "choice.txt")) as f:
+            assert f.read() == "new"
+        assert os.path.isdir(old_stage)
+        assert not os.path.exists(new_stage)
+
+    def test_restart_ignores_unrecognized_staged_directory(
+        self, library_dir, fake_audio,
+    ):
+        library = SongLibrary(library_dir)
+        song = library.add_song(
+            title="Do Not Guess",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        unrelated = os.path.join(
+            library._songs_dir,
+            f".remove-{song.id}-not-a-library-token",
+        )
+        os.replace(song.stems_path, unrelated)
+
+        restarted = SongLibrary(library_dir)
+
+        assert restarted.get_song(song.id) is not None
+        assert not os.path.exists(song.stems_path)
+        assert os.path.isdir(unrelated)
+
     def test_update_song(self, library, fake_audio):
         song = library.add_song(
             title="Original",
@@ -335,6 +584,59 @@ class TestSongLibraryCRUD:
     def test_update_nonexistent_song_raises(self, library):
         with pytest.raises(KeyError):
             library.update_song("nonexistent", title="Nope")
+
+    def test_update_only_changes_editable_metadata(self, library, fake_audio):
+        song = library.add_song(
+            title="Original",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+        original_path = song.original_path
+        stems_path = song.stems_path
+        date_added = song.date_added
+
+        library.update_song(
+            song.id,
+            title="Updated",
+            artist="New Artist",
+            model_used="htdemucs",
+            original_path="C:/outside/original.wav",
+            stems_path="C:/outside",
+            date_added="changed",
+            to_dict="changed",
+        )
+
+        assert song.title == "Updated"
+        assert song.artist == "New Artist"
+        assert song.model_used == "htdemucs"
+        assert song.original_path == original_path
+        assert song.stems_path == stems_path
+        assert song.date_added == date_added
+        assert callable(song.to_dict)
+
+    def test_update_save_failure_restores_in_memory_values(
+        self, library, fake_audio, monkeypatch,
+    ):
+        song = library.add_song(
+            title="Original",
+            artist="Artist",
+            original_path=fake_audio,
+        )
+
+        def fail_save():
+            raise OSError("index unavailable")
+
+        monkeypatch.setattr(library, "_save", fail_save)
+
+        with pytest.raises(OSError, match="index unavailable"):
+            library.update_song(
+                song.id,
+                title="Changed",
+                artist="Changed Artist",
+            )
+
+        assert song.title == "Original"
+        assert song.artist == "Artist"
 
     def test_songs_property_returns_copy(self, library, fake_audio):
         library.add_song(title="Song", artist="A", original_path=fake_audio)

@@ -8,13 +8,13 @@ These tests verify that:
 """
 
 import os
-import shutil
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
+from src.library import SongLibrary
 from src.model_manager import ModelDownloader
 from src.ui.import_dialog import (
     ImportDialog,
@@ -188,6 +188,65 @@ class TestLocalImportErrorHandling:
         text = dialog._status_label.text()
         assert "Error" in text
         assert "space" in text.lower() or "disk" in text.lower()
+
+
+class TestDemucsMemoryConfirmation:
+    """RAM confirmation must happen before the library is mutated."""
+
+    def test_decline_leaves_no_row_and_retry_adds_once(self, qapp, tmp_path):
+        source = tmp_path / "song.wav"
+        source.write_bytes(b"audio")
+        library = SongLibrary(str(tmp_path / "data"))
+        manager = MagicMock()
+        manager.model_path.return_value = str(tmp_path / "htdemucs.onnx")
+        manager.is_model_downloaded.return_value = True
+        queue = MagicMock()
+        dialog = ImportDialog(
+            library,
+            manager,
+            separation_queue=queue,
+        )
+
+        with patch.object(
+            dialog,
+            "_check_memory_ok",
+            side_effect=[False, True],
+        ) as memory_check:
+            dialog._start_local_import(str(source))
+
+            assert library.songs == []
+            assert os.listdir(library._songs_dir) == []
+
+            dialog._start_local_import(str(source))
+
+        assert len(library.songs) == 1
+        assert queue.enqueue.call_count == 1
+        assert memory_check.call_args_list[0].args == (str(source), False)
+        assert memory_check.call_args_list[1].args == (str(source), False)
+        dialog.close()
+
+    def test_mdx_import_does_not_prompt_for_demucs_ram(self, qapp, tmp_path):
+        source = tmp_path / "song.wav"
+        source.write_bytes(b"audio")
+        library = SongLibrary(str(tmp_path / "data"))
+        manager = MagicMock()
+        manager.mdx_model_path.return_value = str(tmp_path / "mdx.onnx")
+        manager.is_mdx_model_downloaded.return_value = True
+        queue = MagicMock()
+        dialog = ImportDialog(
+            library,
+            manager,
+            separation_queue=queue,
+        )
+        dialog._model_combo.setCurrentIndex(2)
+
+        with patch.object(dialog, "_check_memory_ok") as memory_check:
+            dialog._start_local_import(str(source))
+
+        memory_check.assert_not_called()
+        assert len(library.songs) == 1
+        assert queue.enqueue.call_count == 1
+        dialog.close()
 
 
 # -----------------------------------------------------------------------
