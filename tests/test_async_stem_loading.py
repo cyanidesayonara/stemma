@@ -117,6 +117,25 @@ def qapp():
     return app
 
 
+class _QuietMainWindow(main_window_module.MainWindow):
+    """MainWindow with the startup library prune disabled.
+
+    This replaces ``patch.object(MainWindow, "_prune_incomplete_songs")``.
+    Mutating a method on a QWidget *subclass* and then instantiating that
+    class segfaults PySide6 6.10.2 on Python 3.14 -- the interpreter
+    AGENTS.md documents for local development -- with an access violation
+    in the next Qt allocation. CI stayed green because it runs 3.12, so
+    this module was uncollectable locally while looking healthy upstream.
+
+    Verified: patching QTimer.singleShot (a Qt built-in) is fine; patching
+    MainWindow._prune_incomplete_songs or PlayerControls.start_detection
+    is what crashes. Subclassing leaves the base class untouched.
+    """
+
+    def _prune_incomplete_songs(self) -> None:
+        pass
+
+
 @pytest.fixture
 def window(qapp, tmp_path):
     songs = []
@@ -144,16 +163,17 @@ def window(qapp, tmp_path):
     settings = QSettings("stemma", "stemma")
     settings.clear()
     player = player_module.MultiTrackPlayer()
-    with patch.object(
-        main_window_module.MainWindow, "_prune_incomplete_songs",
-    ), patch.object(
-        main_window_module.QTimer, "singleShot",
-    ), patch.object(
-        main_window_module.PlayerControls, "start_detection",
-    ):
-        result = main_window_module.MainWindow(
-            library, player, MagicMock(),
-        )
+    # QTimer.singleShot is a Qt built-in and patches safely; the two
+    # subclass-method patches this used to carry do not (see
+    # _QuietMainWindow), so they are replaced by a subclass override and
+    # an instance attribute.
+    # Suppressing the deferred startup callbacks (QTimer.singleShot) is
+    # enough on its own: nothing calls start_detection during
+    # construction, so the original class-level patch of it was
+    # unnecessary -- and leaving a stub in place would break the tests
+    # below that call the real start_detection.
+    with patch.object(main_window_module.QTimer, "singleShot"):
+        result = _QuietMainWindow(library, player, MagicMock())
 
     yield result
 
