@@ -21,9 +21,10 @@ is published.
 
 ## v3.0 -- practice cockpit
 
-- [#131: interface re-composition](https://github.com/cyanidesayonara/stemma/issues/131)
-  splits the oversized controls module behind the current behavior before
-  recomposing the practice-focused interface.
+- [#131: practice cockpit interface](https://github.com/cyanidesayonara/stemma/issues/131)
+  keeps `PlayerControls` as a facade over `TransportBar`, `StemMixer`,
+  `PracticeRack`, and `SongInfoBar`, then recomposes the practice-focused
+  layout. Scrolling chord lane and section detection stay in #133 / v3.2.
 
 ## v3.1 -- library and setlists
 

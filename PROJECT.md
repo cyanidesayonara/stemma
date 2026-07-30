@@ -172,10 +172,12 @@ stemma/
   session restore, navigation, and generation-safe asynchronous stem reads.
   Only the current `(song, generation)` may update player/UI state or surface
   an error.
-- **`player_controls.py`** — Transport, waveform, mixer, loops, rendered
-  speed/pitch, metronome/count-in, recording, and musical-analysis controls.
-  Waveform-peak work also uses generations so stale futures cannot overwrite
-  current state.
+- **`player_controls.py`** — Composition facade over `transport_bar.py`,
+  `stem_mixer.py`, `practice_rack.py`, and `song_info_bar.py`. Coordinates
+  transport, waveform, mixer, loops, rendered speed/pitch, metronome/count-in,
+  recording, and musical-analysis controls while preserving the current visual
+  layout. Waveform-peak work also uses generations so stale futures cannot
+  overwrite current state.
 - **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
 - **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
 - **`import_dialog.py`** — File browser or YouTube URL, metadata fields, and
