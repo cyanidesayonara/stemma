@@ -10,7 +10,6 @@ from src.downloader import (
     extract_metadata,
     download_audio,
     check_ffmpeg,
-    _get_ffmpeg_exe,
     DownloadError,
 )
 
@@ -197,9 +196,7 @@ class TestDownloadAudio:
 
         mock_ydl.download.side_effect = fake_download
 
-        result = download_audio(
-            "https://youtu.be/dQw4w9WgXcQ", output_path
-        )
+        download_audio("https://youtu.be/dQw4w9WgXcQ", output_path)
         assert os.path.isdir(str(tmp_path / "subdir"))
 
     @patch("src.downloader.yt_dlp.YoutubeDL")

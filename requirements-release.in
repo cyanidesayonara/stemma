@@ -1,0 +1,9 @@
+# Regenerate on Windows with Python 3.12:
+# See docs/DEVELOPMENT.md for the canonical pip-compile command.
+-r requirements.txt
+
+# Release validation and packaging.
+pyinstaller>=6.0
+pytest>=8.0.0
+pytest-timeout>=2.3.0
+ruff>=0.16.0

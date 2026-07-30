@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure Store credentials
-        uses: microsoft/store-submission@v1
+        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
           command: configure
           type: packaged
@@ -38,7 +38,7 @@ jobs:
       # Template only: confirm JSON against Partner Center before choosing submit_and_publish.
       - name: Update draft submission (MSIX URL)
         if: ${{ inputs.mode == 'submit_and_publish' }}
-        uses: microsoft/store-submission@v1
+        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
           command: update
           type: packaged
@@ -52,7 +52,7 @@ jobs:
 
       - name: Publish submission
         if: ${{ inputs.mode == 'submit_and_publish' }}
-        uses: microsoft/store-submission@v1
+        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
           command: publish
           type: packaged

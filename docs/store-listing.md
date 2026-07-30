@@ -4,6 +4,10 @@ Paste-ready text for Partner Center. Keep this file in sync when
 features ship -- it is the source of truth for the listing, so the
 listing never drifts the way it did between v2.3.0 and v2.5.0.
 
+This copy reflects the latest stable release, **v2.5.0**. The current source
+tree targets **v2.6.0**, which is not released; do not add its features to
+the published listing before that release ships.
+
 Fields map to Partner Center as follows:
 
 | Partner Center field | Section below |
@@ -48,8 +52,8 @@ your voice or instrument, up to seven semitones either way, and the
 displayed key follows. Count yourself in, play along to the metronome,
 and record your take against the backing to hear how it really sat.
 
-stemma reads the song as you work: tempo, musical key, time signature,
-and the chord under the playhead, updated as it plays. There is a
+stemma reads the song as you work: tempo, musical key, and the chord
+under the playhead, updated as it plays. There is a
 waveform to scrub, per-stem volume faders, and a library that remembers
 exactly where you left off -- song, position, mix, loop, speed, and
 pitch -- so practice picks up where it stopped.
@@ -77,37 +81,31 @@ semitones with the tempo unchanged. The key readout shows both the
 original and the transposed key, and recordings can either follow the
 shift or stay at their own pitch.
 
-Faster, smoother imports: a new 2-stem mode splits vocals from the
-backing track in seconds using your GPU, and separation now runs in the
-background -- the import window closes immediately and the song shows
-its progress in the library while you keep playing something else.
-
 Reliability: this release fixes a number of issues found in a full
 audit, including recorded takes that could play back silent, audio
 dropouts when deleting a take or clearing a loop mid-playback, the
 chord readout being wrong at reduced speed, export problems when
 exporting a loop region at a slower speed, and several cases where
 closing the app during a long task could interrupt it uncleanly. Model
-downloads now verify themselves and resume cleanly if interrupted.
+downloads now reject corrupt or incomplete files and can be retried cleanly
+after interruption.
 
 ---
 
 ## Product features
 
 AI stem separation: vocals, drums, bass, guitar, piano, other
-2-stem fast mode: vocals and backing track in seconds, GPU accelerated
-Background separation: keep using the app while songs process
 Per-stem mute, solo, and volume faders
 A-B loop for drilling a difficult passage
 Loop Trainer: speed steps up automatically on every loop repeat
 Pitch-preserving speed control from 50% to 200%
 Transpose up or down seven semitones, tempo unchanged
-Automatic tempo, key, and time-signature detection
+Automatic tempo and key detection
 Live chord readout that follows the playhead
 Beat-synced metronome with tap tempo and nudge
 Count-in before playback and before each loop repeat
 Record your own take against the backing track
-Latency compensation for recorded takes
+Manual timing offset for recorded takes
 Waveform with click-to-seek, playback cursor, and loop markers
 Export stems or a custom mix as WAV or MP3
 Import from an audio file or a YouTube link

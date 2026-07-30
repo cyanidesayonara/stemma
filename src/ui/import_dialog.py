@@ -380,6 +380,13 @@ class ImportDialog(QDialog):
 
     def _start_local_import(self, path: str) -> None:
         """Import a local audio file into the library and start separation."""
+        model_key = self._model_combo.currentData()
+        if not model_key.startswith("mdx_"):
+            is_6_stem = model_key == "htdemucs_6s"
+            if not self._check_memory_ok(path, is_6_stem):
+                self._button_box.setEnabled(True)
+                return
+
         title = self._title_edit.text() or "Untitled"
         artist = self._artist_edit.text() or "Unknown Artist"
 
@@ -397,7 +404,6 @@ class ImportDialog(QDialog):
         self._import_song_id = song.id
 
         # Start separation.
-        model_key = self._model_combo.currentData()
         model_path = self._model_path_for(model_key)
 
         if not self._model_downloaded_for(model_key):
@@ -524,18 +530,9 @@ class ImportDialog(QDialog):
     ) -> None:
         """Start separation: hand off to the queue, or run inline.
 
-        The RAM confirmation for the full-track Demucs engines happens
-        here in both cases -- it is a user prompt, so it must run while
-        the dialog is still up. MDX processes the track in small
-        spectrogram windows (a few hundred MB peak regardless of track
-        length), so the check doesn't apply to it.
+        The caller has already completed the Demucs RAM confirmation
+        against the source path before adding the song to the library.
         """
-        if not model_key.startswith("mdx_"):
-            is_6_stem = model_key == "htdemucs_6s"
-            if not self._check_memory_ok(song.original_path, is_6_stem):
-                self._button_box.setEnabled(True)
-                return
-
         if self._separation_queue is not None:
             # Background path: enqueue and close. The song row is
             # finalized (model_used) or rolled back by the main window

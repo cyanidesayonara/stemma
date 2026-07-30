@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from src.library import Song

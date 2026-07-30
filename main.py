@@ -13,6 +13,10 @@ from PySide6.QtCore import QSettings, QSharedMemory, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from src.diagnostics import (
+    diagnostics_requested,
+    main as diagnostics_main,
+)
 from src.paths import app_root
 from src.ui.splash_screen import SplashScreen
 from src.ui.styles import apply_tooltip_palette, get_stylesheet
@@ -83,4 +87,12 @@ def main() -> int:
     return qapp.exec()
 
 
-sys.exit(main())
+def _run() -> int:
+    """Run diagnostics when requested, otherwise launch the normal GUI."""
+    if diagnostics_requested(sys.argv):
+        return diagnostics_main(sys.argv)
+    return main()
+
+
+if __name__ == "__main__":
+    sys.exit(_run())

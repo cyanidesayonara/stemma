@@ -11,7 +11,7 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -57,7 +57,10 @@ from src.player import (
     PITCH_MAX_SEMITONES,
     PITCH_MIN_SEMITONES,
     MultiTrackPlayer,
+    StemLoadWorker,
 )
+from src.qt_signal_utils import safe_disconnect
+from src.separation_state import separation_is_complete
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -129,6 +132,15 @@ class MainWindow(QMainWindow):
         self._volume_toast: QLabel | None = None
         self._volume_toast_timer: QTimer | None = None
         self._separation_queue = SeparationQueue(self)
+        self._stem_load_generation = 0
+        self._stem_load_worker: StemLoadWorker | None = None
+        self._orphaned_stem_load_workers: list[StemLoadWorker] = []
+        self._loading_song_id: str | None = None
+        self._pending_autoplay_song_id: str | None = None
+        self._active_load_autoplay: tuple[int, str] | None = None
+        self._session_restore_song_id: str | None = None
+        self._pending_restore_callbacks: list[tuple[object, object]] = []
+        self._suppress_recording_reload = False
 
         self._settings = QSettings("stemma", "stemma")
         self._theme = self._settings.value("theme", "dark")
@@ -603,6 +615,17 @@ class MainWindow(QMainWindow):
 
     def _save_session(self) -> None:
         """Persist current player state so it can be restored on next launch."""
+        if self._loading_song_id is not None and self._current_song_id is None:
+            # The outgoing song was saved before its arrays were unloaded.
+            # Do not replace that valid session with an incomplete selection.
+            self._settings.setValue(
+                "session/repeat_mode", self._library_panel.repeat_mode
+            )
+            self._settings.setValue(
+                "session/shuffle_enabled",
+                self._library_panel.shuffle_enabled,
+            )
+            return
         self._settings.setValue(
             "session/song_id", self._current_song_id or ""
         )
@@ -726,7 +749,19 @@ class MainWindow(QMainWindow):
         if song is None:
             return
 
+        song_id = str(song_id)
+        self._session_restore_song_id = song_id
         if not self._library_panel.select_song(song_id):
+            self._session_restore_song_id = None
+            return
+
+    def _apply_session_restore(
+        self,
+        song_id: str,
+        generation: int,
+    ) -> None:
+        """Apply saved controls after the matching song arrays are live."""
+        if not self._is_current_song_generation(generation, song_id):
             return
 
         # Stem mute/solo/volume
@@ -742,12 +777,6 @@ class MainWindow(QMainWindow):
             volumes = json.loads(self._settings.value("session/volumes", "{}"))
         except (json.JSONDecodeError, TypeError):
             volumes = {}
-        try:
-            nudge_offsets = json.loads(
-                self._settings.value("session/nudge_offsets", "{}")
-            )
-        except (json.JSONDecodeError, TypeError):
-            nudge_offsets = {}
 
         self._player_controls.restore_stem_state(muted, soloed, volumes)
 
@@ -813,6 +842,9 @@ class MainWindow(QMainWindow):
         pitch_non_identity = pitch_semi != 0
 
         def _seek_after_render(_v: object = None, pos=position) -> None:
+            self._disconnect_pending_restore_callbacks()
+            if not self._is_current_song_generation(generation, song_id):
+                return
             self._player.seek(pos)
             # Ensure key label reflects pitch even if only speed_changed fired.
             self._player_controls._refresh_key_label()
@@ -824,20 +856,18 @@ class MainWindow(QMainWindow):
             # speed supersedes pitch when both are active.
             if speed_non_identity:
                 def _after_speed(_s: float) -> None:
-                    try:
-                        self._player.speed_changed.disconnect(_after_speed)
-                    except (TypeError, RuntimeError):
-                        pass
                     _seek_after_render()
                 self._player.speed_changed.connect(_after_speed)
+                self._pending_restore_callbacks.append(
+                    (self._player.speed_changed, _after_speed)
+                )
             else:
                 def _after_pitch(_p: int) -> None:
-                    try:
-                        self._player.pitch_changed.disconnect(_after_pitch)
-                    except (TypeError, RuntimeError):
-                        pass
                     _seek_after_render()
                 self._player.pitch_changed.connect(_after_pitch)
+                self._pending_restore_callbacks.append(
+                    (self._player.pitch_changed, _after_pitch)
+                )
 
             if pitch_non_identity:
                 self._player.set_pitch(pitch_semi)
@@ -951,6 +981,27 @@ class MainWindow(QMainWindow):
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
 
+    def _is_current_song_generation(
+        self,
+        generation: int,
+        song_id: str,
+    ) -> bool:
+        return (
+            generation == self._stem_load_generation
+            and song_id == self._current_song_id
+            and self._loading_song_id is None
+        )
+
+    def _disconnect_pending_restore_callbacks(self) -> None:
+        """Disconnect one-shot render callbacks from superseded restores."""
+        callbacks = self._pending_restore_callbacks
+        self._pending_restore_callbacks = []
+        for signal, callback in callbacks:
+            try:
+                signal.disconnect(callback)
+            except (TypeError, RuntimeError):
+                pass
+
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
         super().showEvent(event)
@@ -973,8 +1024,13 @@ class MainWindow(QMainWindow):
         # Abort any background separation; interrupted songs are pruned
         # from the library on the next launch (no stems on disk).
         self._separation_queue.shutdown(5000)
+        self._shutdown_stem_loads()
 
-        self._player.stop()
+        self._suppress_recording_reload = True
+        try:
+            self._player.stop()
+        finally:
+            self._suppress_recording_reload = False
         # Cancel and drain stretch/peak workers *before* Qt tears down,
         # otherwise Python's atexit blocks in ThreadPoolExecutor.join()
         # (librosa pitch/time-stretch is uninterruptible mid-call, so
@@ -991,6 +1047,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.song_removal_requested.connect(
+            self._on_song_removal_requested
+        )
         self._library_panel.song_removed.connect(self._on_song_removed)
         self._library_panel.cancel_separation_requested.connect(
             self._separation_queue.cancel_song
@@ -1028,7 +1087,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_song_selected(self, song_id: str) -> None:
-        """Load stems for the selected song into the player."""
+        """Start loading the selected song without blocking the GUI thread."""
         song = self._library.get_song(song_id)
         if song is None:
             return
@@ -1040,128 +1099,265 @@ class MainWindow(QMainWindow):
             if os.path.isfile(path):
                 stem_paths[name] = path
 
-        if stem_paths:
-            # Save state for the outgoing song.
-            if self._current_song_id:
-                self._settings.setValue(
-                    "session/muted_stems",
-                    json.dumps(sorted(self._player.muted_stems)),
-                )
-                self._settings.setValue(
-                    "session/soloed_stems",
-                    json.dumps(sorted(self._player.soloed_stems)),
-                )
-                self._settings.setValue(
-                    "session/volumes",
-                    json.dumps(self._player.volumes),
-                )
-                self._settings.setValue(
-                    "session/nudge_offsets",
-                    json.dumps(self._player.nudge_offsets),
-                )
-                prefix = f"detection/{self._current_song_id}"
-                self._settings.setValue(
-                    f"{prefix}/key",
-                    self._player_controls.detected_key,
-                )
-                self._settings.setValue(
-                    f"{prefix}/key_conf",
-                    self._player_controls.key_confidence,
-                )
-                self._settings.setValue(
-                    f"{prefix}/bpm_text",
-                    self._player_controls.detected_bpm_text,
-                )
-                self._settings.setValue(
-                    f"{prefix}/bpm_conf",
-                    self._player_controls.bpm_confidence,
-                )
-                self._settings.setValue(
-                    f"{prefix}/beat_times",
-                    json.dumps(self._player.beat_times),
-                )
-                self._settings.setValue(
-                    f"{prefix}/downbeat_times",
-                    json.dumps(self._player.downbeat_times),
-                )
-                self._settings.setValue(
-                    f"{prefix}/beat_nudge_ms",
-                    self._player_controls.beat_sync_nudge_ms,
-                )
-                self._settings.setValue(
-                    f"{prefix}/chord_sequence",
-                    json.dumps(self._player.chord_sequence),
-                )
-                self._settings.setValue(f"{prefix}/det_ver", 4)
+        if not stem_paths:
+            return
+        source_stem_names = tuple(stem_paths)
+        for take_path in sorted(glob.glob(
+            os.path.join(song.stems_path, "recording_take*.wav")
+        )):
+            stem_name = os.path.basename(take_path).replace(".wav", "")
+            stem_paths[stem_name] = take_path
 
+        if self._current_song_id is not None:
+            self._save_session()
+
+        autoplay = self._pending_autoplay_song_id == song_id
+        self._pending_autoplay_song_id = None
+        if (
+            self._session_restore_song_id is not None
+            and self._session_restore_song_id != song_id
+        ):
+            self._session_restore_song_id = None
+
+        self._suppress_recording_reload = True
+        try:
             self._player.stop()
-            self._player.load_stems(stem_paths)
-            self._current_song_id = song_id
-            self._library_panel.set_playing_song(song_id)
+            self._invalidate_stem_load()
+            self._player.unload()
+        finally:
+            self._suppress_recording_reload = False
+        self._current_song_id = None
+        self._loading_song_id = song_id
+        self._library_panel.set_playing_song(None)
+        self._player_controls.show_loading(song.title)
+        self.setWindowTitle(f"Loading {song.title} \u2014 stemma")
 
-            # Restore previously detected values for this song (if any).
-            prefix = f"detection/{song_id}"
-            saved_key = str(
-                self._settings.value(f"{prefix}/key", "") or ""
-            )
-            saved_key_conf = str(
-                self._settings.value(f"{prefix}/key_conf", "") or ""
-            )
-            saved_bpm = str(
-                self._settings.value(f"{prefix}/bpm_text", "") or ""
-            )
-            saved_bpm_conf = str(
-                self._settings.value(f"{prefix}/bpm_conf", "") or ""
-            )
-            self._player_controls.set_detected_key(
-                saved_key, saved_key_conf,
-            )
-            self._player_controls.set_detected_bpm_text(
-                saved_bpm, saved_bpm_conf,
-            )
-            # Schema version 4 = major/minor-only chords (no false 7ths).
-            # For older sessions, skip restoring beat/chord data so
-            # set_stem_names triggers re-detection with the new algorithm.
-            det_ver = int(
-                self._settings.value(f"{prefix}/det_ver", 0) or 0
-            )
-            try:
-                nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
-                nudge = float(nudge_str) if nudge_str else 0.0
-                self._player_controls.set_beat_sync_nudge(nudge)
+        generation = self._stem_load_generation
+        if autoplay:
+            self._active_load_autoplay = (generation, song_id)
 
-                if det_ver >= 4:
-                    bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
-                    dt_str = self._settings.value(
-                        f"{prefix}/downbeat_times", "[]",
+        worker = StemLoadWorker(stem_paths)
+        worker.generation = generation
+        worker.song_id = song_id
+        worker.source_stem_names = source_stem_names
+        worker.completed.connect(self._on_stem_load_completed)
+        worker.error.connect(self._on_stem_load_error)
+        worker.finished.connect(self._on_stem_load_finished)
+        self._stem_load_worker = worker
+        worker.start()
+
+    @Slot(dict, int)
+    def _on_stem_load_completed(
+        self,
+        stems: dict,
+        sample_rate: int,
+    ) -> None:
+        """Receive a worker result on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
+        self._handle_stem_load_completed(worker, stems, sample_rate)
+
+    def _handle_stem_load_completed(
+        self,
+        worker: StemLoadWorker,
+        stems: dict,
+        sample_rate: int,
+    ) -> None:
+        """Apply arrays only when their worker is still the active load."""
+        generation = worker.generation
+        song_id = worker.song_id
+        if (
+            generation != self._stem_load_generation
+            or song_id != self._loading_song_id
+            or worker is not self._stem_load_worker
+        ):
+            return
+        song = self._library.get_song(song_id)
+        if song is None:
+            self._clear_missing_stem_load(generation, song_id)
+            return
+
+        self._player.apply_loaded_stems(stems, sample_rate)
+        self._current_song_id = song_id
+        self._loading_song_id = None
+        self._library_panel.set_playing_song(song_id)
+        self._restore_song_detection(song_id)
+        self._player_controls.set_stem_names(
+            list(worker.source_stem_names)
+        )
+        self._player.set_recording_song_dir(song.stems_path)
+        self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
+        self._load_existing_recordings(song.stems_path)
+
+        if self._session_restore_song_id == song_id:
+            self._session_restore_song_id = None
+            self._apply_session_restore(song_id, generation)
+
+        if self._active_load_autoplay == (generation, song_id):
+            self._active_load_autoplay = None
+            self._player.play()
+
+    def _restore_song_detection(self, song_id: str) -> None:
+        """Restore cached beat, key, tempo, and chord data for a song."""
+        prefix = f"detection/{song_id}"
+        saved_key = str(self._settings.value(f"{prefix}/key", "") or "")
+        saved_key_conf = str(
+            self._settings.value(f"{prefix}/key_conf", "") or ""
+        )
+        saved_bpm = str(
+            self._settings.value(f"{prefix}/bpm_text", "") or ""
+        )
+        saved_bpm_conf = str(
+            self._settings.value(f"{prefix}/bpm_conf", "") or ""
+        )
+        self._player_controls.set_detected_key(saved_key, saved_key_conf)
+        self._player_controls.set_detected_bpm_text(saved_bpm, saved_bpm_conf)
+        det_ver = int(self._settings.value(f"{prefix}/det_ver", 0) or 0)
+        try:
+            nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
+            nudge = float(nudge_str) if nudge_str else 0.0
+            self._player_controls.set_beat_sync_nudge(nudge)
+            if det_ver >= 4:
+                bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
+                dt_str = self._settings.value(
+                    f"{prefix}/downbeat_times", "[]",
+                )
+                beat_times = json.loads(str(bt_str)) if bt_str else []
+                downbeat_times = json.loads(str(dt_str)) if dt_str else []
+                if beat_times:
+                    self._player_controls.restore_beat_times(
+                        beat_times, downbeat_times,
                     )
-                    b_times = json.loads(str(bt_str)) if bt_str else []
-                    d_times = json.loads(str(dt_str)) if dt_str else []
-                    if b_times:
-                        self._player_controls.restore_beat_times(
-                            b_times, d_times,
-                        )
+                cs_str = self._settings.value(
+                    f"{prefix}/chord_sequence", "[]",
+                )
+                chords = json.loads(str(cs_str)) if cs_str else []
+                self._player_controls.restore_chord_sequence(
+                    [(float(time), str(chord)) for time, chord in chords]
+                )
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
 
-                    cs_str = self._settings.value(
-                        f"{prefix}/chord_sequence", "[]",
-                    )
-                    chords = json.loads(str(cs_str)) if cs_str else []
-                    chords = [(float(t), str(c)) for t, c in chords]
-                    # Restore even when empty: signals detection ran but
-                    # found no chords (prevents spurious re-detection).
-                    self._player_controls.restore_chord_sequence(chords)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+    @Slot(str)
+    def _on_stem_load_error(self, message: str) -> None:
+        """Receive a worker error on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
+        self._handle_stem_load_error(worker, message)
 
-            self._player_controls.set_stem_names(list(stem_paths.keys()))
-            self._player.set_recording_song_dir(song.stems_path)
-            self.setWindowTitle(f"{song.artist} \u2014 {song.title} \u2014 stemma")
-            self._load_existing_recordings(song.stems_path)
+    def _handle_stem_load_error(
+        self,
+        worker: StemLoadWorker,
+        message: str,
+    ) -> None:
+        """Apply an error only for the current worker generation."""
+        generation = worker.generation
+        song_id = worker.song_id
+        if (
+            generation != self._stem_load_generation
+            or song_id != self._loading_song_id
+            or worker is not self._stem_load_worker
+        ):
+            return
+        self._loading_song_id = None
+        self._active_load_autoplay = None
+        if self._session_restore_song_id == song_id:
+            self._session_restore_song_id = None
+        self._player.unload()
+        self._current_song_id = None
+        self._player_controls.clear_song()
+        self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
+        self.setWindowTitle("stemma")
+        QMessageBox.warning(
+            self, "Load Song", f"Could not load this song:\n{message}",
+        )
+
+    @Slot()
+    def _on_stem_load_finished(self) -> None:
+        """Release a completed worker on the MainWindow thread."""
+        worker = self.sender()
+        if worker is None or not hasattr(worker, "generation"):
+            return
+        if worker is self._stem_load_worker:
+            self._stem_load_worker = None
+        if worker in self._orphaned_stem_load_workers:
+            self._orphaned_stem_load_workers.remove(worker)
+        worker.setParent(None)
+        worker.deleteLater()
+
+    def _invalidate_stem_load(self) -> None:
+        """Supersede the active load without waiting for its disk reads."""
+        self._disconnect_pending_restore_callbacks()
+        self._stem_load_generation += 1
+        self._loading_song_id = None
+        self._active_load_autoplay = None
+        worker = self._stem_load_worker
+        self._stem_load_worker = None
+        if worker is None:
+            return
+        safe_disconnect(worker.completed)
+        safe_disconnect(worker.error)
+        if worker.isRunning():
+            self._orphaned_stem_load_workers.append(worker)
+        else:
+            worker.setParent(None)
+            worker.deleteLater()
+
+    def _shutdown_stem_loads(self) -> None:
+        """Invalidate and drain all stem readers before Qt teardown."""
+        self._invalidate_stem_load()
+        workers = list(self._orphaned_stem_load_workers)
+        for worker in workers:
+            if worker.isRunning():
+                worker.wait()
+            worker.setParent(None)
+            worker.deleteLater()
+        self._orphaned_stem_load_workers.clear()
+
+    def _drain_stem_loads_for_song(self, song_id: str) -> None:
+        """Drain readers for *song_id* before its directory is deleted."""
+        active = self._stem_load_worker
+        if active is not None and active.song_id == song_id:
+            self._invalidate_stem_load()
+        for worker in list(self._orphaned_stem_load_workers):
+            if worker.song_id != song_id:
+                continue
+            safe_disconnect(worker.completed)
+            safe_disconnect(worker.error)
+            safe_disconnect(worker.finished)
+            if worker.isRunning():
+                worker.wait()
+            self._orphaned_stem_load_workers.remove(worker)
+            worker.setParent(None)
+            worker.deleteLater()
+
+    def _clear_missing_stem_load(
+        self,
+        generation: int,
+        song_id: str,
+    ) -> None:
+        """Restore an empty usable UI if a loaded library row disappeared."""
+        if (
+            generation != self._stem_load_generation
+            or song_id != self._loading_song_id
+        ):
+            return
+        self._loading_song_id = None
+        self._active_load_autoplay = None
+        self._player.unload()
+        self._current_song_id = None
+        self._player_controls.clear_song()
+        self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
+        self.setWindowTitle("stemma")
 
     def _load_existing_recordings(self, song_dir: str) -> None:
-        """Scan *song_dir* for recording_take*.wav and load them as stems.
+        """Build mixer rows for recording takes already loaded by the worker.
 
-        After loading, restores any saved mute/solo/volume/nudge state for
+        Afterward, restores any saved mute/solo/volume/nudge state for
         the recording stems from QSettings.
         """
         takes = sorted(glob.glob(
@@ -1179,7 +1375,12 @@ class MainWindow(QMainWindow):
                 display = f"Take {num}"
             except ValueError:
                 display = stem_name
-            self._add_recording_stem(stem_name, take_path, display)
+            if stem_name not in self._player.stems:
+                continue
+            row = self._player_controls.add_recording_row(
+                stem_name, display,
+            )
+            row.delete_requested.connect(self._on_delete_recording)
 
         # A song opened with the maximum number of takes must start with
         # the record button disabled (previously only recording/deleting
@@ -1232,14 +1433,28 @@ class MainWindow(QMainWindow):
 
         *direction*: +1 for next, -1 for previous.
 
-        Stem loading (via `_on_song_selected`) is synchronous, so by the
-        time `select_song` returns the player is ready to start.
+        Playback starts from the matching asynchronous load callback.
         """
         next_id = self._get_next_song_id(direction)
         if next_id is None:
             return
-        self._library_panel.select_song(next_id)
-        self._player.play()
+        self._pending_autoplay_song_id = next_id
+        if not self._library_panel.select_song(next_id):
+            self._pending_autoplay_song_id = None
+            return
+        if self._pending_autoplay_song_id == next_id:
+            # Selecting the already-current row emits no selection signal.
+            self._pending_autoplay_song_id = None
+            if (
+                self._loading_song_id == next_id
+                and self._stem_load_worker is not None
+            ):
+                self._active_load_autoplay = (
+                    self._stem_load_generation,
+                    next_id,
+                )
+            elif self._current_song_id == next_id:
+                self._player.play()
 
     def _get_next_song_id(self, direction: int = 1) -> str | None:
         """Resolve the next song ID respecting shuffle and repeat.
@@ -1258,9 +1473,12 @@ class MainWindow(QMainWindow):
             return self._pop_shuffle_queue(songs)
 
         # Sequential: find current index and step.
-        if self._current_song_id not in songs:
+        current_song_id = (
+            self.__dict__.get("_loading_song_id") or self._current_song_id
+        )
+        if current_song_id not in songs:
             return songs[0] if songs else None
-        idx = songs.index(self._current_song_id)
+        idx = songs.index(current_song_id)
         next_idx = idx + direction
         if self._library_panel.repeat_mode == REPEAT_ALL:
             next_idx = next_idx % len(songs)
@@ -1272,12 +1490,15 @@ class MainWindow(QMainWindow):
         """Pop the next song from the shuffle queue, regenerating if needed."""
         # Filter out stale IDs and the current song.
         song_set = set(songs)
+        current_song_id = (
+            self.__dict__.get("_loading_song_id") or self._current_song_id
+        )
         self._shuffle_queue = [
             sid for sid in self._shuffle_queue
-            if sid in song_set and sid != self._current_song_id
+            if sid in song_set and sid != current_song_id
         ]
         if not self._shuffle_queue:
-            candidates = [sid for sid in songs if sid != self._current_song_id]
+            candidates = [sid for sid in songs if sid != current_song_id]
             if not candidates:
                 return None
             random.shuffle(candidates)
@@ -1291,6 +1512,8 @@ class MainWindow(QMainWindow):
 
     def _on_recording_saved(self, path: str) -> None:
         """Handle a newly saved recording: load it and add a UI row."""
+        if self._suppress_recording_reload:
+            return
         base = os.path.basename(path)
         stem_name = base.replace(".wav", "")
         try:
@@ -1363,16 +1586,30 @@ class MainWindow(QMainWindow):
 
     def _on_close_song(self) -> None:
         """Unload the song and return to the empty logo state."""
-        self._player.unload()
+        self._invalidate_stem_load()
+        self._pending_autoplay_song_id = None
+        self._session_restore_song_id = None
+        self._suppress_recording_reload = True
+        try:
+            self._player.unload()
+        finally:
+            self._suppress_recording_reload = False
         self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
         self._library_panel.set_playing_song(None)
+        self._library_panel.clear_selection()
         self._current_song_id = None
         self.setWindowTitle("stemma")
 
+    def _on_song_removal_requested(self, song_id: str) -> None:
+        """Stop and drain a song before its files are removed."""
+        if song_id in (self._current_song_id, self._loading_song_id):
+            self._on_close_song()
+        self._drain_stem_loads_for_song(song_id)
+
     def _on_song_removed(self, song_id: str) -> None:
         """Unload the player if the removed song is the one loaded."""
-        if song_id == self._current_song_id:
+        if song_id in (self._current_song_id, self._loading_song_id):
             self._on_close_song()
 
     def _on_import(self) -> None:
@@ -1404,18 +1641,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _prune_incomplete_songs(self) -> None:
-        """Remove library rows whose song dir contains no stems at all.
+        """Remove library rows whose expected separation is incomplete.
 
-        A row without stems can only come from a separation that never
-        finished (app closed or crashed mid-job); keeping it would show
-        an unplayable ghost entry.
+        New jobs require valid atomic completion state. Markerless songs
+        from older versions remain compatible when every stem expected by
+        their persisted model is present.
         """
         for song in list(self._library.songs):
-            has_stems = any(
-                os.path.isfile(os.path.join(song.stems_path, f"{name}.wav"))
-                for name in ALL_STEM_NAMES
-            )
-            if not has_stems:
+            if not separation_is_complete(
+                song.stems_path,
+                song.model_used,
+            ):
                 try:
                     self._library.remove_song(song.id)
                 except KeyError:

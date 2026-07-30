@@ -11,117 +11,53 @@ mute/solo any stem, and play along with your instrument.
 
 Local-only. No cloud, no subscriptions, no command line needed by the end user.
 
-For full technical specs, module descriptions, and the phased roadmap, see `PROJECT.md`.
+Latest stable release: **v2.5.0**. The current `main` line and this branch
+target **v2.6.0**, which is not released.
+
+Canonical documents:
+
+- `PROJECT.md`: durable architecture and technical reference
+- `docs/DEVELOPMENT.md`: setup, validation, diagnostics, packaging, and
+  contribution workflow
+- `docs/ROADMAP.md`: concise roadmap backed by live GitHub issues
+- `CHANGELOG.md`: shipped release notes only
+- `docs/DEVELOPMENT_LOG.md`: historical session and implementation notes
 
 ## Tech Stack
 
 - Python 3.14 (local dev; GitHub Actions CI uses 3.12 per `.github/workflows/ci.yml`)
 - PySide6 (Qt 6) for GUI
-- ONNX Runtime for inference (no PyTorch); DirectML GPU path attempted with CPU fallback — separation runs on CPU today, see issue #125
-- HTDemucs v4 ONNX models (4-stem and 6-stem)
+- ONNX Runtime DirectML for inference; no PyTorch
+- MDX-Net two-stem separation selects DirectML when available and reports
+  CPU fallback
+- HTDemucs v4 four/six-stem separation remains CPU-only; DirectML model
+  re-export research is tracked in
+  [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
 - sounddevice + soundfile for audio playback
 - numpy for audio buffer processing
 - librosa for STFT/iSTFT (pre/post-processing outside ONNX model)
 - yt-dlp + ffmpeg for YouTube audio download
 - PyInstaller for packaging
 
-## Project Structure
+## Architecture at a Glance
 
-```
-stemma/
-  main.py              # Entry point
-  requirements.txt
-  pyproject.toml       # pytest config (markers, pythonpath)
-  PROJECT.md           # Detailed spec and roadmap (reference doc)
-  AGENTS.md            # This file (AI context, living document)
-  CHANGELOG.md         # Append-only session history
-  stemma.spec              # PyInstaller one-folder (COLLECT) build spec
-  requirements-dev.txt     # Dev/build dependencies (pyinstaller)
-  .github/workflows/ci.yml      # CI: fast tests on push
-  .github/workflows/release.yml # On v* tags: sync version + manifest, fast tests, stemma.zip + stemma.msix, GitHub Release
-  .github/workflows/partner-center-submit.yml # Optional manual Partner Center API (default: credentials check only)
-  src/
-    app.py             # QApplication setup
-    app_settings.py    # Typed QSettings reads (audio, export, import defaults)
-    data_paths.py      # Per-user data dir + legacy repo data/ migration
-    paths.py           # app_root(): frozen-build-aware root dir (sys._MEIPASS)
-    version.py         # __version__ string
-    import_messages.py # User-facing import / download / separation error text
-    metronome.py       # Tap tempo / BPM helpers for metronome UI
-    click_utils.py     # Metronome click sample generation
-    separator.py       # HTDemucs 4/6-stem ONNX separation engine (CPU)
-    mdx_separator.py   # MDX-Net 2-stem ONNX separation engine (DirectML GPU)
-    separation_queue.py # Background separation job queue (serial)
-    beat_detector.py   # BPM/key/chord detection + beat_this ONNX beat tracking
-    model_manager.py   # Download/cache ONNX models
-    player.py          # Multi-track audio player
-    library.py         # Song library (JSON-based)
-    exporter.py        # Export stems as WAV/MP3
-    downloader.py      # YouTube audio download (yt-dlp)
-    post_processing.py # Wiener filter + soft gate
-    qt_signal_utils.py # PySide6 helpers (safe signal disconnect)
-    waveform.py        # Waveform peak computation (numpy)
-    ui/
-      main_window.py
-      player_controls.py
-      waveform_widget.py   # Waveform display (QPainter)
-      library_panel.py
-      import_dialog.py
-      preferences_dialog.py  # Edit > Preferences
-      audio_sync.py      # Splash/logo audio-visual timing constants
-      animated_logo.py   # Animated main logo (notes + waves, click Easter egg)
-      animated_arpeggio.py # Animated footer arpeggio logo (letter glow, click Easter egg)
-      splash_screen.py   # Animated startup splash with arpeggio logo
-      wav_playback.py    # Logo SFX entry (lazy-loads Qt Multimedia impl)
-      _wav_playback_impl.py  # QSoundEffect + winsound fallback
-      styles.py          # Dark / light themes
-  tests/               # pytest test suite (~845 fast + slow/hardware deselected by default)
-    conftest.py        # Shared fixtures
-    test_separator.py
-    test_model_manager.py
-    test_player.py
-    test_library.py
-    test_downloader.py
-    test_exporter.py
-    test_post_processing.py
-    test_waveform.py
-    test_waveform_widget.py
-    test_import_dialog.py
-    test_import_messages.py
-    test_drag_drop.py
-    test_library_panel.py
-    test_metadata_edit.py
-    test_speed_control.py
-    test_data_paths.py
-    test_app_settings.py
-    test_theme.py
-    test_integration.py
-    test_session_persistence.py
-    test_metronome.py
-    test_count_in.py
-    test_splash_screen.py
-    test_animated_logo.py
-    test_animated_arpeggio.py
-    test_audio_sync.py
-    test_wav_playback.py
-    test_qt_signal_utils.py
-  assets/
-    icons/             # SVG logos, .ico app icon, PNGs
-    audio/             # Startup arpeggio WAV
-    msix/              # Generated MSIX visual assets (Store logos)
-  msix/
-    AppxManifest.xml   # MSIX Desktop Bridge manifest (Store identity)
-  scripts/
-    generate_startup_audio.py  # One-time audio asset generator
-    generate_msix_assets.py    # Generate MSIX PNGs from icon_256.png
-    build_msix.ps1             # Pack PyInstaller output into .msix
-    sync_release_version.ps1   # Align version.py + AppxManifest with a release tag
-  data/                # Legacy dev-only folder; packaged app uses OS user dir
-    models/            # (when using repo data/) Cached ONNX models
-    songs/{song-id}/   # Separated stems per song
-```
+- `main.py` and `src/app.py`: diagnostics or Qt application startup
+- `src/separator.py` and `src/mdx_separator.py`: HTDemucs and MDX
+  separation engines
+- `src/onnx_session.py`: shared DirectML-first session construction with
+  CPU fallback
+- `src/separation_queue.py`: serialized background separation jobs
+- `src/player.py`: real-time multi-track playback, loops, metronome,
+  recording, and rendered speed/pitch changes
+- `src/library.py` and `src/data_paths.py`: persistent song metadata and
+  per-user storage
+- `src/beat_detector.py`: tempo, beat/downbeat, key, and chord analysis
+- `src/ui/`: Qt windows, dialogs, controls, themes, and visualizations
+- `tests/`: fast tests plus explicitly marked slow-model and hardware tests
 
-Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\\stemma` on Windows), with a one-time copy from `./data` when that folder is new. See `src/data_paths.py`.
+Runtime data defaults to `%LOCALAPPDATA%\stemma`, with one-time migration
+from the legacy repository `data/` directory. See `PROJECT.md` for design
+rationale and subsystem boundaries.
 
 ## Rules
 
@@ -141,89 +77,25 @@ Runtime library and models default to the per-user folder (e.g. `%LOCALAPPDATA%\
 
 ## Current Status
 
-Last updated: 2026-07-09
+Verified against GitHub Releases on 2026-07-28:
 
-Current version: **v2.5.0** — v2.4.0 shipped pitch shift / key transposition (#117); v2.4.1 was a stability pass; v2.5.0 adds the Loop Trainer (auto speed ramp per loop repeat).
+- Latest stable: **v2.5.0**
+- Current source and manifest target: **v2.6.0**, unreleased
+- v2.6 focus: DirectML-capable MDX two-stem separation, background imports,
+  correctness/lifecycle hardening, reproducible release validation, and
+  documentation/Project repair
 
-### Phase 1 (MVP) -- Complete
-All core functionality implemented and tested:
-- ONNX stem separation with overlap-add Hann windowing
-- Multi-track player with mute/solo/volume
-- Song library with JSON persistence and corruption recovery
-- Full Qt UI with dark theme
-- Integration test suite (including hardware playback)
+Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
+releases. Do not infer release status from code already present on a branch.
 
-### Phase 2 (Polish) -- Complete
-- MP3 export (lameenc, 320kbps)
-- Keyboard shortcuts (Space, S, arrows, Ctrl+1-6, A/B/L, Shift+Up/Down speed, Shift+Left/Right pitch, M, C; Help > Keyboard Shortcuts)
-- Per-stem volume sliders
-- Window state persistence
-- Wiener filter + soft gate post-processing
-- Robustness fixes (thread cleanup, stream safety, JSON recovery)
-- CI pipeline (GitHub Actions)
+## Canonical Validation
 
-### Phase 3 (Advanced) -- Complete
-- [x] A-B loop repeat (#44, PR #48)
-- [x] YouTube URL import (#41, PR #49)
-- [x] Waveform visualization (#43, PR #58)
-- [x] Drag-and-drop import (#51, PR #60)
-- [x] Bundled ffmpeg via imageio-ffmpeg (PR #60)
-- [x] Error handling and model download UX (#73, PR #82)
-
-### v1.0 Release -- Shipped
-- [x] Library search/filter (#54, PR #63)
-- [x] Song metadata editing (#52, PR #64)
-- [x] Playback speed control (#53, PR #67)
-- [x] Light theme + theme switch (#70)
-- [x] App icon and branding (#61)
-- [x] User data directory, preferences, single-instance lock (#72, PR #81)
-- [x] PyInstaller packaging + GitHub Release (#56, PR #83)
-
-### v1.1 Release -- Shipped
-- [x] Session persistence (#55, PR #85)
-- [x] Metronome with BPM entry (#57, PR #86)
-- [x] Count-in before playback/loop start (#78, PR #87)
-
-### v1.2.0 Release -- Shipped
-- [x] Record audio track: full-duplex recording, multiple takes, input device, latency compensation (#79, PR #91)
-
-### v2.0 Release
-- [x] Animated arpeggio startup logo (#76, PR #94)
-- [x] UI/UX redesign, per-stem waveforms, post-recording track adjustment (#92, PR #101, #102)
-- [x] Export enhancements: A-B loop region, count-in (#98, #99, PR #101)
-- [x] Post-recording track nudge (#100, PR #101)
-- [x] MSIX packaging for Microsoft Store (#74)
-
-### Post-2.0 Backlog
-- [x] Tempo/key detection & beat-synced metronome (#42)
-- [x] Pitch shift / key transposition (#117, shipped v2.4.0)
-- [ ] Experimental DSP (#28)
-- [ ] Real-time streaming (#13)
-- [ ] GPU separation via DirectML re-export (#125)
-
-### v2.1.0 Release -- Shipped
-- [x] Metronome beat-sync nudge (±500ms spinbox, all click sources)
-- [x] Count-in controls moved to transport bar
-- [x] Live volume combos (editable, real-time slider sync)
-- [x] Library two-row display with separator lines and teal selection
-- [x] Recording session persistence (nudge/mute/solo/volume per take)
-
-### v2.2.0 Release -- Shipped
-- [x] Real-time chord detection (major/minor, Viterbi HMM smoothing, silence gate) (#118)
-- [x] beat_this ONNX model auto-download + chunked inference for beat/downbeat tracking (#118)
-- [x] QThread crash fix: worker orphaning pattern with identity-checked finished callback (#118)
-- [x] Badge HTML regeneration on theme switch; light mode readability fixes (#118)
-- [x] "Chord: --" placeholder when stopped or during silence (#118)
-
-## Test Suite
-
-```
-pytest                                    # ~845 fast tests (~25s)
-pytest -m slow                            # ONNX inference tests (needs model)
-pytest -m hardware                        # audible playback test (needs speakers)
-set STEMMA_TEST_SONG=path/to/song.mp3     # Required for slow/hardware tests
+```powershell
+python -m ruff check .
+$env:QT_QPA_PLATFORM = "offscreen"
+python -m pytest -m "not slow and not hardware"
+python main.py --diagnostics
 ```
 
-## Session History
-
-See `CHANGELOG.md` for a detailed log of what was done in each session.
+See `docs/DEVELOPMENT.md` for focused, slow-model, hardware, lock-generation,
+packaging, and release commands.

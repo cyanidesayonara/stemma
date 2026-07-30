@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyle,
     QStyledItemDelegate,
-    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -376,6 +375,7 @@ class LibraryPanel(QWidget):
     """
 
     song_selected = Signal(str)
+    song_removal_requested = Signal(str)  # emitted before files are deleted
     song_removed = Signal(str)  # emitted with the removed song's id
     cancel_separation_requested = Signal(str)  # song_id still separating
     repeat_mode_changed = Signal(str)
@@ -687,6 +687,11 @@ class LibraryPanel(QWidget):
                 return True
         return False
 
+    def clear_selection(self) -> None:
+        """Clear the current row so it can be selected again explicitly."""
+        self._list.setCurrentItem(None)
+        self._list.clearSelection()
+
     def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
@@ -749,6 +754,9 @@ class LibraryPanel(QWidget):
                     QMessageBox.StandardButton.No,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
+                    # MainWindow must stop/drain readers before remove_song
+                    # deletes the directory they may still be reading.
+                    self.song_removal_requested.emit(song_id)
                     self._library.remove_song(song_id)
                     self.refresh()
                     # Let the main window unload the player if the

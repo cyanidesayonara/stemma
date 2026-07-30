@@ -7,10 +7,15 @@ file and separated stems are stored.
 
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+
+
+_EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
+_GENERATED_SONG_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 @dataclass
@@ -52,6 +57,7 @@ class SongLibrary:
         self._songs: list[Song] = []
 
         os.makedirs(self._songs_dir, exist_ok=True)
+        self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
 
         if os.path.isfile(self._json_path):
             self._load()
@@ -69,6 +75,93 @@ class SongLibrary:
             if song.id == song_id:
                 return song
         return None
+
+    def _is_safe_song_dir(self, path: str) -> bool:
+        """Return whether *path* resolves below this library's songs root."""
+        try:
+            candidate = os.path.normcase(os.path.realpath(path))
+            common = os.path.commonpath([self._songs_root, candidate])
+        except (OSError, TypeError, ValueError):
+            return False
+        return candidate != self._songs_root and common == self._songs_root
+
+    def _require_safe_song_dir(self, path: str) -> None:
+        """Reject paths that could make a destructive operation escape."""
+        if not self._is_safe_song_dir(path):
+            raise ValueError(
+                f"Song directory is outside the library songs root: {path}"
+            )
+
+    @staticmethod
+    def _normalized_path(path: str) -> str:
+        """Return a case-normalized absolute path for exact comparisons."""
+        return os.path.normcase(os.path.abspath(os.path.normpath(path)))
+
+    def _recover_staged_removal(self, song: Song) -> bool:
+        """Restore the newest valid interrupted-removal directory.
+
+        Returns False when valid staged data exists but cannot be restored
+        safely, preventing the stale JSON entry from being exposed to startup
+        pruning while its recovery data remains staged.
+        """
+        if not _GENERATED_SONG_ID_RE.fullmatch(song.id):
+            return True
+
+        canonical = os.path.join(self._songs_dir, song.id)
+        if (
+            self._normalized_path(song.stems_path)
+            != self._normalized_path(canonical)
+            or self._normalized_path(os.path.dirname(song.original_path))
+            != self._normalized_path(canonical)
+            or os.path.exists(canonical)
+        ):
+            return True
+
+        try:
+            entries = os.listdir(self._songs_dir)
+        except OSError:
+            return False
+
+        pattern = re.compile(
+            rf"^\.remove-{re.escape(song.id)}-([0-9a-f]{{32}})$"
+        )
+        original_name = os.path.basename(song.original_path)
+        candidates: list[tuple[int, str]] = []
+        for entry in entries:
+            if pattern.fullmatch(entry) is None:
+                continue
+            candidate = os.path.join(self._songs_dir, entry)
+            if (
+                not self._is_safe_song_dir(candidate)
+                or os.path.islink(candidate)
+                or not os.path.isdir(candidate)
+                or not os.path.isfile(os.path.join(candidate, original_name))
+            ):
+                continue
+            try:
+                modified = os.stat(
+                    candidate,
+                    follow_symlinks=False,
+                ).st_mtime_ns
+            except OSError:
+                continue
+            candidates.append((modified, candidate))
+
+        if not candidates:
+            return True
+
+        candidates.sort(reverse=True)
+        if (
+            len(candidates) > 1
+            and candidates[0][0] == candidates[1][0]
+        ):
+            return False
+
+        try:
+            os.replace(candidates[0][1], canonical)
+        except OSError:
+            return False
+        return True
 
     def add_song(
         self,
@@ -101,7 +194,7 @@ class SongLibrary:
             internal_path = os.path.join(song_dir, f"original{ext}")
             shutil.copy2(original_path, internal_path)
         except OSError:
-            if os.path.isdir(song_dir):
+            if self._is_safe_song_dir(song_dir) and os.path.isdir(song_dir):
                 shutil.rmtree(song_dir, ignore_errors=True)
             raise
 
@@ -119,7 +212,8 @@ class SongLibrary:
             self._save()
         except OSError:
             self._songs = [s for s in self._songs if s.id != song_id]
-            shutil.rmtree(song_dir, ignore_errors=True)
+            if self._is_safe_song_dir(song_dir):
+                shutil.rmtree(song_dir, ignore_errors=True)
             raise
         return song
 
@@ -133,11 +227,37 @@ class SongLibrary:
         if song is None:
             raise KeyError(f"Song '{song_id}' not found")
 
+        self._require_safe_song_dir(song.stems_path)
+        song_index = self._songs.index(song)
+        staged_dir = None
         if os.path.isdir(song.stems_path):
-            shutil.rmtree(song.stems_path)
+            staged_dir = os.path.join(
+                self._songs_dir,
+                f".remove-{song.id}-{uuid.uuid4().hex}",
+            )
+            self._require_safe_song_dir(staged_dir)
+            os.replace(song.stems_path, staged_dir)
 
-        self._songs = [s for s in self._songs if s.id != song_id]
-        self._save()
+        self._songs.pop(song_index)
+        try:
+            self._save()
+        except Exception as save_error:
+            if staged_dir is not None:
+                try:
+                    os.replace(staged_dir, song.stems_path)
+                except Exception as restore_error:
+                    raise OSError(
+                        f"Could not persist removal of song '{song.id}' "
+                        f"({save_error}); restoring its directory also "
+                        f"failed ({restore_error}). Song data is preserved "
+                        f"for recovery at: {staged_dir}"
+                    ) from save_error
+            self._songs.insert(song_index, song)
+            raise
+
+        if staged_dir is not None:
+            self._require_safe_song_dir(staged_dir)
+            shutil.rmtree(staged_dir)
 
     def update_song(self, song_id: str, **fields: str) -> Song:
         """Update one or more fields on an existing song.
@@ -155,12 +275,21 @@ class SongLibrary:
         if song is None:
             raise KeyError(f"Song '{song_id}' not found")
 
-        fields.pop("id", None)
-        for key, value in fields.items():
-            if hasattr(song, key):
-                setattr(song, key, value)
+        updates = {
+            key: value
+            for key, value in fields.items()
+            if key in _EDITABLE_METADATA_FIELDS
+        }
+        previous = {key: getattr(song, key) for key in updates}
+        for key, value in updates.items():
+            setattr(song, key, value)
 
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            for key, value in previous.items():
+                setattr(song, key, value)
+            raise
         return song
 
     # ------------------------------------------------------------------
@@ -178,7 +307,12 @@ class SongLibrary:
         try:
             with open(self._json_path, encoding="utf-8") as f:
                 data = json.load(f)
-            self._songs = [Song.from_dict(entry) for entry in data]
+            loaded = [Song.from_dict(entry) for entry in data]
+            self._songs = [
+                song for song in loaded
+                if self._is_safe_song_dir(song.stems_path)
+                and self._recover_staged_removal(song)
+            ]
         except (
             json.JSONDecodeError, TypeError, KeyError,
             OSError, UnicodeDecodeError, ValueError,
@@ -207,7 +341,10 @@ class SongLibrary:
             return recovered
         for song_id in entries:
             song_dir = os.path.join(self._songs_dir, song_id)
-            if not os.path.isdir(song_dir):
+            if (
+                not self._is_safe_song_dir(song_dir)
+                or not os.path.isdir(song_dir)
+            ):
                 continue
             original = None
             for fname in os.listdir(song_dir):

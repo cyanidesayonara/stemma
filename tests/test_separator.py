@@ -1,5 +1,6 @@
 """Tests for the stem separation engine."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -148,6 +149,97 @@ class TestSeparatorResample:
         audio = np.random.randn(2, 22050).astype(np.float32)
         result = worker._resample(audio, 22050)
         assert result.shape[0] == 2
+
+
+class TestSegmentedOverlapAdd:
+    """Exercise multi-chunk reconstruction without a real ONNX model."""
+
+    def test_fake_session_reconstructs_across_overlapping_seams(
+        self, tmp_dir, sample_audio_path, monkeypatch
+    ):
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, _outputs, feeds):
+                self.calls += 1
+                segment = feeds["input"][0]
+                temporal = np.repeat(
+                    (segment / len(STEMS_4))[np.newaxis, np.newaxis],
+                    len(STEMS_4),
+                    axis=1,
+                )
+                spectral = np.zeros(
+                    (1, len(STEMS_4), 4, 1, 1),
+                    dtype=np.float32,
+                )
+                return [spectral, temporal.astype(np.float32)]
+
+        monkeypatch.setattr("src.separator.SEGMENT_SAMPLES", 16)
+        t = np.linspace(0.0, 3.5 * np.pi, 40, dtype=np.float32)
+        mono = (0.25 + np.sin(t)).astype(np.float32)
+        audio = np.stack([mono, mono * 0.5])
+        assert np.all(np.abs(audio[:, 0]) > 0.1)
+        assert np.all(np.abs(audio[:, -1]) > 0.1)
+        session = FakeSession()
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=tmp_dir,
+            model_path="fake_model.onnx",
+        )
+        monkeypatch.setattr(worker, "_load_audio", lambda: (audio, SAMPLE_RATE))
+        monkeypatch.setattr(worker, "_resample", lambda data, _sr: data)
+        monkeypatch.setattr(worker, "_create_session", lambda: session)
+        monkeypatch.setattr(
+            worker,
+            "_compute_stft_cac",
+            lambda _segment: np.zeros((4, 1, 1), dtype=np.float32),
+        )
+        monkeypatch.setattr(
+            worker,
+            "_compute_istft_cac",
+            lambda _spec, length: np.zeros((2, length), dtype=np.float32),
+        )
+        monkeypatch.setattr(worker, "_post_process", lambda stems: stems)
+
+        saved = {}
+
+        def save_stems(stems):
+            saved["stems"] = stems
+            return {name: f"{name}.wav" for name in STEMS_4}
+
+        monkeypatch.setattr(worker, "_save_stems", save_stems)
+        progress = []
+        completed = []
+        errors = []
+        worker.progress.connect(lambda pct, text: progress.append((pct, text)))
+        worker.finished.connect(completed.append)
+        worker.error.connect(errors.append)
+
+        worker.run()
+
+        separated = saved["stems"]
+        reconstructed = separated.sum(axis=0)
+        assert session.calls > 1
+        assert separated.shape == (len(STEMS_4), 2, audio.shape[1])
+        assert np.all(np.isfinite(separated))
+        np.testing.assert_allclose(reconstructed, audio, atol=1e-6, rtol=1e-6)
+        np.testing.assert_allclose(reconstructed[:, 0], audio[:, 0], atol=1e-6)
+        np.testing.assert_allclose(
+            reconstructed[:, -1],
+            audio[:, -1],
+            atol=1e-6,
+        )
+        for seam in (8, 16, 24):
+            np.testing.assert_allclose(
+                reconstructed[:, seam - 1:seam + 1],
+                audio[:, seam - 1:seam + 1],
+                atol=1e-6,
+                rtol=1e-6,
+            )
+        assert not errors
+        assert progress[-1] == (100, "Done")
+        assert len(completed) == 1
 
 
 class TestSeparatorCreateSession:
@@ -331,6 +423,15 @@ class TestSeparatorSaveStems:
             audio, sr = sf.read(result[stem_name])
             assert sr == 44100
             assert audio.shape == (44100, 2)
+        marker = os.path.join(worker.output_dir, ".separation-complete.json")
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state == {
+            "version": 1,
+            "model": "htdemucs",
+            "stems": list(STEMS_4),
+        }
+        assert not os.path.exists(marker + ".tmp")
 
     def test_saves_6_stems(self, tmp_dir, sample_audio_path):
         worker = SeparatorWorker(
@@ -346,6 +447,45 @@ class TestSeparatorSaveStems:
         for stem_name in STEMS_6:
             assert stem_name in result
             assert os.path.isfile(result[stem_name])
+        marker = os.path.join(worker.output_dir, ".separation-complete.json")
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state == {
+            "version": 1,
+            "model": "htdemucs_6s",
+            "stems": list(STEMS_6),
+        }
+
+    def test_failed_stem_write_removes_stale_completion_marker(
+        self, tmp_dir, sample_audio_path, monkeypatch,
+    ):
+        output_dir = os.path.join(tmp_dir, "output")
+        os.makedirs(output_dir)
+        marker = os.path.join(output_dir, ".separation-complete.json")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("{}")
+        worker = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=output_dir,
+            model_path="fake_model.onnx",
+        )
+        separated = np.zeros((4, 2, 100), dtype=np.float32)
+        real_write = sf.write
+        calls = 0
+
+        def fail_second_write(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("write failed")
+            return real_write(*args, **kwargs)
+
+        monkeypatch.setattr("src.separator.sf.write", fail_second_write)
+
+        with pytest.raises(OSError, match="write failed"):
+            worker._save_stems(separated)
+
+        assert not os.path.exists(marker)
 
 
 class TestMemoryEstimation:
