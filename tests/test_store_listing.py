@@ -20,7 +20,10 @@ from src.store_listing import (
     png_size,
     read_app_version,
     render_markdown,
+    render_metadata_update,
+    render_product_update,
     render_skeleton,
+    tag_to_version,
     validate_listing,
     write_outputs,
 )
@@ -214,6 +217,34 @@ def test_render_skeleton_includes_store_identity() -> None:
     assert payload["packageFamilyName"] == identity.package_family_name
     assert payload["storeUrl"] == identity.url
     assert payload["publisherDisplayName"] == identity.publisher_display_name
+
+
+def test_tag_to_version_strips_prefix() -> None:
+    assert tag_to_version("v2.6.0") == "2.6.0"
+    assert tag_to_version("refs/tags/v2.6.0") == "2.6.0"
+
+
+def test_render_product_update_uses_release_msix_url() -> None:
+    payload = render_product_update(
+        _data(),
+        release_version="2.6.0",
+        repository="cyanidesayonara/stemma",
+    )
+    assert payload["packages"][0]["architectures"] == ["X64"]
+    assert (
+        payload["packages"][0]["packageUrl"]
+        == "https://github.com/cyanidesayonara/stemma/releases/download/v2.6.0/stemma.msix"
+    )
+
+
+def test_render_metadata_update_maps_listing_fields() -> None:
+    payload = render_metadata_update(_data(), release_version="2.6.0")
+    listing = payload["listing"]["en-us"]
+    assert listing["shortDescription"] == "Short"
+    assert listing["description"] == "Desc"
+    assert listing["productFeatures"] == ["Feature one"]
+    assert listing["keywords"] == ["stem"]
+    assert "What's new in version 2.6.0" in listing["whatsNew"]
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:

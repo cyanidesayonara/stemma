@@ -212,3 +212,7 @@ __marimo__/
 # Local App Data
 data/
 
+
+# Generated Partner Center API payloads (local / CI artifacts)
+store/payloads/
+

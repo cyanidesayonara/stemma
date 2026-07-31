@@ -1,7 +1,5 @@
-# Optional: submit an existing GitHub Release MSIX to Partner Center.
-# See docs/store-release-pipeline.md for prerequisites. The update/publish payload
-# must match your listing type (MSIX vs Win32); edit product-update after validating
-# with Microsoft docs or Partner Center support before using submit_and_publish.
+# Optional: update / publish Partner Center drafts from a GitHub Release MSIX.
+# See docs/store-release-pipeline.md. Prefer update_draft; publish_draft is explicit.
 
 name: Partner Center submit (manual)
 
@@ -9,21 +7,64 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing GitHub release tag (e.g. v2.0.3)"
+        description: "Existing GitHub release tag (e.g. v2.6.0)"
         required: true
         type: string
       mode:
-        description: "configure = test credentials only; submit_and_publish = update + publish (edit YAML payload first)"
+        description: "configure = credentials; update_draft = package+listing draft; publish_draft = submit draft"
         type: choice
         options:
           - configure
-          - submit_and_publish
+          - update_draft
+          - publish_draft
         default: configure
 
 jobs:
   submit:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        if: ${{ inputs.mode == 'update_draft' }}
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Setup Python
+        if: ${{ inputs.mode == 'update_draft' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        if: ${{ inputs.mode == 'update_draft' }}
+        run: python -m pip install "PyYAML>=6.0"
+
+      - name: Build Partner Center payloads
+        if: ${{ inputs.mode == 'update_draft' }}
+        id: payloads
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python scripts/build_partner_center_payloads.py \
+            --tag "$TAG" \
+            --repository "${{ github.repository }}" \
+            --out-dir store/payloads
+          {
+            echo "product_update<<EOF"
+            cat store/payloads/product-update.json
+            echo "EOF"
+            echo "metadata_update<<EOF"
+            cat store/payloads/metadata-update.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload payload artifacts
+        if: ${{ inputs.mode == 'update_draft' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: partner-center-payloads
+          path: store/payloads/
+          if-no-files-found: error
+
       - name: Configure Store credentials
         uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
@@ -35,9 +76,8 @@ jobs:
           client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
           client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
 
-      # Template only: confirm JSON against Partner Center before choosing submit_and_publish.
-      - name: Update draft submission (MSIX URL)
-        if: ${{ inputs.mode == 'submit_and_publish' }}
+      - name: Update draft submission
+        if: ${{ inputs.mode == 'update_draft' }}
         uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
           command: update
@@ -47,11 +87,11 @@ jobs:
           tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
           client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
           client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-          product-update: >-
-            {"packages":[{"packageUrl":"https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/stemma.msix","languages":["en-us"],"architectures":["X64"],"isSilentInstall":true}]}
+          product-update: ${{ steps.payloads.outputs.product_update }}
+          metadata-update: ${{ steps.payloads.outputs.metadata_update }}
 
-      - name: Publish submission
-        if: ${{ inputs.mode == 'submit_and_publish' }}
+      - name: Publish draft submission
+        if: ${{ inputs.mode == 'publish_draft' }}
         uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
         with:
           command: publish

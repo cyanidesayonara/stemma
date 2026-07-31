@@ -292,6 +292,61 @@ def render_skeleton(data: ListingData, *, release_version: str) -> dict:
     return payload
 
 
+def tag_to_version(tag: str) -> str:
+    """Normalize a release tag (v2.6.0) to a listing version (2.6.0)."""
+    trimmed = tag.strip()
+    if trimmed.startswith("refs/tags/"):
+        trimmed = trimmed[len("refs/tags/") :]
+    if trimmed.startswith("v") or trimmed.startswith("V"):
+        trimmed = trimmed[1:]
+    if not trimmed:
+        raise ValueError(f"empty version from tag: {tag!r}")
+    return trimmed
+
+
+def render_product_update(
+    data: ListingData,
+    *,
+    release_version: str,
+    repository: str = "cyanidesayonara/stemma",
+) -> dict:
+    """Build microsoft/store-submission product-update (packages only)."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    return {
+        "packages": [
+            {
+                "packageUrl": (
+                    f"https://github.com/{repository}/releases/"
+                    f"download/v{release_version}/stemma.msix"
+                ),
+                "languages": ["en-us"],
+                "architectures": ["X64"],
+                "installerParameters": "",
+                "isSilentInstall": True,
+            }
+        ]
+    }
+
+
+def render_metadata_update(
+    data: ListingData,
+    *,
+    release_version: str,
+) -> dict:
+    """Build microsoft/store-submission metadata-update (listing module)."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    listing = {
+        "description": data.description,
+        "shortDescription": data.short_description,
+        "whatsNew": data.whats_new[release_version],
+        "productFeatures": data.features,
+        "keywords": data.search_terms,
+    }
+    return {"listing": {"en-us": listing}}
+
+
 def write_outputs(
     data: ListingData,
     *,
