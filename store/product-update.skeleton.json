@@ -14,7 +14,7 @@
   ],
   "listing": {
     "shortDescription": "Practice any song: split it into stems, mute the part you play, slow it\ndown, and loop the hard bars.",
-    "description": "stemma turns any song into a practice tool.\n\nImport a track and stemma separates it into individual stems -- vocals,\ndrums, bass, guitar, piano, and everything else -- so you can mute the\npart you play and perform it yourself. Silence the guitar and it is your\nguitar in the mix. Solo the drums to lock in with them. Pull the vocal\ndown and sing the line yourself.\n\nEverything else is built around learning a part properly. Set an A-B\nloop over the two bars that keep tripping you up and drill them. Slow\nthe passage down without the pitch dropping, or turn on the Loop\nTrainer and let stemma step the speed up a notch on every repeat until\nyou are at full tempo. Transpose the whole song into a key that suits\nyour voice or instrument, up to seven semitones either way, and the\ndisplayed key follows. Count yourself in, play along to the metronome,\nand record your take against the backing to hear how it really sat.\n\nstemma reads the song as you work: tempo, musical key, and the chord\nunder the playhead, updated as it plays. There is a\nwaveform to scrub, per-stem volume faders, and a library that remembers\nexactly where you left off -- song, position, mix, loop, speed, and\npitch -- so practice picks up where it stopped.\n\nSeparation runs on your own machine. Nothing is uploaded, there is no\naccount, no subscription, and no internet connection needed once the\nmodels are downloaded. Import from a file or paste a YouTube link, and\nexport any stem or your own custom mix as WAV or MP3 when you want to\ntake it elsewhere.\n\nBuilt for Windows, keyboard-first, dark and light themes.",
+    "description": "stemma turns any song into a practice tool.\n\nImport a track and stemma separates it into individual stems -- vocals,\ndrums, bass, guitar, piano, and everything else -- so you can mute the\npart you play and perform it yourself. Silence the guitar and it is your\nguitar in the mix. Solo the drums to lock in with them. Pull the vocal\ndown and sing the line yourself.\n\nEverything else is built around learning a part properly. Set an A-B\nloop over the two bars that keep tripping you up and drill them. Slow\nthe passage down without the pitch dropping, or turn on the Loop\nTrainer and let stemma step the speed up a notch on every repeat until\nyou are at full tempo. Transpose the whole song into a key that suits\nyour voice or instrument, up to seven semitones either way, and the\ndisplayed key follows. Count yourself in, play along to the metronome,\nand record your take against the backing to hear how it really sat.\n\nstemma reads the song as you work: tempo, musical key, and the chord\nunder the playhead, updated as it plays. There is a\nwaveform to scrub, per-stem volume faders, and a library that remembers\nexactly where you left off -- song, position, mix, loop, speed, and\npitch -- so practice picks up where it stopped. Browse with previous\nand next, loop a single song, shuffle the collection, or autoplay\nthrough it.\n\nSeparation runs on your own machine. Nothing is uploaded, there is no\naccount, no subscription, and no internet connection needed once the\nmodels are downloaded. Import from a file or paste a YouTube link, and\nexport any stem or your own custom mix as WAV or MP3 when you want to\ntake it elsewhere.\n\nBuilt for Windows, keyboard-first, and layout-independent (Space,\narrows, Ctrl+1-6, and the rest work the same on international\nkeyboards). Dark and light themes.",
     "features": [
       "AI stem separation: vocals, drums, bass, guitar, piano, other",
       "Per-stem mute, solo, and volume faders",
@@ -32,6 +32,7 @@
       "Export stems or a custom mix as WAV or MP3",
       "Import from an audio file or a YouTube link",
       "Session memory: song, position, mix, loop, speed, and pitch",
+      "Library with previous/next, shuffle, and autoplay",
       "Keyboard shortcuts for the whole practice loop",
       "Runs entirely on your PC: no account, no subscription, no uploads"
     ],
@@ -55,8 +56,12 @@
       "singer",
       "music learning",
       "isolate instrument",
-      "minus one"
+      "music stem separator"
     ],
     "whatsNew": "What's new in version 2.6.0\n\nFaster 2-stem separation: when a compatible GPU is available, 2-stem\nseparation runs with GPU acceleration and falls back to CPU\nautomatically when it is not.\n\nBackground imports: importing and separating songs no longer blocks\nthe rest of the app -- jobs run in a background queue so you can keep\nbrowsing your library while work finishes.\n\nStability and integrity: model downloads are checksum-verified,\nstems load asynchronously so the UI stays responsive, and release\ndiagnostics make packaged builds easier to verify before Store\nsubmission."
-  }
+  },
+  "productId": "9P2W12L8F381",
+  "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",
+  "storeUrl": "https://apps.microsoft.com/detail/9p2w12l8f381",
+  "publisherDisplayName": "Santtu Nyk\u00e4nen"
 }

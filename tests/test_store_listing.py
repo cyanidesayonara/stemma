@@ -13,6 +13,7 @@ from src.store_listing import (
     DEFAULT_SKELETON,
     DEFAULT_VERSION_PY,
     ListingData,
+    StoreIdentity,
     ValidationError,
     load_listing,
     outputs_match,
@@ -64,6 +65,11 @@ def test_load_listing_reads_required_fields(tmp_path: Path) -> None:
     yaml_path.write_text(
         """
 listing_version: "2.6.0"
+store:
+  product_id: "9P2W12L8F381"
+  package_family_name: "SanttuNyknen.stemma_rt9h3xsn8gsh8"
+  url: "https://apps.microsoft.com/detail/9p2w12l8f381"
+  publisher_display_name: "Santtu Nykänen"
 short_description: Short text
 description: |
   Longer description.
@@ -88,6 +94,38 @@ whats_new:
     assert data.features == ["Feature one"]
     assert data.search_terms == ["stem separation"]
     assert "2.6.0" in data.whats_new
+    assert data.store == StoreIdentity(
+        product_id="9P2W12L8F381",
+        package_family_name="SanttuNyknen.stemma_rt9h3xsn8gsh8",
+        url="https://apps.microsoft.com/detail/9p2w12l8f381",
+        publisher_display_name="Santtu Nykänen",
+    )
+
+
+def test_load_listing_rejects_null_store_fields(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "listing.yaml"
+    yaml_path.write_text(
+        """
+listing_version: "2.6.0"
+store:
+  product_id: "9P2W12L8F381"
+  package_family_name: "SanttuNyknen.stemma_rt9h3xsn8gsh8"
+  url: null
+  publisher_display_name: "Santtu Nykänen"
+short_description: Short text
+description: Desc
+features:
+  - Feature one
+search_terms:
+  - stem
+whats_new:
+  "2.6.0": |
+    What's new in version 2.6.0
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="url"):
+        load_listing(yaml_path)
 
 
 def test_png_size_reads_ihdr(tmp_path: Path) -> None:
@@ -161,6 +199,21 @@ def test_render_skeleton_includes_package_url_placeholder() -> None:
     assert "packages" in payload
     assert "v2.6.0/stemma.msix" in payload["packages"][0]["packageUrl"]
     assert payload["listing"]["shortDescription"] == "Short"
+    assert "productId" not in payload
+
+
+def test_render_skeleton_includes_store_identity() -> None:
+    identity = StoreIdentity(
+        product_id="9P2W12L8F381",
+        package_family_name="SanttuNyknen.stemma_rt9h3xsn8gsh8",
+        url="https://apps.microsoft.com/detail/9p2w12l8f381",
+        publisher_display_name="Santtu Nykänen",
+    )
+    payload = render_skeleton(_data(store=identity), release_version="2.6.0")
+    assert payload["productId"] == "9P2W12L8F381"
+    assert payload["packageFamilyName"] == identity.package_family_name
+    assert payload["storeUrl"] == identity.url
+    assert payload["publisherDisplayName"] == identity.publisher_display_name
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:
