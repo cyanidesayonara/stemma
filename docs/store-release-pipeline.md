@@ -5,7 +5,7 @@
 Pushing a version tag matching `v*` triggers `.github/workflows/release.yml`:
 
 1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v2.6.0` becomes app `2.6.0` and MSIX `2.6.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
-2. **Validate Store listing** -- after dependency install, `scripts/validate_store_release.py` and `scripts/build_store_listing.py --check` run against the tag version (leading `v` stripped). The release fails if listing metadata, assets, or generated outputs are invalid or out of date.
+2. **Validate Store listing** -- after dependency install, `scripts/validate_store_release.py` and `scripts/build_store_listing.py --check` run against the synced `src/version.py` (semver from the tag; prerelease suffixes already stripped by sync). Each command's exit code is checked so a failed validation cannot be masked by a later success. The release fails if listing metadata, assets, or generated outputs are invalid or out of date.
 3. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
 4. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
 5. **GitHub Release** -- attaches `stemma.zip` and `stemma.msix`.
