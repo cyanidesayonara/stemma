@@ -26,6 +26,16 @@ DEFAULT_VERSION_PY = REPO_ROOT / "src" / "version.py"
 
 
 @dataclass(frozen=True)
+class StoreIdentity:
+    """Microsoft Store product identity for Partner Center / public listing."""
+
+    product_id: str
+    package_family_name: str
+    url: str
+    publisher_display_name: str
+
+
+@dataclass(frozen=True)
 class ListingData:
     listing_version: str
     short_description: str
@@ -33,6 +43,30 @@ class ListingData:
     features: list[str]
     search_terms: list[str]
     whats_new: dict[str, str]
+    store: StoreIdentity | None = None
+
+
+def _load_store_identity(raw: dict) -> StoreIdentity | None:
+    block = raw.get("store")
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        raise ValueError("store must be a mapping")
+    required = (
+        "product_id",
+        "package_family_name",
+        "url",
+        "publisher_display_name",
+    )
+    missing = [key for key in required if not str(block.get(key, "")).strip()]
+    if missing:
+        raise ValueError(f"store missing fields: {', '.join(missing)}")
+    return StoreIdentity(
+        product_id=str(block["product_id"]).strip(),
+        package_family_name=str(block["package_family_name"]).strip(),
+        url=str(block["url"]).strip(),
+        publisher_display_name=str(block["publisher_display_name"]).strip(),
+    )
 
 
 def load_listing(path: str | Path) -> ListingData:
@@ -53,6 +87,7 @@ def load_listing(path: str | Path) -> ListingData:
         whats_new={
             str(key): str(value).strip() for key, value in whats_new.items()
         },
+        store=_load_store_identity(raw),
     )
 
 
@@ -142,6 +177,13 @@ def render_markdown(data: ListingData, *, release_version: str) -> str:
     # Comma-separated for Partner Center paste; wrap roughly like the
     # historical hand-edited listing.
     search_terms = ", ".join(data.search_terms)
+    if data.store is not None:
+        store_line = (
+            f"\nPublic Store listing: {data.store.url} "
+            f"(product id `{data.store.product_id}`).\n"
+        )
+    else:
+        store_line = "\n"
     return f"""# Microsoft Store listing copy
 
 Generated from `store/listing.yaml`. Edit the YAML, then run
@@ -149,7 +191,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 Do not edit this markdown by hand.
 
 This copy reflects listing content for version **{release_version}**.
-
+{store_line}
 Fields map to Partner Center as follows:
 
 | Partner Center field | Section below |
@@ -220,7 +262,7 @@ def render_skeleton(data: ListingData, *, release_version: str) -> dict:
     }
     if release_version in data.whats_new:
         listing["whatsNew"] = data.whats_new[release_version]
-    return {
+    payload: dict = {
         "packages": [
             {
                 "packageUrl": (
@@ -235,6 +277,12 @@ def render_skeleton(data: ListingData, *, release_version: str) -> dict:
         ],
         "listing": listing,
     }
+    if data.store is not None:
+        payload["productId"] = data.store.product_id
+        payload["packageFamilyName"] = data.store.package_family_name
+        payload["storeUrl"] = data.store.url
+        payload["publisherDisplayName"] = data.store.publisher_display_name
+    return payload
 
 
 def write_outputs(

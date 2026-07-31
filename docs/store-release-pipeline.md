@@ -14,7 +14,7 @@ CI (`.github/workflows/ci.yml`) also runs on `v*` tag pushes so a tag-only relea
 
 ## Store listing as code
 
-`store/listing.yaml` is the single source of truth for Partner Center copy, feature bullets, and per-version **What's new** text.
+`store/listing.yaml` is the single source of truth for Partner Center copy, feature bullets, and per-version **What's new** text. It also records the live Store product identity (`store.product_id` `9P2W12L8F381`, package family name, public URL). An archival capture of the previously published Store copy lives in `store/live-snapshot-2026-07-31.md`.
 
 - **Edit YAML, not markdown.** Do not hand-edit `docs/store-listing.md`; it is generated output.
 - **Regenerate outputs** after YAML changes:

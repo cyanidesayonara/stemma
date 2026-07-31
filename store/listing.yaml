@@ -1,6 +1,15 @@
 # Informational only. Release authority is the git tag / synced version.py.
 listing_version: "2.6.0"
 
+# Live Microsoft Store product identity (apps.microsoft.com).
+# Snapshot of published copy before the 2.6.0 submission:
+# store/live-snapshot-2026-07-31.md
+store:
+  product_id: "9P2W12L8F381"
+  package_family_name: "SanttuNyknen.stemma_rt9h3xsn8gsh8"
+  url: "https://apps.microsoft.com/detail/9p2w12l8f381"
+  publisher_display_name: "Santtu Nykänen"
+
 short_description: |
   Practice any song: split it into stems, mute the part you play, slow it
   down, and loop the hard bars.
@@ -27,7 +36,9 @@ description: |
   under the playhead, updated as it plays. There is a
   waveform to scrub, per-stem volume faders, and a library that remembers
   exactly where you left off -- song, position, mix, loop, speed, and
-  pitch -- so practice picks up where it stopped.
+  pitch -- so practice picks up where it stopped. Browse with previous
+  and next, loop a single song, shuffle the collection, or autoplay
+  through it.
 
   Separation runs on your own machine. Nothing is uploaded, there is no
   account, no subscription, and no internet connection needed once the
@@ -35,7 +46,9 @@ description: |
   export any stem or your own custom mix as WAV or MP3 when you want to
   take it elsewhere.
 
-  Built for Windows, keyboard-first, dark and light themes.
+  Built for Windows, keyboard-first, and layout-independent (Space,
+  arrows, Ctrl+1-6, and the rest work the same on international
+  keyboards). Dark and light themes.
 
 features:
   - "AI stem separation: vocals, drums, bass, guitar, piano, other"
@@ -54,6 +67,7 @@ features:
   - "Export stems or a custom mix as WAV or MP3"
   - "Import from an audio file or a YouTube link"
   - "Session memory: song, position, mix, loop, speed, and pitch"
+  - "Library with previous/next, shuffle, and autoplay"
   - "Keyboard shortcuts for the whole practice loop"
   - "Runs entirely on your PC: no account, no subscription, no uploads"
 
@@ -77,7 +91,7 @@ search_terms:
   - singer
   - music learning
   - isolate instrument
-  - minus one
+  - music stem separator
 
 whats_new:
   "2.5.0": |

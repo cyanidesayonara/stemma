@@ -6,6 +6,8 @@ Do not edit this markdown by hand.
 
 This copy reflects listing content for version **2.6.0**.
 
+Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
+
 Fields map to Partner Center as follows:
 
 | Partner Center field | Section below |
@@ -54,7 +56,9 @@ stemma reads the song as you work: tempo, musical key, and the chord
 under the playhead, updated as it plays. There is a
 waveform to scrub, per-stem volume faders, and a library that remembers
 exactly where you left off -- song, position, mix, loop, speed, and
-pitch -- so practice picks up where it stopped.
+pitch -- so practice picks up where it stopped. Browse with previous
+and next, loop a single song, shuffle the collection, or autoplay
+through it.
 
 Separation runs on your own machine. Nothing is uploaded, there is no
 account, no subscription, and no internet connection needed once the
@@ -62,7 +66,9 @@ models are downloaded. Import from a file or paste a YouTube link, and
 export any stem or your own custom mix as WAV or MP3 when you want to
 take it elsewhere.
 
-Built for Windows, keyboard-first, dark and light themes.
+Built for Windows, keyboard-first, and layout-independent (Space,
+arrows, Ctrl+1-6, and the rest work the same on international
+keyboards). Dark and light themes.
 
 ---
 
@@ -103,6 +109,7 @@ Waveform with click-to-seek, playback cursor, and loop markers
 Export stems or a custom mix as WAV or MP3
 Import from an audio file or a YouTube link
 Session memory: song, position, mix, loop, speed, and pitch
+Library with previous/next, shuffle, and autoplay
 Keyboard shortcuts for the whole practice loop
 Runs entirely on your PC: no account, no subscription, no uploads
 
@@ -110,7 +117,7 @@ Runs entirely on your PC: no account, no subscription, no uploads
 
 ## Search terms
 
-stem separation, vocal remover, play along, backing track, practice, karaoke, transcribe, slow down music, loop, metronome, tempo, key detection, chord detection, guitar practice, bass practice, drum practice, singer, music learning, isolate instrument, minus one
+stem separation, vocal remover, play along, backing track, practice, karaoke, transcribe, slow down music, loop, metronome, tempo, key detection, chord detection, guitar practice, bass practice, drum practice, singer, music learning, isolate instrument, music stem separator
 
 ---
 
