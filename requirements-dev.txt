@@ -4,3 +4,4 @@ pytest-cov>=4.1.0
 pytest-timeout>=2.3.0
 ruff>=0.16.0
 pip-tools>=7.6.0
+PyYAML>=6.0
