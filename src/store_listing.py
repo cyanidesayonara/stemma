@@ -77,3 +77,58 @@ def read_app_version(version_py: str | Path) -> str:
     if match is None:
         raise ValueError(f"could not parse __version__ from {version_py}")
     return match.group(1)
+
+
+class ValidationError(Exception):
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("\n".join(errors))
+
+
+def validate_listing(
+    data: ListingData,
+    *,
+    version: str,
+    screenshots_dir: str | Path,
+) -> None:
+    errors: list[str] = []
+    notes = data.whats_new.get(version, "").strip()
+    if not notes:
+        errors.append(f"whats_new missing entry for version {version}")
+    if not (1 <= len(data.features) <= MAX_FEATURES):
+        errors.append(
+            f"features count {len(data.features)} not in 1..{MAX_FEATURES}"
+        )
+    for feature in data.features:
+        if not feature:
+            errors.append("empty feature entry")
+        elif len(feature) > MAX_FEATURE_LENGTH:
+            errors.append(
+                f"feature exceeds {MAX_FEATURE_LENGTH} chars: {feature!r}"
+            )
+    if not data.short_description:
+        errors.append("short_description is empty")
+    elif len(data.short_description) > MAX_SHORT_DESCRIPTION_LENGTH:
+        errors.append("short_description exceeds max length")
+    if not data.description.strip():
+        errors.append("description is empty")
+
+    shot_dir = Path(screenshots_dir)
+    shots = sorted(shot_dir.glob("*.png")) if shot_dir.is_dir() else []
+    if len(shots) < MIN_SCREENSHOTS:
+        errors.append(
+            f"need >= {MIN_SCREENSHOTS} screenshots, found {len(shots)}"
+        )
+    for shot in shots:
+        try:
+            width, height = png_size(shot)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        if width < MIN_SCREENSHOT_WIDTH or height < MIN_SCREENSHOT_HEIGHT:
+            errors.append(
+                f"{shot.name} is {width}x{height}; "
+                f"need >= {MIN_SCREENSHOT_WIDTH}x{MIN_SCREENSHOT_HEIGHT}"
+            )
+    if errors:
+        raise ValidationError(errors)
