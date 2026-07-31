@@ -69,6 +69,17 @@ jobs:
           curl -fsSL -o stemma.msix "$url"
           ls -lh stemma.msix
 
+      - name: Set up Linux credential storage
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnome-keyring dbus-x11
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
+          echo "anypass_just_to_unlock" | gnome-keyring-daemon --unlock
+          eval "$(echo "anypass_just_to_unlock" | gnome-keyring-daemon --start --components=secrets)"
+          echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
+
       - name: Setup Microsoft Store CLI
         uses: microsoft/setup-msstore-cli@52af111539fa0c9569714bfca7c79e33bc704f92 # v1
 
