@@ -10,9 +10,13 @@ from src.store_listing import (
     ListingData,
     ValidationError,
     load_listing,
+    outputs_match,
     png_size,
     read_app_version,
+    render_markdown,
+    render_skeleton,
     validate_listing,
+    write_outputs,
 )
 
 
@@ -133,4 +137,69 @@ def test_validate_listing_rejects_undersized_screenshots(
     assert any(
         "1366" in err or "screenshot" in err.lower()
         for err in exc.value.errors
+    )
+
+
+def test_render_markdown_marks_generated_and_includes_sections() -> None:
+    text = render_markdown(_data(), release_version="2.6.0")
+    assert "generated from" in text.lower()
+    assert "store/listing.yaml" in text
+    assert "## Short description" in text
+    assert "Short" in text
+    assert "## Product features" in text
+    assert "Feature one" in text
+    assert "What's new in version 2.6.0" in text
+
+
+def test_render_skeleton_includes_package_url_placeholder() -> None:
+    payload = render_skeleton(_data(), release_version="2.6.0")
+    assert "packages" in payload
+    assert "v2.6.0/stemma.msix" in payload["packages"][0]["packageUrl"]
+    assert payload["listing"]["shortDescription"] == "Short"
+
+
+def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "listing.yaml"
+    yaml_path.write_text(
+        """
+listing_version: "2.6.0"
+short_description: Short text
+description: |
+  Longer description.
+features:
+  - Feature one
+search_terms:
+  - stem separation
+whats_new:
+  "2.6.0": |
+    What's new in version 2.6.0
+
+    Notes.
+""".lstrip(),
+        encoding="utf-8",
+    )
+    data = load_listing(yaml_path)
+    markdown_path = tmp_path / "store-listing.md"
+    skeleton_path = tmp_path / "product-update.skeleton.json"
+    write_outputs(
+        data,
+        release_version="2.6.0",
+        markdown_path=markdown_path,
+        skeleton_path=skeleton_path,
+    )
+    assert outputs_match(
+        data,
+        release_version="2.6.0",
+        markdown_path=markdown_path,
+        skeleton_path=skeleton_path,
+    )
+    markdown_path.write_text(
+        markdown_path.read_text(encoding="utf-8") + "\nstale\n",
+        encoding="utf-8",
+    )
+    assert not outputs_match(
+        data,
+        release_version="2.6.0",
+        markdown_path=markdown_path,
+        skeleton_path=skeleton_path,
     )

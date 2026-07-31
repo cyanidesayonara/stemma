@@ -1,12 +1,10 @@
 # Microsoft Store listing copy
 
-Paste-ready text for Partner Center. Keep this file in sync when
-features ship -- it is the source of truth for the listing, so the
-listing never drifts the way it did between v2.3.0 and v2.5.0.
+Generated from `store/listing.yaml`. Edit the YAML, then run
+`python scripts/build_store_listing.py` to regenerate this file.
+Do not edit this markdown by hand.
 
-This copy reflects the latest stable release, **v2.5.0**. The current source
-tree targets **v2.6.0**, which is not released; do not add its features to
-the published listing before that release ships.
+This copy reflects listing content for version **2.6.0**.
 
 Fields map to Partner Center as follows:
 
@@ -70,25 +68,20 @@ Built for Windows, keyboard-first, dark and light themes.
 
 ## What's new in this version
 
-What's new in version 2.5.0
+What's new in version 2.6.0
 
-Loop Trainer: with an A-B loop running, stemma can raise the playback
-speed one step on every repeat -- start at 75% and work up to full
-tempo without touching the controls.
+Faster 2-stem separation: when a compatible GPU is available, 2-stem
+separation runs with GPU acceleration and falls back to CPU
+automatically when it is not.
 
-Pitch transposition: shift a whole song up or down by up to seven
-semitones with the tempo unchanged. The key readout shows both the
-original and the transposed key, and recordings can either follow the
-shift or stay at their own pitch.
+Background imports: importing and separating songs no longer blocks
+the rest of the app -- jobs run in a background queue so you can keep
+browsing your library while work finishes.
 
-Reliability: this release fixes a number of issues found in a full
-audit, including recorded takes that could play back silent, audio
-dropouts when deleting a take or clearing a loop mid-playback, the
-chord readout being wrong at reduced speed, export problems when
-exporting a loop region at a slower speed, and several cases where
-closing the app during a long task could interrupt it uncleanly. Model
-downloads now reject corrupt or incomplete files and can be retried cleanly
-after interruption.
+Stability and integrity: model downloads are checksum-verified,
+stems load asynchronously so the UI stays responsive, and release
+diagnostics make packaged builds easier to verify before Store
+submission.
 
 ---
 
@@ -117,10 +110,7 @@ Runs entirely on your PC: no account, no subscription, no uploads
 
 ## Search terms
 
-stem separation, vocal remover, play along, backing track, practice,
-karaoke, transcribe, slow down music, loop, metronome, tempo, key
-detection, chord detection, guitar practice, bass practice, drum
-practice, singer, music learning, isolate instrument, minus one
+stem separation, vocal remover, play along, backing track, practice, karaoke, transcribe, slow down music, loop, metronome, tempo, key detection, chord detection, guitar practice, bass practice, drum practice, singer, music learning, isolate instrument, minus one
 
 ---
 

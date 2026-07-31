@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import struct
@@ -132,3 +133,149 @@ def validate_listing(
             )
     if errors:
         raise ValidationError(errors)
+
+
+def render_markdown(data: ListingData, *, release_version: str) -> str:
+    """Render Partner Center paste-ready markdown from listing data."""
+    whats_new = data.whats_new[release_version].strip()
+    features = "\n".join(data.features)
+    # Comma-separated for Partner Center paste; wrap roughly like the
+    # historical hand-edited listing.
+    search_terms = ", ".join(data.search_terms)
+    return f"""# Microsoft Store listing copy
+
+Generated from `store/listing.yaml`. Edit the YAML, then run
+`python scripts/build_store_listing.py` to regenerate this file.
+Do not edit this markdown by hand.
+
+This copy reflects listing content for version **{release_version}**.
+
+Fields map to Partner Center as follows:
+
+| Partner Center field | Section below |
+|---|---|
+| Description | [Description](#description) |
+| What's new in this version | [What's new](#whats-new-in-this-version) |
+| Product features (max 20, one per line) | [Product features](#product-features) |
+| Short description | [Short description](#short-description) |
+| Search terms | [Search terms](#search-terms) |
+
+Assets: `assets/store_listing/` (regenerate with
+`python scripts/generate_brand.py` then
+`python scripts/generate_store_listing_assets.py`).
+Screenshots: `assets/store_listing/screenshots/` (regenerate with
+`python scripts/generate_screenshots.py`).
+
+---
+
+## Short description
+
+{data.short_description}
+
+---
+
+## Description
+
+{data.description}
+
+---
+
+## What's new in this version
+
+{whats_new}
+
+---
+
+## Product features
+
+{features}
+
+---
+
+## Search terms
+
+{search_terms}
+
+---
+
+## Notes for future submissions
+
+- Update `What's new` for every Store submission; keep the version
+  number in the first line (Partner Center shows it verbatim).
+- The Description avoids naming specific model versions (HTDemucs,
+  MDX-Net): those change, and the Store copy should not need a rewrite
+  when they do. Attribution for the models lives in the README.
+- Do not claim GPU acceleration for 4/6-stem separation: only the
+  2-stem path runs on the GPU today (see issue #125).
+"""
+
+
+def render_skeleton(data: ListingData, *, release_version: str) -> dict:
+    """Render Partner Center product-update skeleton JSON payload."""
+    listing: dict = {
+        "shortDescription": data.short_description,
+        "description": data.description,
+        "features": data.features,
+        "searchTerms": data.search_terms,
+    }
+    if release_version in data.whats_new:
+        listing["whatsNew"] = data.whats_new[release_version]
+    return {
+        "packages": [
+            {
+                "packageUrl": (
+                    "https://github.com/cyanidesayonara/stemma/releases/"
+                    f"download/v{release_version}/stemma.msix"
+                ),
+                "languages": ["en-us"],
+                "architectures": ["x64"],
+                "installerParameters": "",
+                "isSilentInstall": True,
+            }
+        ],
+        "listing": listing,
+    }
+
+
+def write_outputs(
+    data: ListingData,
+    *,
+    release_version: str,
+    markdown_path: str | Path,
+    skeleton_path: str | Path,
+) -> None:
+    """Write generated markdown and skeleton JSON to disk."""
+    markdown = render_markdown(data, release_version=release_version)
+    skeleton = render_skeleton(data, release_version=release_version)
+    md_path = Path(markdown_path)
+    sk_path = Path(skeleton_path)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    sk_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(markdown, encoding="utf-8", newline="\n")
+    sk_path.write_text(
+        json.dumps(skeleton, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def outputs_match(
+    data: ListingData,
+    *,
+    release_version: str,
+    markdown_path: str | Path,
+    skeleton_path: str | Path,
+) -> bool:
+    """Return True when committed outputs match a fresh render."""
+    md_path = Path(markdown_path)
+    sk_path = Path(skeleton_path)
+    if not md_path.is_file() or not sk_path.is_file():
+        return False
+    expected_md = render_markdown(data, release_version=release_version)
+    expected_sk = render_skeleton(data, release_version=release_version)
+    actual_md = md_path.read_text(encoding="utf-8")
+    try:
+        actual_sk = json.loads(sk_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return actual_md == expected_md and actual_sk == expected_sk
