@@ -35,11 +35,12 @@ CI (`.github/workflows/ci.yml`) also runs on `v*` tag pushes so a tag-only relea
   Add a `whats_new` entry for every release version. Screenshots under `assets/store_listing/screenshots/` must meet Store minimum size (1366x768) and count requirements.
 
 Partner Center draft/submit automation uses `.github/workflows/partner-center-submit.yml`
-(manual `workflow_dispatch`). Modes:
+(manual `workflow_dispatch`) with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview) (`msstore`), which supports MSIX products. Modes:
 
-- **`configure`** -- credentials check only
-- **`update_draft`** -- build package + listing payloads from `store/listing.yaml` and the
-  given release tag, then update the Partner Center **draft** (does not publish)
+- **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
+- **`update_draft`** -- download `stemma.msix` from the release tag, upload it with
+  `msstore publish --noCommit`, then push listing metadata from `store/listing.yaml`
+- **`get_draft`** -- print current submission status and package JSON (debug)
 - **`publish_draft`** -- publish the current Partner Center draft for certification
 
 Local payload preview:
@@ -62,9 +63,9 @@ Public download URL pattern (public repo):
 
 Example: `https://github.com/cyanidesayonara/stemma/releases/download/v2.5.0/stemma.msix`
 
-## Optional: Partner Center API / GitHub Action
+## Partner Center credentials (GitHub Actions)
 
-Microsoft publishes [microsoft/store-submission](https://github.com/microsoft/store-submission) for automating submissions. stemma uses `type: packaged` with repository secrets:
+Repository secrets for `partner-center-submit.yml`:
 
 - `PARTNER_CENTER_SELLER_ID`
 - `PARTNER_CENTER_PRODUCT_ID`
@@ -72,7 +73,9 @@ Microsoft publishes [microsoft/store-submission](https://github.com/microsoft/st
 - `PARTNER_CENTER_CLIENT_ID`
 - `PARTNER_CENTER_CLIENT_SECRET`
 
-Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Inspect the Partner Center draft before **`publish_draft`**. Manual MSIX upload remains a fallback if the API payload shape rejects an update.
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Inspect the Partner Center draft before **`publish_draft`**. Manual MSIX upload remains a fallback if automation fails.
+
+Note: [microsoft/store-submission](https://github.com/microsoft/store-submission) targets EXE/MSI (Win32) packaged apps and does not support MSIX; stemma uses `msstore` instead.
 
 ## Local version sync (without tagging)
 

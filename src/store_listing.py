@@ -310,7 +310,7 @@ def render_product_update(
     release_version: str,
     repository: str = "cyanidesayonara/stemma",
 ) -> dict:
-    """Build microsoft/store-submission product-update (packages only)."""
+    """Build Partner Center product-update JSON (packages only; reference/debug)."""
     if release_version not in data.whats_new:
         raise ValueError(f"whats_new missing entry for version {release_version}")
     return {
@@ -334,7 +334,7 @@ def render_metadata_update(
     *,
     release_version: str,
 ) -> dict:
-    """Build microsoft/store-submission metadata-update (listing module)."""
+    """Build msstore submission updateMetadata payload (listing module)."""
     if release_version not in data.whats_new:
         raise ValueError(f"whats_new missing entry for version {release_version}")
     listing = {

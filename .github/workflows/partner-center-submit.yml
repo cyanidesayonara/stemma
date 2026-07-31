@@ -1,5 +1,5 @@
 # Optional: update / publish Partner Center drafts from a GitHub Release MSIX.
-# See docs/store-release-pipeline.md. Prefer update_draft; publish_draft is explicit.
+# Uses Microsoft Store CLI (msstore) for MSIX products. See docs/store-release-pipeline.md.
 
 name: Partner Center submit (manual)
 
@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = package draft; get_draft = read listing; publish_draft = submit"
+        description: "configure = credentials; update_draft = MSIX + listing draft; get_draft = read submission; publish_draft = submit"
         type: choice
         options:
           - configure
@@ -23,6 +23,8 @@ on:
 jobs:
   submit:
     runs-on: ubuntu-latest
+    env:
+      PRODUCT_ID: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
     steps:
       - name: Checkout
         if: ${{ inputs.mode == 'update_draft' }}
@@ -40,7 +42,6 @@ jobs:
 
       - name: Build Partner Center payloads
         if: ${{ inputs.mode == 'update_draft' }}
-        id: payloads
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -49,14 +50,6 @@ jobs:
             --tag "$TAG" \
             --repository "${{ github.repository }}" \
             --out-dir store/payloads
-          {
-            echo "product_update<<EOF"
-            cat store/payloads/product-update.json
-            echo "EOF"
-            echo "metadata_update<<EOF"
-            cat store/payloads/metadata-update.json
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Upload payload artifacts
         if: ${{ inputs.mode == 'update_draft' }}
@@ -66,54 +59,56 @@ jobs:
           path: store/payloads/
           if-no-files-found: error
 
-      - name: Configure Store credentials
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: configure
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-
-      - name: Update draft submission
+      - name: Download release MSIX
         if: ${{ inputs.mode == 'update_draft' }}
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: update
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-          # Packages first; metadata PUT is a separate follow-up once package
-          # update succeeds (Partner Center may reject listing module shape).
-          product-update: ${{ steps.payloads.outputs.product_update }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${{ github.repository }}/releases/download/${TAG}/stemma.msix"
+          curl -fsSL -o stemma.msix "$url"
+          ls -lh stemma.msix
 
-      - name: Get draft listing (debug)
+      - name: Setup Microsoft Store CLI
+        uses: microsoft/setup-msstore-cli@52af111539fa0c9569714bfca7c79e33bc704f92 # v1
+
+      - name: Configure Store credentials
+        run: |
+          set -euo pipefail
+          msstore reconfigure \
+            --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" \
+            --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" \
+            --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" \
+            --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
+
+      - name: Verify Store credentials
+        if: ${{ inputs.mode == 'configure' }}
+        run: msstore info
+
+      - name: Update draft submission (MSIX package)
+        if: ${{ inputs.mode == 'update_draft' }}
+        run: |
+          set -euo pipefail
+          msstore publish stemma.msix \
+            --appId "$PRODUCT_ID" \
+            --noCommit \
+            --verbose
+
+      - name: Update draft listing metadata
+        if: ${{ inputs.mode == 'update_draft' }}
+        run: |
+          set -euo pipefail
+          metadata="$(cat store/payloads/metadata-update.json)"
+          msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
+
+      - name: Get draft submission (debug)
         if: ${{ inputs.mode == 'get_draft' }}
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: get
-          type: packaged
-          module-name: listings
-          listing-language: en-us
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          msstore submission status "$PRODUCT_ID" --verbose
+          echo "---"
+          msstore submission get "$PRODUCT_ID" --verbose
 
       - name: Publish draft submission
         if: ${{ inputs.mode == 'publish_draft' }}
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: publish
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        run: msstore submission publish "$PRODUCT_ID" --verbose
