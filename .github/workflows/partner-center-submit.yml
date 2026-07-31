@@ -98,7 +98,7 @@ jobs:
         with:
           command: get
           type: packaged
-          module-name: listing
+          module-name: listings
           listing-language: en-us
           seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
           product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
