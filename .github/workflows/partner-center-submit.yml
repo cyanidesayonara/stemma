@@ -11,11 +11,12 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = package+listing draft; publish_draft = submit draft"
+        description: "configure = credentials; update_draft = package draft; get_draft = read listing; publish_draft = submit"
         type: choice
         options:
           - configure
           - update_draft
+          - get_draft
           - publish_draft
         default: configure
 
@@ -87,8 +88,23 @@ jobs:
           tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
           client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
           client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+          # Packages first; metadata PUT is a separate follow-up once package
+          # update succeeds (Partner Center may reject listing module shape).
           product-update: ${{ steps.payloads.outputs.product_update }}
-          metadata-update: ${{ steps.payloads.outputs.metadata_update }}
+
+      - name: Get draft listing (debug)
+        if: ${{ inputs.mode == 'get_draft' }}
+        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
+        with:
+          command: get
+          type: packaged
+          module-name: listing
+          listing-language: en-us
+          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
+          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
 
       - name: Publish draft submission
         if: ${{ inputs.mode == 'publish_draft' }}
