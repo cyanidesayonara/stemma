@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 
 from src.store_listing import (
+    DEFAULT_LISTING_YAML,
+    DEFAULT_MARKDOWN,
+    DEFAULT_SCREENSHOTS,
+    DEFAULT_SKELETON,
+    DEFAULT_VERSION_PY,
     ListingData,
     ValidationError,
     load_listing,
@@ -202,4 +207,17 @@ whats_new:
         release_version="2.6.0",
         markdown_path=markdown_path,
         skeleton_path=skeleton_path,
+    )
+
+
+def test_committed_store_listing_is_valid_and_fresh() -> None:
+    """Smoke test real repo paths; catches listing, screenshot, and drift regressions."""
+    data = load_listing(DEFAULT_LISTING_YAML)
+    version = read_app_version(DEFAULT_VERSION_PY)
+    validate_listing(data, version=version, screenshots_dir=DEFAULT_SCREENSHOTS)
+    assert outputs_match(
+        data,
+        release_version=version,
+        markdown_path=DEFAULT_MARKDOWN,
+        skeleton_path=DEFAULT_SKELETON,
     )
