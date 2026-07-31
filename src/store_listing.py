@@ -58,14 +58,21 @@ def _load_store_identity(raw: dict) -> StoreIdentity | None:
         "url",
         "publisher_display_name",
     )
-    missing = [key for key in required if not str(block.get(key, "")).strip()]
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for key in required:
+        value = block.get(key)
+        if value is None or not isinstance(value, str) or not value.strip():
+            missing.append(key)
+        else:
+            values[key] = value.strip()
     if missing:
         raise ValueError(f"store missing fields: {', '.join(missing)}")
     return StoreIdentity(
-        product_id=str(block["product_id"]).strip(),
-        package_family_name=str(block["package_family_name"]).strip(),
-        url=str(block["url"]).strip(),
-        publisher_display_name=str(block["publisher_display_name"]).strip(),
+        product_id=values["product_id"],
+        package_family_name=values["package_family_name"],
+        url=values["url"],
+        publisher_display_name=values["publisher_display_name"],
     )
 
 

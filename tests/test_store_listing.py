@@ -102,6 +102,32 @@ whats_new:
     )
 
 
+def test_load_listing_rejects_null_store_fields(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "listing.yaml"
+    yaml_path.write_text(
+        """
+listing_version: "2.6.0"
+store:
+  product_id: "9P2W12L8F381"
+  package_family_name: "SanttuNyknen.stemma_rt9h3xsn8gsh8"
+  url: null
+  publisher_display_name: "Santtu Nykänen"
+short_description: Short text
+description: Desc
+features:
+  - Feature one
+search_terms:
+  - stem
+whats_new:
+  "2.6.0": |
+    What's new in version 2.6.0
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="url"):
+        load_listing(yaml_path)
+
+
 def test_png_size_reads_ihdr(tmp_path: Path) -> None:
     path = tmp_path / "tiny.png"
     path.write_bytes(_minimal_png(8, 4))
