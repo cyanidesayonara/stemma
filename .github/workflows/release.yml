@@ -29,6 +29,14 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --require-hashes -r requirements-release.txt
 
+      - name: Validate Store listing
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag.StartsWith("v")) { $tag = $tag.Substring(1) }
+          python scripts/validate_store_release.py --version $tag
+          python scripts/build_store_listing.py --check --version $tag
+
       - name: Run Ruff
         run: python -m ruff check .
 

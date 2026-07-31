@@ -5,11 +5,36 @@
 Pushing a version tag matching `v*` triggers `.github/workflows/release.yml`:
 
 1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v2.6.0` becomes app `2.6.0` and MSIX `2.6.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
-2. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
-3. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
-4. **GitHub Release** -- attaches `stemma.zip` and `stemma.msix`.
+2. **Validate Store listing** -- after dependency install, `scripts/validate_store_release.py` and `scripts/build_store_listing.py --check` run against the tag version (leading `v` stripped). The release fails if listing metadata, assets, or generated outputs are invalid or out of date.
+3. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
+4. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
+5. **GitHub Release** -- attaches `stemma.zip` and `stemma.msix`.
 
 CI (`.github/workflows/ci.yml`) also runs on `v*` tag pushes so a tag-only release still gets a test run.
+
+## Store listing as code
+
+`store/listing.yaml` is the single source of truth for Partner Center copy, feature bullets, and per-version **What's new** text.
+
+- **Edit YAML, not markdown.** Do not hand-edit `docs/store-listing.md`; it is generated output.
+- **Regenerate outputs** after YAML changes:
+
+  ```powershell
+  python scripts/build_store_listing.py --version X.Y.Z
+  ```
+
+  This refreshes `docs/store-listing.md` and `store/product-update.skeleton.json`.
+
+- **Validate before tagging** (same checks as release CI):
+
+  ```powershell
+  python scripts/validate_store_release.py --version X.Y.Z
+  python scripts/build_store_listing.py --check --version X.Y.Z
+  ```
+
+  Add a `whats_new` entry for every release version. Screenshots under `assets/store_listing/screenshots/` must meet Store minimum size (1366x768) and count requirements.
+
+Partner Center draft/submit automation remains manual for slice 1 of [#134](https://github.com/cyanidesayonara/stemma/issues/134); use the GitHub Release MSIX upload path below until a later slice wires API submission.
 
 ## Manual Store upload (current default)
 
