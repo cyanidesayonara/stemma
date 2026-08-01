@@ -141,6 +141,17 @@ jobs:
           metadata="$(cat submission-metadata.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
 
+      - name: Commit Partner Center submission changes
+        if: ${{ (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') && steps.update_metadata.outcome == 'success' }}
+        env:
+          PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        id: commit_submission
+        run: |
+          set -euo pipefail
+          python scripts/commit_partner_center_submission.py --verbose
+
       - name: Upload merged submission metadata
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
