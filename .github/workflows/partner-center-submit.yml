@@ -11,14 +11,13 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = MSIX + listing; update_metadata = ensure draft + listing; get_draft = read; publish_draft = submit"
+        description: "configure = credentials; update_draft = MSIX + listing (draft only); update_metadata = ensure draft + listing (draft only); get_draft = read submission JSON"
         type: choice
         options:
           - configure
           - update_draft
           - update_metadata
           - get_draft
-          - publish_draft
         default: configure
 
 jobs:
@@ -110,6 +109,7 @@ jobs:
           echo "::notice::No pending draft (for example after certification). Creating one from release MSIX."
           msstore publish stemma.msix \
             --appId "$PRODUCT_ID" \
+            --noCommit \
             --verbose
           echo "created=true" >> "$GITHUB_OUTPUT"
 
@@ -119,10 +119,11 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          # Commit the uploaded package into the Partner Center draft. This does
-          # not submit for certification; use publish_draft for that step.
+          # Upload package into the Partner Center draft without starting
+          # certification. Submit manually in Partner Center when ready.
           msstore publish stemma.msix \
             --appId "$PRODUCT_ID" \
+            --noCommit \
             --verbose
 
       - name: Update draft listing metadata
@@ -141,16 +142,14 @@ jobs:
           metadata="$(cat submission-metadata.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
 
-      - name: Commit Partner Center submission changes
+      - name: Verify listing metadata in submission API
         if: ${{ (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') && steps.update_metadata.outcome == 'success' }}
-        env:
-          PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-        id: commit_submission
         run: |
           set -euo pipefail
-          python scripts/commit_partner_center_submission.py --verbose
+          NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission-after.json
+          python scripts/verify_partner_center_metadata.py \
+            --submission submission-after.json \
+            --tag "${{ inputs.tag }}"
 
       - name: Upload merged submission metadata
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
@@ -167,7 +166,9 @@ jobs:
           if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
             echo "Created a new Partner Center draft from release MSIX before updating listing metadata."
           fi
-          echo "Listing metadata update completed. Inspect the draft in Partner Center before publish_draft."
+          echo "Listing metadata update completed and verified via submission API."
+          echo "Partner Center UI may stay stale while the draft is PendingCommit."
+          echo "Inspect the draft in Partner Center, then click Submit for certification."
 
       - name: Summarize draft update
         if: ${{ inputs.mode == 'update_draft' }}
@@ -189,6 +190,8 @@ jobs:
             exit 1
           fi
           echo "Partner Center draft update completed."
+          echo "Package and listing changes remain in draft (PendingCommit)."
+          echo "Inspect the draft in Partner Center, then click Submit for certification."
 
       - name: Get draft submission (debug)
         if: ${{ inputs.mode == 'get_draft' }}
@@ -197,7 +200,3 @@ jobs:
           msstore submission status "$PRODUCT_ID" --verbose
           echo "---"
           msstore submission get "$PRODUCT_ID" --verbose
-
-      - name: Publish draft submission
-        if: ${{ inputs.mode == 'publish_draft' }}
-        run: msstore submission publish "$PRODUCT_ID" --verbose

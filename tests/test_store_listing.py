@@ -23,6 +23,7 @@ from src.store_listing import (
     render_metadata_update,
     merge_submission_listing_metadata,
     parse_msstore_submission_json,
+    verify_submission_listing_metadata,
     render_product_update,
     render_skeleton,
     tag_to_version,
@@ -297,6 +298,51 @@ def test_merge_submission_listing_metadata_updates_base_listing() -> None:
     assert base["Features"] == ["Feature one"]
     assert "What's new in version 2.6.0" in base["ReleaseNotes"]
     assert submission["Listings"]["en-us"]["BaseListing"]["Description"] == "Old"
+
+
+def test_verify_submission_listing_metadata_passes_when_fields_match() -> None:
+    data = _data()
+    submission = merge_submission_listing_metadata(
+        {
+            "Listings": {
+                "en-us": {
+                    "BaseListing": {
+                        "Description": "Old",
+                        "ReleaseNotes": "Old notes",
+                    }
+                }
+            }
+        },
+        data,
+        release_version="2.6.0",
+    )
+    verify_submission_listing_metadata(
+        submission,
+        data,
+        release_version="2.6.0",
+    )
+
+
+def test_verify_submission_listing_metadata_raises_on_mismatch() -> None:
+    submission = {
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Wrong",
+                    "ShortDescription": "Short",
+                    "ReleaseNotes": "Old notes",
+                    "Features": ["Feature one"],
+                    "Keywords": ["stem separation"],
+                }
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="Description"):
+        verify_submission_listing_metadata(
+            submission,
+            _data(),
+            release_version="2.6.0",
+        )
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:

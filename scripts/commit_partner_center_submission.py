@@ -1,4 +1,10 @@
-"""Commit a pending Partner Center submission after updateMetadata."""
+"""Submit a pending Partner Center draft for certification.
+
+The Dev Center ``commit`` API starts the certification pipeline
+(PreProcessing -> Certification -> Published). It is not a UI-only save.
+This script is kept for debugging; the GitHub workflow does not call it.
+Submit for certification manually in Partner Center instead.
+"""
 
 from __future__ import annotations
 

@@ -410,6 +410,42 @@ def parse_msstore_submission_json(raw: str) -> dict:
     return parsed
 
 
+def verify_submission_listing_metadata(
+    submission: dict,
+    data: ListingData,
+    *,
+    release_version: str,
+    language: str = "en-us",
+) -> None:
+    """Raise ValueError when submission listing fields differ from YAML."""
+    expected = render_metadata_update(
+        data,
+        release_version=release_version,
+        language=language,
+    )["BaseListing"]
+    listings = submission.get("Listings")
+    if not isinstance(listings, dict):
+        raise ValueError("submission JSON missing Listings object")
+    lang_key = _resolve_listing_language_key(listings, language)
+    base = listings[lang_key].get("BaseListing")
+    if not isinstance(base, dict):
+        raise ValueError(f"submission listing {lang_key!r} missing BaseListing")
+    for field in (
+        "Description",
+        "ShortDescription",
+        "ReleaseNotes",
+        "Features",
+        "Keywords",
+    ):
+        actual = base.get(field)
+        want = expected[field]
+        if actual != want:
+            raise ValueError(
+                f"submission BaseListing.{field} does not match store/listing.yaml "
+                f"for version {release_version}",
+            )
+
+
 def merge_submission_listing_metadata(
     submission: dict,
     data: ListingData,

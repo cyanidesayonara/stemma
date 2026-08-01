@@ -38,20 +38,27 @@ Partner Center draft/submit automation uses `.github/workflows/partner-center-su
 (manual `workflow_dispatch`) with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview) (`msstore`), which supports MSIX products. Modes:
 
 - **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
-- **`update_draft`** -- download `stemma.msix` from the release tag, upload and commit
-  it with `msstore publish` (draft only; does not certify), then push listing metadata
-- **`update_metadata`** -- fetch current submission JSON, merge listing fields from
-  `store/listing.yaml`, and push with `submission updateMetadata` (no MSIX upload)
+- **`update_draft`** -- download `stemma.msix` from the release tag, upload it with
+  `msstore publish --noCommit` (draft only; does not start certification), then push
+  listing metadata and verify via the submission API
+- **`update_metadata`** -- ensure a pending draft exists (creating one with
+  `--noCommit` if needed), merge listing fields from `store/listing.yaml`, push with
+  `submission updateMetadata`, and verify via the submission API
 - **`get_draft`** -- print current submission status and package JSON (debug)
-- **`publish_draft`** -- publish the current Partner Center draft for certification
+
+Partner Center UI can lag behind the submission API while a draft is in
+`PendingCommit`. After `update_draft` or `update_metadata`, trust the workflow
+verification step (or `get_draft`) for listing copy. Submit for certification
+manually in Partner Center when you are ready to ship.
 
 ```powershell
 python scripts/build_partner_center_payloads.py --tag v2.6.0
 ```
 
 Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.json`
-(gitignored). After `update_draft`, inspect the draft in Partner Center before
-`publish_draft`.
+(gitignored). After `update_draft` or `update_metadata`, confirm listing fields via
+the workflow verification step or `get_draft`, then submit for certification
+manually in Partner Center.
 
 ## Manual Store upload (fallback)
 
@@ -73,7 +80,9 @@ Repository secrets for `partner-center-submit.yml`:
 - `PARTNER_CENTER_CLIENT_ID`
 - `PARTNER_CENTER_CLIENT_SECRET`
 
-Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Inspect the Partner Center draft before **`publish_draft`**. Manual MSIX upload remains a fallback if automation fails.
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Verify listing metadata via the workflow or **`get_draft`**, then click **Submit for certification** in Partner Center. Manual MSIX upload remains a fallback if automation fails.
+
+**Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself.
 
 **Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; listing metadata can still be pushed via `update_draft`.
 
