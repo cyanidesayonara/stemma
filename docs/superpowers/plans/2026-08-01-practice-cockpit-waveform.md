@@ -31,6 +31,31 @@
 | `src/ui/stem_mixer.py` | Remove mini waveforms and `set_mini_peaks` |
 | `tests/test_waveform_stack_widget.py` | Unit tests for stack widget |
 | `tests/test_waveform_widget.py` | Update/remove mini-waveform stem row assertions |
+| `tests/widget_visual.py` | Offscreen widget PNG snapshot helpers |
+| `tests/fixtures/widget_snapshots/` | Golden PNGs for visual regression |
+
+---
+
+### Task 0: Widget visual snapshot helpers
+
+**Files:**
+- Create: `tests/widget_visual.py`
+- Create: `tests/fixtures/widget_snapshots/.gitkeep`
+- Create: `tests/test_widget_visual.py`
+
+**Interfaces:**
+- Produces:
+  - `render_widget_png(widget, *, width: int, height: int) -> bytes`
+  - `assert_widget_snapshot(widget, name: str, *, width: int, height: int) -> None`
+  - Set env `UPDATE_WIDGET_SNAPSHOTS=1` to regenerate golden PNGs locally/CI.
+
+Use `QApplication.processEvents()` before grab; offscreen platform only. Snapshots
+live under `tests/fixtures/widget_snapshots/{name}.png`. Compare SHA-256 of PNG
+bytes for stable CI. Include one smoke test that grabs a simple QLabel to prove
+the harness works.
+
+- [ ] Implement helpers + smoke test
+- [ ] Commit: `test: add offscreen widget snapshot helpers`
 
 ---
 
@@ -50,7 +75,7 @@
   - `set_loading(loading: bool) -> None`
   - Signal `seek_requested(float)` (seconds)
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **Step 1: Write failing tests** (include one `assert_widget_snapshot` for two-lane layout)
 
 ```python
 # tests/test_waveform_stack_widget.py
@@ -58,6 +83,7 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 from src.ui.waveform_stack_widget import WaveformStackWidget, STACK_HEIGHT
+from tests.widget_visual import assert_widget_snapshot
 
 
 @pytest.fixture(scope="module")
@@ -86,6 +112,18 @@ def test_seek_emits_seconds(app):
     w.seek_requested.connect(got.append)
     w._emit_seek_at_ratio(0.25)
     assert got == [25.0]
+
+
+def test_two_lane_stack_snapshot(app):
+    w = WaveformStackWidget()
+    peaks = np.array([0.0, 0.8, 0.2, 0.9], dtype=np.float32)
+    w.set_stem_lanes(
+        [("vocals", peaks, "#e78284"), ("drums", peaks, "#a6e3a1")],
+        muted=set(),
+        soloed=set(),
+    )
+    w.set_total_seconds(60.0)
+    assert_widget_snapshot(w, "waveform_stack_two_lanes", width=640, height=280)
 ```
 
 - [ ] **Step 2: Run tests — expect FAIL**

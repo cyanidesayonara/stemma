@@ -7,8 +7,9 @@ from PySide6.QtCore import Qt, QEvent, QPointF
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from src.ui.waveform_widget import MiniWaveformWidget, WaveformWidget
-from src.ui.player_controls import PlayerControls, StemRow
+from src.ui.waveform_widget import WaveformWidget
+from src.ui.player_controls import PlayerControls
+from src.ui.stem_mixer import StemRow
 
 
 @pytest.fixture(scope="module")
@@ -118,58 +119,61 @@ class TestMixChangedWiring:
         player.has_stems = True
         return player
 
-    def test_mute_triggers_waveform_recompute(self, app):
-        """Muting a stem calls _recompute_peaks via mix_changed signal."""
+    def test_mute_refreshes_lane_mix_without_recompute(self, app):
+        """Muting a stem refreshes stack opacities without recomputing peaks."""
         player = self._make_player_mock()
         controls = PlayerControls(player)
         controls.set_stem_names(["vocals", "drums"])
+        controls._cached_stem_peaks = {
+            "vocals": np.array([0.1, 0.5], dtype=np.float32),
+            "drums": np.array([0.2, 0.4], dtype=np.float32),
+        }
 
-        with patch.object(controls, "_recompute_peaks") as mock_recompute:
-            controls._stem_rows["vocals"].set_muted(True)
-            mock_recompute.assert_called_once()
+        with patch.object(controls, "_recompute_peaks") as mock_recompute, patch.object(
+            controls, "_refresh_waveform_lane_mix",
+        ) as mock_refresh:
+            controls._stem_rows["vocals"]._on_mute(True)
+            mock_refresh.assert_called_once()
+            mock_recompute.assert_not_called()
 
-    def test_solo_triggers_waveform_recompute(self, app):
-        """Soloing a stem calls _recompute_peaks via mix_changed signal."""
+    def test_solo_refreshes_lane_mix_without_recompute(self, app):
+        """Soloing a stem refreshes stack opacities without recomputing peaks."""
         player = self._make_player_mock()
         controls = PlayerControls(player)
         controls.set_stem_names(["vocals", "drums"])
+        controls._cached_stem_peaks = {
+            "vocals": np.array([0.1, 0.5], dtype=np.float32),
+            "drums": np.array([0.2, 0.4], dtype=np.float32),
+        }
 
-        with patch.object(controls, "_recompute_peaks") as mock_recompute:
-            controls._stem_rows["drums"].mix_changed.emit()
-            mock_recompute.assert_called_once()
+        with patch.object(controls, "_recompute_peaks") as mock_recompute, patch.object(
+            controls, "_refresh_waveform_lane_mix",
+        ) as mock_refresh:
+            controls._stem_rows["drums"]._on_solo(True)
+            mock_refresh.assert_called_once()
+            mock_recompute.assert_not_called()
 
 
-class TestMiniWaveformWidget:
-    """Tests for MiniWaveformWidget."""
+class TestStemRowLayout:
+    """Tests for simplified stem mixer rows."""
 
-    def test_creates_with_color(self, app):
-        widget = MiniWaveformWidget("#ff0000")
-        assert widget._color.red() == 255
-        assert widget._peaks is None
-
-    def test_set_peaks_stores_data(self, app):
-        widget = MiniWaveformWidget("#00ff00")
-        peaks = np.array([0.2, 0.8, 0.4], dtype=np.float32)
-        widget.set_peaks(peaks)
-        np.testing.assert_array_equal(widget._peaks, peaks)
-        assert widget._max_peak == pytest.approx(0.8)
-
-    def test_paint_no_crash_without_peaks(self, app):
-        widget = MiniWaveformWidget("#0000ff")
-        widget.resize(100, 24)
-        widget.repaint()
-
-    def test_paint_no_crash_with_peaks(self, app):
-        widget = MiniWaveformWidget("#ffffff")
-        widget.resize(100, 24)
-        widget.set_peaks(np.array([0.1, 0.5, 0.3], dtype=np.float32))
-        widget.repaint()
-
-    def test_stem_row_has_mini_waveform(self, app):
+    def test_stem_row_has_no_mini_waveform(self, app):
         player = MagicMock()
         player.muted_stems = set()
         player.soloed_stems = set()
         player.volumes = {}
         row = StemRow("vocals", player)
-        assert hasattr(row, "_mini_waveform")
-        assert isinstance(row._mini_waveform, MiniWaveformWidget)
+        assert not hasattr(row, "_mini_waveform")
+        assert row._label.text() == "Vocals"
+        assert row._mute_btn is not None
+        assert row._solo_btn is not None
+
+    def test_stem_row_snapshot(self, app):
+        from tests.widget_visual import assert_widget_snapshot
+
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        row = StemRow("vocals", player)
+        assert_widget_snapshot(row, "stem_row_simplified", width=420, height=36)

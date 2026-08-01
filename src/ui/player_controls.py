@@ -1,9 +1,12 @@
 """Player transport controls and per-stem mute/solo mixer.
 
 PlayerControls remains the composition facade over TransportBar,
-StemMixer, PracticeRack, and SongInfoBar. Visual recomposition is
-deferred to a later v3.0 change; this module preserves the shipped
-layout and public integration points.
+StemMixer, PracticeRack, and SongInfoBar. The transport bar hosts a
+~280px stacked stem waveform view (``WaveformStackWidget``); peak jobs
+route stem lanes here and per-stem mini waveforms were removed from the
+mixer. Further practice-cockpit visual recomposition is deferred to later
+v3.0 slices; this module preserves the shipped layout and public
+integration points.
 """
 
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -30,27 +33,35 @@ from src.ui.control_primitives import format_time as _format_time
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.stem_mixer import RecordingStemRow, StemMixer, StemRow
-from src.ui.styles import CONFIDENCE_COLORS, DARK_COLORS, LIGHT_COLORS
+from src.ui.styles import (
+    CONFIDENCE_COLORS,
+    DARK_COLORS,
+    LIGHT_COLORS,
+    RECORDING_COLOR,
+    STEM_COLORS_DARK,
+    STEM_COLORS_LIGHT,
+)
 from src.ui.transport_bar import TransportBar
-from src.waveform import compute_peaks, compute_stem_peaks
+from src.waveform import compute_stem_peaks
 
 _PEAK_DEBOUNCE_MS = 80
 
 
-def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
-                      mini_bins=200):
-    """Compute peaks on a background thread. Returns (main_peaks, stem_peaks)."""
-    main_peaks = compute_peaks(
-        stems=stems,
-        muted=muted,
-        soloed=soloed,
-        volumes=volumes,
-        num_bins=num_bins,
-    )
-    stem_peaks = {}
-    for name, data in stems.items():
-        stem_peaks[name] = compute_stem_peaks(data, num_bins=mini_bins)
-    return main_peaks, stem_peaks
+def _compute_peaks_bg(stems, stem_bins=2000):
+    """Compute per-stem peaks on a background thread.
+
+    Mute/solo/volume are not applied here: the stacked lanes show each stem
+    at full scale and express mix state as paint opacity, so peaks stay valid
+    across mix changes and only need recomputing when the audio itself does.
+
+    ``stem_bins`` matches the resolution the old single composite waveform
+    used. Bin count is nearly free: the cost is the O(frames) pass over the
+    audio, not the reduction into bins.
+    """
+    return {
+        name: compute_stem_peaks(data, num_bins=stem_bins)
+        for name, data in stems.items()
+    }
 
 
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
@@ -105,6 +116,7 @@ class PlayerControls(QWidget):
         self._peak_future_generation: int | None = None
         self._peak_generation = 0
         self._peak_refresh_pending = False
+        self._cached_stem_peaks: dict[str, np.ndarray] | None = None
         self._peak_poll_timer = QTimer(self)
         self._peak_poll_timer.setInterval(16)  # ~60fps poll
         self._peak_poll_timer.timeout.connect(self._poll_peak_future)
@@ -385,7 +397,7 @@ class PlayerControls(QWidget):
         self._song_info_bar.bpm_redetect_requested.connect(
             self._request_bpm_redetection
         )
-        self._stem_mixer.mix_changed.connect(self._recompute_peaks)
+        self._stem_mixer.mix_changed.connect(self._on_mixer_mix_changed)
 
     def _request_key_redetection(self) -> None:
         if self._player.stems:
@@ -436,6 +448,8 @@ class PlayerControls(QWidget):
         self._empty_logo.set_theme(theme)
         self._arpeggio_label.set_theme(theme)
         self._stem_mixer.apply_theme(theme)
+        if self._cached_stem_peaks is not None:
+            self._apply_stem_lanes_to_waveform(self._cached_stem_peaks)
 
     def play_intro_animation(self, with_sound: bool = False) -> None:
         """Trigger the main logo's intro animation (notes + waves)."""
@@ -455,6 +469,7 @@ class PlayerControls(QWidget):
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Populate the stem mixer with rows for each stem."""
         self._invalidate_detection()
+        self._cached_stem_peaks = None
         has_stems = bool(stem_names)
         self._empty_widget.setVisible(not has_stems)
         self._controls_widget.setVisible(has_stems)
@@ -507,8 +522,9 @@ class PlayerControls(QWidget):
         self._detach_detection_worker()
         self.set_stem_names([])
         self._hint_label.setText("Drop an audio file or use File > Import")
+        self._cached_stem_peaks = None
         self._waveform.set_loading(False)
-        self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
+        self._waveform.set_stem_lanes([], muted=set(), soloed=set())
         self._waveform.set_position(0.0)
         self._time_label.setText("0:00 / 0:00")
         self._key_label.setText("")
@@ -670,6 +686,55 @@ class PlayerControls(QWidget):
         else:
             self._waveform.set_position(0.0)
 
+    def _build_stem_lanes(
+        self, stem_peaks: dict[str, np.ndarray],
+    ) -> list[tuple[str, np.ndarray, str]]:
+        palette = (
+            STEM_COLORS_DARK if self._theme == "dark" else STEM_COLORS_LIGHT
+        )
+        lanes: list[tuple[str, np.ndarray, str]] = []
+        for name in self._stem_mixer.stem_names():
+            peaks = stem_peaks.get(name)
+            if peaks is None:
+                continue
+            if name in self._stem_mixer.recording_rows:
+                color = RECORDING_COLOR
+            else:
+                color = palette.get(name, "#95a5a6")
+            lanes.append((name, peaks, color))
+        return lanes
+
+    def _apply_stem_lanes_to_waveform(
+        self, stem_peaks: dict[str, np.ndarray],
+    ) -> None:
+        try:
+            _ = self._waveform
+        except RuntimeError:
+            return
+        self._waveform.set_stem_lanes(
+            self._build_stem_lanes(stem_peaks),
+            muted=self._player.muted_stems,
+            soloed=self._player.soloed_stems,
+        )
+
+    def _refresh_waveform_lane_mix(self) -> None:
+        try:
+            _ = self._waveform
+        except RuntimeError:
+            return
+        if self._cached_stem_peaks is None:
+            return
+        self._waveform.update_lane_mix(
+            muted=self._player.muted_stems,
+            soloed=self._player.soloed_stems,
+        )
+
+    def _on_mixer_mix_changed(self) -> None:
+        if self._cached_stem_peaks is not None:
+            self._refresh_waveform_lane_mix()
+            return
+        self._recompute_peaks()
+
     def _recompute_peaks(self) -> None:
         """Schedule a debounced waveform peak recomputation.
 
@@ -695,7 +760,11 @@ class PlayerControls(QWidget):
         stems = self._player.stems
         if not stems:
             self._peak_refresh_pending = False
-            self._waveform.set_peaks(np.zeros(1, dtype=np.float32))
+            self._cached_stem_peaks = None
+            try:
+                self._waveform.set_stem_lanes([], muted=set(), soloed=set())
+            except RuntimeError:
+                pass
             return
 
         self._peak_refresh_pending = False
@@ -703,9 +772,6 @@ class PlayerControls(QWidget):
         self._peak_future = _get_peak_pool().submit(
             _compute_peaks_bg,
             stems=stems,
-            muted=self._player.muted_stems,
-            soloed=self._player.soloed_stems,
-            volumes=self._player.volumes,
         )
         self._peak_poll_timer.start()
 
@@ -722,27 +788,26 @@ class PlayerControls(QWidget):
         failed = future.cancelled() or future.exception() is not None
         if not stale and not failed:
             try:
-                main_peaks, stem_peaks = future.result()
+                stem_peaks = future.result()
             except Exception:
                 failed = True
             else:
-                self._on_peaks_computed(main_peaks, stem_peaks)
+                self._on_peaks_computed(stem_peaks)
 
         refresh = stale or self._peak_refresh_pending
         self._peak_refresh_pending = False
         if refresh:
             self._start_peak_computation()
 
-    def _on_peaks_computed(self, main_peaks: np.ndarray,
-                           stem_peaks: dict) -> None:
+    def _on_peaks_computed(self, stem_peaks: dict) -> None:
         """Apply peak results from the background thread."""
+        self._cached_stem_peaks = stem_peaks
+        self._apply_stem_lanes_to_waveform(stem_peaks)
         try:
             _ = self._waveform
         except RuntimeError:
             return  # Widget was destroyed
-        self._waveform.set_peaks(main_peaks)
         self._waveform.set_total_seconds(self._player.total_seconds)
-        self._stem_mixer.set_mini_peaks(stem_peaks)
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""

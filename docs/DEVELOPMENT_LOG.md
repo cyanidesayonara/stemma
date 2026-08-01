@@ -7,6 +7,18 @@ shipped versions.
 
 ---
 
+## 2026-08-01 -- Practice cockpit waveform stack (issue #131 slice 1)
+
+### Done
+- **Stacked waveform view:** Replaced the single 140px composite waveform with a ~280px DAW-style ``WaveformStackWidget`` in the transport bar. Stem lanes follow mixer row order, theme colors, and mute/solo dimming; seek, playhead, and loop markers behave as before.
+- **Peak routing:** ``PlayerControls`` feeds cached stem peaks to the stack; mute/solo changes refresh lane opacity without recomputing peaks when possible.
+- **Mixer simplification:** Removed per-stem mini waveforms from ``StemRow`` and deleted the unused ``MiniWaveformWidget`` class.
+
+### Metrics recorded at the time
+- 993 fast tests passed (slow/hardware deselected).
+
+---
+
 ## 2026-07-17 -- Unreleased v2.6.0 MDX-Net 2-stem GPU separation and background imports
 
 ### Done

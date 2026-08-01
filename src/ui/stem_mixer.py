@@ -1,7 +1,5 @@
 """Stem and recording-row presentation for PlayerControls."""
 
-import numpy as np
-
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -34,13 +32,12 @@ from src.ui.styles import (
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
 )
-from src.ui.waveform_widget import MiniWaveformWidget
 
 MAX_RECORDING_TAKES = 2
 
 
 class StemRow(QWidget):
-    """A single stem row with waveform, mute, solo, and volume controls."""
+    """A single stem row with mute, solo, and volume controls."""
 
     mix_changed = Signal()
 
@@ -71,10 +68,6 @@ class StemRow(QWidget):
             f"color: {color}; font-weight: bold;"
         )
         layout.addWidget(self._label)
-
-        self._mini_waveform = MiniWaveformWidget(color, player)
-        self._mini_waveform.seek_requested.connect(self._on_mini_seek)
-        layout.addWidget(self._mini_waveform, 1)
 
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         icon_color = QColor(colors["text"])
@@ -131,9 +124,6 @@ class StemRow(QWidget):
         self._vol_combo.activated.connect(self._on_vol_combo)
         layout.addWidget(self._vol_combo)
 
-    def _on_mini_seek(self, seconds: float) -> None:
-        self._player.seek(seconds)
-
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
         self._mute_btn.clearFocus()
@@ -166,9 +156,6 @@ class StemRow(QWidget):
         self._volume_slider.setValue(value)
         self._vol_combo.setEditText(f"{value}%")
 
-    def set_mini_peaks(self, peaks: np.ndarray) -> None:
-        self._mini_waveform.set_peaks(peaks)
-
     def apply_stem_theme(self, theme: str) -> None:
         palette = (
             STEM_COLORS_DARK if theme == "dark" else STEM_COLORS_LIGHT
@@ -177,8 +164,6 @@ class StemRow(QWidget):
         self._label.setStyleSheet(
             f"color: {color}; font-weight: bold;"
         )
-        self._mini_waveform.set_color(QColor(color))
-        self._mini_waveform.update()
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         icon_color = QColor(colors["text"])
         self._mute_btn.setIcon(
@@ -207,7 +192,6 @@ class RecordingStemRow(StemRow):
         self._label.setStyleSheet(
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
-        self._mini_waveform.set_color(QColor(RECORDING_COLOR))
 
         layout = self.layout()
         insert_position = layout.count()
@@ -316,6 +300,10 @@ class StemMixer(QWidget):
     def max_recordings_reached(self) -> bool:
         return len(self._recording_rows) >= MAX_RECORDING_TAKES
 
+    def stem_names(self) -> list[str]:
+        """Return stem row names in display order (source stems, then recordings)."""
+        return list(self._stem_rows) + list(self._recording_rows)
+
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Replace source rows while preserving matching player state."""
         saved_muted = set(self._player.muted_stems)
@@ -381,14 +369,6 @@ class StemMixer(QWidget):
         self._recording_rows.clear()
         self._recordings_label.setVisible(False)
         self._recordings_frame.setVisible(False)
-
-    def set_mini_peaks(self, stem_peaks: dict[str, np.ndarray]) -> None:
-        for name, row in self._stem_rows.items():
-            if name in stem_peaks:
-                row.set_mini_peaks(stem_peaks[name])
-        for name, row in self._recording_rows.items():
-            if name in stem_peaks:
-                row.set_mini_peaks(stem_peaks[name])
 
     def apply_theme(self, theme: str) -> None:
         self._theme = theme

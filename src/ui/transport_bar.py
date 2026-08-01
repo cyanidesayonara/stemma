@@ -21,7 +21,7 @@ from src.ui.control_primitives import (
     make_icon,
 )
 from src.ui.styles import RECORDING_COLOR
-from src.ui.waveform_widget import WaveformWidget
+from src.ui.waveform_stack_widget import WaveformStackWidget
 
 
 class TransportBar(QWidget):
@@ -120,7 +120,7 @@ class TransportBar(QWidget):
         waveform_layout = QVBoxLayout(self._waveform_frame)
         waveform_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._waveform = WaveformWidget()
+        self._waveform = WaveformStackWidget()
         self._waveform.seek_requested.connect(self.seek_requested.emit)
         waveform_layout.addWidget(self._waveform)
         layout.addWidget(self._waveform_frame)
@@ -158,7 +158,7 @@ class TransportBar(QWidget):
         return self._waveform_frame
 
     @property
-    def waveform(self) -> WaveformWidget:
+    def waveform(self) -> WaveformStackWidget:
         return self._waveform
 
     @property
