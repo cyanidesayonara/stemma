@@ -115,7 +115,8 @@ jobs:
         continue-on-error: ${{ inputs.mode == 'update_draft' }}
         run: |
           set -euo pipefail
-          NO_COLOR=1 msstore submission get "$PRODUCT_ID" > submission.json
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
+          NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission.json
           python scripts/merge_partner_center_metadata.py \
             --submission submission.json \
             --listing store/listing.yaml \
