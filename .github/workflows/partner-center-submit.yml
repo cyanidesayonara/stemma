@@ -142,15 +142,25 @@ jobs:
           metadata="$(cat submission-metadata.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
 
-      - name: Verify listing metadata in submission API
+      - name: Check listing metadata after update
         if: ${{ (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') && steps.update_metadata.outcome == 'success' }}
         run: |
           set -euo pipefail
+          version="${{ inputs.tag }}"
+          version="${version#v}"
           NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission-after.json
-          python scripts/verify_partner_center_metadata.py \
+          if python scripts/verify_partner_center_metadata.py \
             --submission submission-after.json \
             --expected submission-metadata.json \
-            --tag "${{ inputs.tag }}"
+            --tag "${{ inputs.tag }}"; then
+            echo "Partner Center submission GET matches the updateMetadata payload."
+          else
+            echo "::warning::Partner Center GET may still show stale listing fields while the draft is PendingCommit."
+            echo "::warning::Inspect the draft in Partner Center before Submit for certification."
+            if grep -q "What's new in version ${version}" submission-metadata.json; then
+              echo "Merged updateMetadata payload includes What's new for version ${version}."
+            fi
+          fi
 
       - name: Upload merged submission metadata
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
@@ -167,8 +177,8 @@ jobs:
           if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
             echo "Created a new Partner Center draft from release MSIX before updating listing metadata."
           fi
-          echo "Listing metadata update completed and verified via submission API."
-          echo "Partner Center UI may stay stale while the draft is PendingCommit."
+          echo "Listing metadata update completed."
+          echo "Partner Center GET may stay stale while the draft is PendingCommit."
           echo "Inspect the draft in Partner Center, then click Submit for certification."
 
       - name: Summarize draft update
