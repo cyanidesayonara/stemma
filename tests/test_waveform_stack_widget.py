@@ -92,6 +92,44 @@ def test_set_loading_no_crash(app):
     w.repaint()
 
 
+def test_muted_lane_low_opacity(app):
+    w = WaveformStackWidget()
+    peaks = np.array([1.0], dtype=np.float32)
+    w.set_stem_lanes([("drums", peaks, "#00ff00")], muted={"drums"}, soloed=set())
+    assert w.lane_opacity("drums") < 0.5
+
+
+def test_solo_hides_non_solo_lanes(app):
+    w = WaveformStackWidget()
+    peaks = np.array([1.0], dtype=np.float32)
+    w.set_stem_lanes(
+        [("vocals", peaks, "#f00"), ("drums", peaks, "#0f0")],
+        muted=set(),
+        soloed={"vocals"},
+    )
+    assert w.lane_opacity("drums") < 0.5
+    assert w.lane_opacity("vocals") == 1.0
+
+
+def test_active_lane_full_opacity(app):
+    w = WaveformStackWidget()
+    peaks = np.array([1.0], dtype=np.float32)
+    w.set_stem_lanes([("vocals", peaks, "#f00")], muted=set(), soloed=set())
+    assert w.lane_opacity("vocals") == 1.0
+
+
+def test_solo_overrides_mute_opacity(app):
+    w = WaveformStackWidget()
+    peaks = np.array([1.0], dtype=np.float32)
+    w.set_stem_lanes(
+        [("vocals", peaks, "#f00"), ("drums", peaks, "#0f0")],
+        muted={"vocals"},
+        soloed={"vocals"},
+    )
+    assert w.lane_opacity("vocals") == 1.0
+    assert w.lane_opacity("drums") < 0.5
+
+
 def test_two_lane_stack_snapshot(app):
     w = WaveformStackWidget()
     peaks = np.array([0.0, 0.8, 0.2, 0.9], dtype=np.float32)
@@ -102,3 +140,27 @@ def test_two_lane_stack_snapshot(app):
     )
     w.set_total_seconds(60.0)
     assert_widget_snapshot(w, "waveform_stack_two_lanes", width=640, height=280)
+
+
+def test_muted_drums_snapshot(app):
+    w = WaveformStackWidget()
+    peaks = np.array([0.0, 0.8, 0.2, 0.9], dtype=np.float32)
+    w.set_stem_lanes(
+        [("vocals", peaks, "#e78284"), ("drums", peaks, "#a6e3a1")],
+        muted={"drums"},
+        soloed=set(),
+    )
+    w.set_total_seconds(60.0)
+    assert_widget_snapshot(w, "waveform_stack_muted_drums", width=640, height=280)
+
+
+def test_solo_vocals_snapshot(app):
+    w = WaveformStackWidget()
+    peaks = np.array([0.0, 0.8, 0.2, 0.9], dtype=np.float32)
+    w.set_stem_lanes(
+        [("vocals", peaks, "#e78284"), ("drums", peaks, "#a6e3a1")],
+        muted=set(),
+        soloed={"vocals"},
+    )
+    w.set_total_seconds(60.0)
+    assert_widget_snapshot(w, "waveform_stack_solo_vocals", width=640, height=280)

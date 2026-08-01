@@ -7,10 +7,11 @@ Supports click-to-seek and drag-to-seek like WaveformWidget.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF
+from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -33,6 +34,7 @@ _BAR_RADIUS = 1.0
 _CURSOR_GLOW_WIDTH = 6
 _LABEL_WIDTH = 52
 _LABEL_PADDING = 4
+_MUTED_LANE_OPACITY = 0.15
 
 
 @dataclass
@@ -61,6 +63,11 @@ class WaveformStackWidget(QWidget):
         self._total_seconds: float = 0.0
         self._seeking: bool = False
         self._loading: bool = False
+        self._shimmer_phase: float = 0.0
+
+        self._shimmer_timer = QTimer(self)
+        self._shimmer_timer.setInterval(30)  # ~33fps
+        self._shimmer_timer.timeout.connect(self._tick_shimmer)
 
         self._apply_colors(DARK_COLORS)
 
@@ -74,6 +81,7 @@ class WaveformStackWidget(QWidget):
         self._loop_marker_color = QColor(colors["red"])
         self._label_color = QColor(colors["text"])
         accent = QColor(colors["accent"])
+        self._accent_color = accent
         self._loop_region_color = QColor(
             accent.red(), accent.green(), accent.blue(), 38
         )
@@ -96,6 +104,16 @@ class WaveformStackWidget(QWidget):
     def lane_count(self) -> int:
         return len(self._lanes)
 
+    def lane_opacity(self, stem_name: str) -> float:
+        """Return paint opacity for *stem_name* based on mute/solo state."""
+        if self._soloed:
+            if stem_name in self._soloed:
+                return 1.0
+            return _MUTED_LANE_OPACITY
+        if stem_name in self._muted:
+            return _MUTED_LANE_OPACITY
+        return 1.0
+
     def set_stem_lanes(
         self,
         stems: list[tuple[str, np.ndarray, str]],
@@ -117,10 +135,20 @@ class WaveformStackWidget(QWidget):
         self.update()
 
     def set_loading(self, loading: bool) -> None:
-        """Show or hide loading state. Shimmer deferred to Task 2."""
+        """Show or hide a shimmer animation while peaks are being computed."""
         if loading == self._loading:
             return
         self._loading = loading
+        if loading:
+            self._shimmer_phase = 0.0
+            self._shimmer_timer.start()
+        else:
+            self._shimmer_timer.stop()
+        self.update()
+
+    def _tick_shimmer(self) -> None:
+        """Advance the shimmer phase and repaint."""
+        self._shimmer_phase = (self._shimmer_phase + 0.015) % 1.0
         self.update()
 
     def set_position(self, ratio: float) -> None:
@@ -169,6 +197,7 @@ class WaveformStackWidget(QWidget):
         painter.fillRect(0, 0, w, h, self._bg_color)
 
         if self._loading:
+            self._draw_shimmer(painter, w, h)
             painter.end()
             return
 
@@ -200,8 +229,37 @@ class WaveformStackWidget(QWidget):
                 painter.setPen(QPen(divider, 1.0))
                 painter.drawLine(_LABEL_WIDTH, y, w, y)
 
+            opacity = self.lane_opacity(lane.name)
+            painter.save()
+            painter.setOpacity(opacity)
             self._draw_lane_label(painter, lane.name, y, rect_h)
             self._draw_lane_waveform(painter, lane, lane_w, rect_h, y)
+            painter.restore()
+
+    def _draw_shimmer(self, painter: QPainter, w: int, h: int) -> None:
+        """Draw a subtle animated shimmer bar sweeping left to right."""
+        t = self._shimmer_phase
+        pos = 0.5 + 0.5 * math.sin(t * 2 * math.pi - math.pi / 2)
+
+        bar_w = w * 0.25
+        bar_x = pos * (w + bar_w) - bar_w
+
+        accent = self._accent_color
+        grad = QLinearGradient(bar_x, 0, bar_x + bar_w, 0)
+        grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+        grad.setColorAt(0.4, QColor(accent.red(), accent.green(), accent.blue(), 50))
+        grad.setColorAt(0.5, QColor(accent.red(), accent.green(), accent.blue(), 70))
+        grad.setColorAt(0.6, QColor(accent.red(), accent.green(), accent.blue(), 50))
+        grad.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(grad)
+        painter.drawRect(QRectF(bar_x, 0, bar_w, h))
+
+        center = h / 2.0
+        line_color = QColor(accent.red(), accent.green(), accent.blue(), 40)
+        painter.setPen(QPen(line_color, 1.0))
+        painter.drawLine(QPointF(0, center), QPointF(w, center))
 
     def _draw_lane_label(
         self, painter: QPainter, name: str, y: int, lane_h: int
