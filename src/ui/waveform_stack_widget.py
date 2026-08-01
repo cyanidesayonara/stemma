@@ -35,6 +35,9 @@ _CURSOR_GLOW_WIDTH = 6
 _LABEL_WIDTH = 52
 _LABEL_PADDING = 4
 _MUTED_LANE_OPACITY = 0.15
+# A dimmed lane needs more opacity to stay legible against a light background;
+# at 0.15 on white it disappears entirely and reads as "stem has no audio".
+_MUTED_LANE_OPACITY_LIGHT = 0.3
 
 
 @dataclass
@@ -77,6 +80,11 @@ class WaveformStackWidget(QWidget):
 
     def _apply_colors(self, colors: dict[str, str]) -> None:
         self._bg_color = QColor(colors["base"])
+        self._muted_opacity = (
+            _MUTED_LANE_OPACITY_LIGHT
+            if self._bg_color.lightness() > 127
+            else _MUTED_LANE_OPACITY
+        )
         self._cursor_color = QColor(colors["text"])
         self._loop_marker_color = QColor(colors["red"])
         self._label_color = QColor(colors["text"])
@@ -109,9 +117,9 @@ class WaveformStackWidget(QWidget):
         if self._soloed:
             if stem_name in self._soloed:
                 return 1.0
-            return _MUTED_LANE_OPACITY
+            return self._muted_opacity
         if stem_name in self._muted:
-            return _MUTED_LANE_OPACITY
+            return self._muted_opacity
         return 1.0
 
     def set_stem_lanes(
@@ -169,8 +177,8 @@ class WaveformStackWidget(QWidget):
         new_ratio = max(0.0, min(1.0, ratio))
         if new_ratio == self._position_ratio:
             return
-        old_px = int(self._position_ratio * self.width())
-        new_px = int(new_ratio * self.width())
+        old_px = int(self._x_for_ratio(self._position_ratio, self.width()))
+        new_px = int(self._x_for_ratio(new_ratio, self.width()))
         self._position_ratio = new_ratio
         if not self._seeking and old_px != new_px:
             self.update()
@@ -195,34 +203,57 @@ class WaveformStackWidget(QWidget):
     def _lane_rect(self, index: int, w: int, h: int) -> tuple[int, int, int, int]:
         """Return (x, y, width, height) for lane *index* waveform area."""
         count = max(len(self._lanes), 1)
-        lane_h = h // count
-        y = index * lane_h
+        # Spread the integer remainder over the first lanes so the stack fills
+        # its full height instead of leaving a dead strip at the bottom.
+        base_h, extra = divmod(h, count)
+        y = index * base_h + min(index, extra)
+        lane_h = base_h + (1 if index < extra else 0)
         return _LABEL_WIDTH, y, w - _LABEL_WIDTH, lane_h
+
+    # -- Time/pixel mapping --
+    #
+    # Lane waveforms are drawn inset by the label gutter, so the playhead,
+    # loop markers, and seek handling must map ratios onto that same inset
+    # span rather than onto the full widget width.
+
+    def _plot_span(self, w: int) -> tuple[float, float]:
+        """Return (x0, span) of the shared waveform plotting area."""
+        return float(_LABEL_WIDTH), max(1.0, float(w - _LABEL_WIDTH))
+
+    def _x_for_ratio(self, ratio: float, w: int) -> float:
+        """Return the x pixel where *ratio* falls within the plotting area."""
+        x0, span = self._plot_span(w)
+        return x0 + ratio * span
+
+    def _ratio_for_x(self, x: float) -> float:
+        """Return the clamped 0..1 ratio for an x pixel in widget coords."""
+        x0, span = self._plot_span(self.width())
+        return max(0.0, min(1.0, (x - x0) / span))
 
     # -- Paint --
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        w = self.width()
-        h = self.height()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            w = self.width()
+            h = self.height()
 
-        painter.fillRect(0, 0, w, h, self._bg_color)
+            painter.fillRect(0, 0, w, h, self._bg_color)
 
-        if self._loading:
-            self._draw_shimmer(painter, w, h)
+            if self._loading:
+                self._draw_shimmer(painter, w, h)
+                return
+
+            if self._lanes:
+                self._draw_lanes(painter, w, h)
+
+            if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
+                self._draw_loop_region(painter, w, h)
+
+            self._draw_cursor(painter, w, h)
+        finally:
             painter.end()
-            return
-
-        if self._lanes:
-            self._draw_lanes(painter, w, h)
-
-        if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
-            self._draw_loop_region(painter, w, h)
-
-        self._draw_cursor(painter, w, h)
-
-        painter.end()
 
     def _draw_lanes(self, painter: QPainter, w: int, h: int) -> None:
         font = QFont()
@@ -362,21 +393,26 @@ class WaveformStackWidget(QWidget):
     def _draw_loop_region(self, painter: QPainter, w: int, h: int) -> None:
         assert self._loop_a_ratio is not None
         assert self._loop_b_ratio is not None
-        x_a = int(self._loop_a_ratio * w)
-        x_b = int(self._loop_b_ratio * w)
+        x_a = self._x_for_ratio(self._loop_a_ratio, w)
+        x_b = self._x_for_ratio(self._loop_b_ratio, w)
+        if x_b < x_a:
+            x_a, x_b = x_b, x_a
 
-        painter.fillRect(x_a, 0, x_b - x_a, h, self._loop_region_color)
+        painter.fillRect(
+            QRectF(x_a, 0.0, x_b - x_a, float(h)), self._loop_region_color
+        )
 
         pen = QPen(self._loop_marker_color, 2.0)
         painter.setPen(pen)
-        painter.drawLine(x_a, 0, x_a, h)
-        painter.drawLine(x_b, 0, x_b, h)
+        painter.drawLine(QPointF(x_a, 0.0), QPointF(x_a, float(h)))
+        painter.drawLine(QPointF(x_b, 0.0), QPointF(x_b, float(h)))
 
     def _draw_cursor(self, painter: QPainter, w: int, h: int) -> None:
         if w <= 0:
             return
-        x = self._position_ratio * w
-        x = max(0.0, min(x, w - 1.0))
+        x0, span = self._plot_span(w)
+        x = self._x_for_ratio(self._position_ratio, w)
+        x = max(x0, min(x, x0 + span - 1.0))
 
         glow_pen = QPen(self._cursor_glow_color, _CURSOR_GLOW_WIDTH)
         glow_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
@@ -391,9 +427,14 @@ class WaveformStackWidget(QWidget):
     # -- Mouse interaction --
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._seeking = True
-            self._seek_to_x(event.position().x())
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if event.position().x() < _LABEL_WIDTH:
+            # The label gutter is a track header, not part of the timeline.
+            # Without this, clicking a stem label would jump to the start.
+            return
+        self._seeking = True
+        self._seek_to_x(event.position().x())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._seeking:
@@ -407,15 +448,7 @@ class WaveformStackWidget(QWidget):
     def _seek_to_x(self, x: float) -> None:
         if self._total_seconds <= 0 or self.width() <= 0:
             return
-        ratio = max(0.0, min(1.0, x / self.width()))
+        ratio = self._ratio_for_x(x)
         self._position_ratio = ratio
         self.update()
         self.seek_requested.emit(ratio * self._total_seconds)
-
-    def _emit_seek_at_ratio(self, ratio: float) -> None:
-        """Emit seek_requested for a normalized position (tests / internal)."""
-        clamped = max(0.0, min(1.0, ratio))
-        self._position_ratio = clamped
-        self.update()
-        if self._total_seconds > 0:
-            self.seek_requested.emit(clamped * self._total_seconds)

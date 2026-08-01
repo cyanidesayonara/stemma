@@ -6,7 +6,11 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from src.ui.waveform_stack_widget import STACK_HEIGHT, WaveformStackWidget
+from src.ui.waveform_stack_widget import (
+    _LABEL_WIDTH,
+    STACK_HEIGHT,
+    WaveformStackWidget,
+)
 from tests.widget_visual import assert_widget_snapshot
 
 
@@ -43,8 +47,8 @@ def test_seek_emits_seconds(app):
     w.resize(400, STACK_HEIGHT)
     got = []
     w.seek_requested.connect(got.append)
-    w._emit_seek_at_ratio(0.25)
-    assert got == [25.0]
+    _press_at(w, w._x_for_ratio(0.25, w.width()))
+    assert got == [pytest.approx(25.0)]
 
 
 def test_set_position_clamps(app):
@@ -64,6 +68,18 @@ def test_set_loop_markers(app):
     assert w._loop_b_ratio == 0.8
 
 
+def _press_at(w, x: float) -> None:
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(x, STACK_HEIGHT / 2),
+        QPointF(x, STACK_HEIGHT / 2),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    w.mousePressEvent(event)
+
+
 def test_mouse_click_emits_seek(app):
     w = WaveformStackWidget()
     w.set_total_seconds(120.0)
@@ -72,18 +88,55 @@ def test_mouse_click_emits_seek(app):
     received = []
     w.seek_requested.connect(received.append)
 
-    event = QMouseEvent(
-        QEvent.Type.MouseButtonPress,
-        QPointF(250, STACK_HEIGHT / 2),
-        QPointF(250, STACK_HEIGHT / 2),
-        Qt.MouseButton.LeftButton,
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    w.mousePressEvent(event)
+    _press_at(w, 250)
 
+    # x=250 is measured against the plotting area, which starts after the
+    # label gutter: (250 - 52) / (500 - 52) * 120.
     assert len(received) == 1
-    assert received[0] == pytest.approx(60.0, abs=1.0)
+    assert received[0] == pytest.approx(53.036, abs=0.01)
+
+
+def test_click_on_label_gutter_does_not_seek(app):
+    """Clicking a stem label is a header click, not a jump to the start."""
+    w = WaveformStackWidget()
+    w.set_total_seconds(120.0)
+    w.resize(500, STACK_HEIGHT)
+
+    received = []
+    w.seek_requested.connect(received.append)
+
+    _press_at(w, _LABEL_WIDTH / 2)
+
+    assert received == []
+
+
+@pytest.mark.parametrize("ratio", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_playhead_x_matches_lane_waveform_x(app, ratio):
+    """The playhead must map onto the same span the lane waveform is drawn in.
+
+    Regression test: the cursor, loop markers, and seek previously used the
+    full widget width while lanes were inset by the label gutter, so the
+    playhead pointed at audio up to _LABEL_WIDTH pixels away from itself.
+    """
+    w = WaveformStackWidget()
+    width = 640
+    w.resize(width, STACK_HEIGHT)
+    peaks = np.ones(64, dtype=np.float32)
+    w.set_stem_lanes([("vocals", peaks, "#e78284")], muted=set(), soloed=set())
+
+    lane_x, _, lane_w, _ = w._lane_rect(0, width, STACK_HEIGHT)
+    expected = lane_x + ratio * lane_w
+
+    assert w._x_for_ratio(ratio, width) == pytest.approx(expected, abs=1.0)
+
+
+@pytest.mark.parametrize("ratio", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_ratio_and_x_round_trip(app, ratio):
+    """Seeking to where the playhead is drawn must not move it."""
+    w = WaveformStackWidget()
+    w.resize(640, STACK_HEIGHT)
+    x = w._x_for_ratio(ratio, w.width())
+    assert w._ratio_for_x(x) == pytest.approx(ratio, abs=1e-6)
 
 
 def test_paint_no_crash_without_lanes(app):
@@ -106,6 +159,24 @@ def test_muted_lane_low_opacity(app):
     peaks = np.array([1.0], dtype=np.float32)
     w.set_stem_lanes([("drums", peaks, "#00ff00")], muted={"drums"}, soloed=set())
     assert w.lane_opacity("drums") < 0.5
+
+
+def test_muted_lane_is_dimmed_more_gently_on_light_theme(app):
+    """At the dark-theme dim level a muted lane vanishes on a light background."""
+    from src.ui.styles import DARK_COLORS, LIGHT_COLORS
+
+    w = WaveformStackWidget()
+    peaks = np.array([1.0], dtype=np.float32)
+    w.set_stem_lanes([("drums", peaks, "#00ff00")], muted={"drums"}, soloed=set())
+
+    w.set_theme_colors(DARK_COLORS)
+    dark_opacity = w.lane_opacity("drums")
+    w.set_theme_colors(LIGHT_COLORS)
+    light_opacity = w.lane_opacity("drums")
+
+    assert light_opacity > dark_opacity
+    # Still clearly reads as muted rather than active.
+    assert light_opacity < 0.5
 
 
 def test_solo_hides_non_solo_lanes(app):
