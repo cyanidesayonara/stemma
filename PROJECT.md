@@ -4,8 +4,8 @@ A Windows desktop music player with AI stem separation. Import a song, separate 
 
 **Personal-use tool. No cloud, no subscriptions, no command line needed.**
 
-Latest stable release: **v2.5.0**. The current source tree targets
-**v2.6.0**, which is not released. Release notes live in `CHANGELOG.md`;
+Latest stable release: **v2.6.0**. The current source tree targets
+**v3.0**, which is not released. Release notes live in `CHANGELOG.md`;
 future scope lives in `docs/ROADMAP.md`.
 
 ---

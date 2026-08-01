@@ -77,13 +77,11 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Verified against GitHub Releases on 2026-07-28:
+Verified against GitHub Releases on 2026-08-01:
 
-- Latest stable: **v2.5.0**
-- Current source and manifest target: **v2.6.0**, unreleased
-- v2.6 focus: DirectML-capable MDX two-stem separation, background imports,
-  correctness/lifecycle hardening, reproducible release validation, and
-  documentation/Project repair
+- Latest stable: **v2.6.0**
+- Current source on `main` targets **v3.0** (unreleased)
+- v3.0 focus: practice cockpit visual recomposition ([#131](https://github.com/cyanidesayonara/stemma/issues/131))
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.

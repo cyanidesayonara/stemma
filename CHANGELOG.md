@@ -8,6 +8,13 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v2.6.0](https://github.com/cyanidesayonara/stemma/releases/tag/v2.6.0) - 2026-07-31
+
+- Added DirectML-capable MDX two-stem separation with automatic CPU fallback.
+- Moved imports and separation onto a background queue so the UI stays usable.
+- Hardened model download checksums, async stem loading, lifecycle safety, and
+  packaged release diagnostics.
+
 ## [v2.5.0](https://github.com/cyanidesayonara/stemma/releases/tag/v2.5.0) - 2026-07-26
 
 - Added Loop Trainer speed ramps for A-B loop practice.
