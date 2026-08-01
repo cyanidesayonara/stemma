@@ -13,6 +13,7 @@ import yaml
 
 MAX_FEATURES = 20
 MAX_FEATURE_LENGTH = 200
+MAX_SEARCH_TERMS = 7
 MAX_SHORT_DESCRIPTION_LENGTH = 1000
 MIN_SCREENSHOTS = 3
 MIN_SCREENSHOT_WIDTH = 1366
@@ -158,6 +159,10 @@ def validate_listing(
         errors.append("short_description exceeds max length")
     if not data.description.strip():
         errors.append("description is empty")
+    if not (1 <= len(data.search_terms) <= MAX_SEARCH_TERMS):
+        errors.append(
+            f"search_terms count {len(data.search_terms)} not in 1..{MAX_SEARCH_TERMS}"
+        )
 
     shot_dir = Path(screenshots_dir)
     shots = sorted(shot_dir.glob("*.png")) if shot_dir.is_dir() else []
