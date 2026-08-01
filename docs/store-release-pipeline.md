@@ -75,6 +75,8 @@ Repository secrets for `partner-center-submit.yml`:
 
 Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Inspect the Partner Center draft before **`publish_draft`**. Manual MSIX upload remains a fallback if automation fails.
 
+**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; listing metadata can still be pushed via `update_draft`.
+
 Note: [microsoft/store-submission](https://github.com/microsoft/store-submission) targets EXE/MSI (Win32) packaged apps and does not support MSIX; stemma uses `msstore` instead.
 
 ## Local version sync (without tagging)

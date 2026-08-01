@@ -98,6 +98,8 @@ jobs:
 
       - name: Update draft submission (MSIX package)
         if: ${{ inputs.mode == 'update_draft' }}
+        id: publish_msix
+        continue-on-error: true
         run: |
           set -euo pipefail
           msstore publish stemma.msix \
@@ -111,6 +113,17 @@ jobs:
           set -euo pipefail
           metadata="$(cat store/payloads/metadata-update.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
+
+      - name: Summarize draft update
+        if: ${{ inputs.mode == 'update_draft' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.publish_msix.outcome }}" != "success" ]; then
+            echo "::warning::MSIX upload via msstore publish failed."
+            echo "::warning::Microsoft documents msstore package updates for free products only."
+            echo "::warning::Upload stemma.msix manually in Partner Center (Start update) if needed."
+          fi
+          echo "Listing metadata update completed."
 
       - name: Get draft submission (debug)
         if: ${{ inputs.mode == 'get_draft' }}
