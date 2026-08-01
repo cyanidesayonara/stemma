@@ -47,9 +47,10 @@ Partner Center draft/submit automation uses `.github/workflows/partner-center-su
 - **`get_draft`** -- print current submission status and package JSON (debug)
 
 Partner Center UI can lag behind the submission API while a draft is in
-`PendingCommit`. After `update_draft` or `update_metadata`, trust the workflow
-verification step (or `get_draft`) for listing copy. Submit for certification
-manually in Partner Center when you are ready to ship.
+`PendingCommit`, especially for long description fields. After
+`update_draft` or `update_metadata`, the workflow verifies at least
+`ReleaseNotes` via the submission API (or use `get_draft`). Submit for
+certification manually in Partner Center when you are ready to ship.
 
 ```powershell
 python scripts/build_partner_center_payloads.py --tag v2.6.0

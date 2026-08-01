@@ -29,7 +29,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Merged submission JSON sent to updateMetadata",
     )
     parser.add_argument("--tag", required=True, help="Release tag, e.g. v2.6.0")
-    parser.add_argument("--listing", type=Path, default=DEFAULT_LISTING_YAML)
+    parser.add_argument(
+        "--fields",
+        default="ReleaseNotes",
+        help="Comma-separated BaseListing fields to verify (default: ReleaseNotes)",
+    )
     args = parser.parse_args(argv)
 
     version = tag_to_version(args.tag)
@@ -38,9 +42,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.expected:
         expected_submission = json.loads(args.expected.read_text(encoding="utf-8"))
-        verify_submission_listing_metadata_applied(submission, expected_submission)
+        fields = tuple(
+            part.strip()
+            for part in args.fields.split(",")
+            if part.strip()
+        )
+        verify_submission_listing_metadata_applied(
+            submission,
+            expected_submission,
+            fields=fields,
+        )
         print(
-            "Verified Partner Center listing metadata matches the updateMetadata payload.",
+            "Verified Partner Center listing metadata matches the updateMetadata payload "
+            f"for {', '.join(fields)}.",
         )
     else:
         data = load_listing(args.listing)

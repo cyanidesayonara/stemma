@@ -446,17 +446,18 @@ def verify_submission_listing_metadata_applied(
     expected_submission: dict,
     *,
     language: str = "en-us",
-) -> None:
-    """Raise ValueError when GET submission listing differs from pushed payload."""
-    actual_base = _submission_base_listing(submission, language=language)
-    expected_base = _submission_base_listing(expected_submission, language=language)
-    for field in (
+    fields: tuple[str, ...] = (
         "Description",
         "ShortDescription",
         "ReleaseNotes",
         "Features",
         "Keywords",
-    ):
+    ),
+) -> None:
+    """Raise ValueError when GET submission listing differs from pushed payload."""
+    actual_base = _submission_base_listing(submission, language=language)
+    expected_base = _submission_base_listing(expected_submission, language=language)
+    for field in fields:
         actual = actual_base.get(field)
         want = expected_base.get(field)
         if not _listing_field_equal(actual, want):
