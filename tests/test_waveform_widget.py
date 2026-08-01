@@ -118,25 +118,39 @@ class TestMixChangedWiring:
         player.has_stems = True
         return player
 
-    def test_mute_triggers_waveform_recompute(self, app):
-        """Muting a stem calls _recompute_peaks via mix_changed signal."""
+    def test_mute_refreshes_lane_mix_without_recompute(self, app):
+        """Muting a stem refreshes stack opacities without recomputing peaks."""
         player = self._make_player_mock()
         controls = PlayerControls(player)
         controls.set_stem_names(["vocals", "drums"])
+        controls._cached_stem_peaks = {
+            "vocals": np.array([0.1, 0.5], dtype=np.float32),
+            "drums": np.array([0.2, 0.4], dtype=np.float32),
+        }
 
-        with patch.object(controls, "_recompute_peaks") as mock_recompute:
-            controls._stem_rows["vocals"].set_muted(True)
-            mock_recompute.assert_called_once()
+        with patch.object(controls, "_recompute_peaks") as mock_recompute, patch.object(
+            controls, "_refresh_waveform_lane_mix",
+        ) as mock_refresh:
+            controls._stem_rows["vocals"]._on_mute(True)
+            mock_refresh.assert_called_once()
+            mock_recompute.assert_not_called()
 
-    def test_solo_triggers_waveform_recompute(self, app):
-        """Soloing a stem calls _recompute_peaks via mix_changed signal."""
+    def test_solo_refreshes_lane_mix_without_recompute(self, app):
+        """Soloing a stem refreshes stack opacities without recomputing peaks."""
         player = self._make_player_mock()
         controls = PlayerControls(player)
         controls.set_stem_names(["vocals", "drums"])
+        controls._cached_stem_peaks = {
+            "vocals": np.array([0.1, 0.5], dtype=np.float32),
+            "drums": np.array([0.2, 0.4], dtype=np.float32),
+        }
 
-        with patch.object(controls, "_recompute_peaks") as mock_recompute:
-            controls._stem_rows["drums"].mix_changed.emit()
-            mock_recompute.assert_called_once()
+        with patch.object(controls, "_recompute_peaks") as mock_recompute, patch.object(
+            controls, "_refresh_waveform_lane_mix",
+        ) as mock_refresh:
+            controls._stem_rows["drums"]._on_solo(True)
+            mock_refresh.assert_called_once()
+            mock_recompute.assert_not_called()
 
 
 class TestMiniWaveformWidget:

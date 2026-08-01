@@ -316,6 +316,10 @@ class StemMixer(QWidget):
     def max_recordings_reached(self) -> bool:
         return len(self._recording_rows) >= MAX_RECORDING_TAKES
 
+    def stem_names(self) -> list[str]:
+        """Return stem row names in display order (source stems, then recordings)."""
+        return list(self._stem_rows) + list(self._recording_rows)
+
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Replace source rows while preserving matching player state."""
         saved_muted = set(self._player.muted_stems)

@@ -21,6 +21,15 @@ def test_stack_has_fixed_height(app):
     assert w.height() == STACK_HEIGHT
 
 
+def test_update_lane_mix_refreshes_opacity(app):
+    w = WaveformStackWidget()
+    peaks = np.array([0.0, 1.0, 0.5], dtype=np.float32)
+    w.set_stem_lanes([("drums", peaks, "#00ff00")], muted=set(), soloed=set())
+    assert w.lane_opacity("drums") == 1.0
+    w.update_lane_mix(muted={"drums"}, soloed=set())
+    assert w.lane_opacity("drums") == pytest.approx(0.15)
+
+
 def test_set_stem_lanes_stores_order(app):
     w = WaveformStackWidget()
     peaks = np.array([0.0, 1.0, 0.5], dtype=np.float32)

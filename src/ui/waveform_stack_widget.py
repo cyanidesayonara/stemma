@@ -134,6 +134,19 @@ class WaveformStackWidget(QWidget):
             self.set_loading(False)
         self.update()
 
+    def update_lane_mix(
+        self,
+        *,
+        muted: set[str],
+        soloed: set[str],
+    ) -> None:
+        """Refresh mute/solo opacities without replacing peak data."""
+        if muted == self._muted and soloed == self._soloed:
+            return
+        self._muted = muted
+        self._soloed = soloed
+        self.update()
+
     def set_loading(self, loading: bool) -> None:
         """Show or hide a shimmer animation while peaks are being computed."""
         if loading == self._loading:
