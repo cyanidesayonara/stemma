@@ -11,11 +11,12 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = MSIX + listing draft; get_draft = read submission; publish_draft = submit"
+        description: "configure = credentials; update_draft = MSIX + listing; update_metadata = listing only; get_draft = read; publish_draft = submit"
         type: choice
         options:
           - configure
           - update_draft
+          - update_metadata
           - get_draft
           - publish_draft
         default: configure
@@ -27,21 +28,21 @@ jobs:
       PRODUCT_ID: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
     steps:
       - name: Checkout
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Python
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
       - name: Install PyYAML
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         run: python -m pip install "PyYAML>=6.0"
 
       - name: Build Partner Center payloads
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -52,7 +53,7 @@ jobs:
             --out-dir store/payloads
 
       - name: Upload payload artifacts
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: partner-center-payloads
@@ -109,9 +110,9 @@ jobs:
             --verbose
 
       - name: Update draft listing metadata
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         id: update_metadata
-        continue-on-error: true
+        continue-on-error: ${{ inputs.mode == 'update_draft' }}
         run: |
           set -euo pipefail
           metadata="$(cat store/payloads/metadata-update.json)"
@@ -129,7 +130,7 @@ jobs:
             echo "::warning::Upload stemma.msix manually in Partner Center (Start update) if needed."
           fi
           if [ "$metadata_ok" != "true" ]; then
-            echo "::warning::Listing metadata update failed (same free-products limitation may apply)."
+            echo "::warning::Listing metadata update failed."
             echo "::warning::Paste listing copy from docs/store-listing.md manually if needed."
           fi
           if [ "$publish_ok" != "true" ] && [ "$metadata_ok" != "true" ]; then

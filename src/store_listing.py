@@ -333,18 +333,21 @@ def render_metadata_update(
     data: ListingData,
     *,
     release_version: str,
+    language: str = "en-us",
 ) -> dict:
-    """Build msstore submission updateMetadata payload (listing module)."""
+    """Build msstore submission updateMetadata payload (listings module)."""
     if release_version not in data.whats_new:
         raise ValueError(f"whats_new missing entry for version {release_version}")
-    listing = {
-        "description": data.description,
-        "shortDescription": data.short_description,
-        "whatsNew": data.whats_new[release_version],
-        "productFeatures": data.features,
-        "keywords": data.search_terms,
+    return {
+        "listings": {
+            "language": language,
+            "description": data.description,
+            "shortDescription": data.short_description,
+            "whatsNew": data.whats_new[release_version],
+            "productFeatures": data.features,
+            "searchTerms": data.search_terms,
+        }
     }
-    return {"listing": {"en-us": listing}}
 
 
 def write_outputs(

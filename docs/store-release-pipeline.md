@@ -40,10 +40,9 @@ Partner Center draft/submit automation uses `.github/workflows/partner-center-su
 - **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
 - **`update_draft`** -- download `stemma.msix` from the release tag, upload and commit
   it with `msstore publish` (draft only; does not certify), then push listing metadata
+- **`update_metadata`** -- push listing fields from `store/listing.yaml` only (no MSIX upload)
 - **`get_draft`** -- print current submission status and package JSON (debug)
 - **`publish_draft`** -- publish the current Partner Center draft for certification
-
-Local payload preview:
 
 ```powershell
 python scripts/build_partner_center_payloads.py --tag v2.6.0

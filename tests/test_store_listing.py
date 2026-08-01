@@ -239,11 +239,12 @@ def test_render_product_update_uses_release_msix_url() -> None:
 
 def test_render_metadata_update_maps_listing_fields() -> None:
     payload = render_metadata_update(_data(), release_version="2.6.0")
-    listing = payload["listing"]["en-us"]
+    listing = payload["listings"]
+    assert listing["language"] == "en-us"
     assert listing["shortDescription"] == "Short"
     assert listing["description"] == "Desc"
     assert listing["productFeatures"] == ["Feature one"]
-    assert listing["keywords"] == ["stem"]
+    assert listing["searchTerms"] == ["stem"]
     assert "What's new in version 2.6.0" in listing["whatsNew"]
 
 
