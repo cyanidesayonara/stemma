@@ -14,6 +14,7 @@ from src.store_listing import (  # noqa: E402
     DEFAULT_LISTING_YAML,
     load_listing,
     merge_submission_listing_metadata,
+    parse_msstore_submission_json,
     tag_to_version,
 )
 
@@ -27,7 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     version = tag_to_version(args.tag)
-    submission = json.loads(args.submission.read_text(encoding="utf-8"))
+    submission = parse_msstore_submission_json(
+        args.submission.read_text(encoding="utf-8"),
+    )
     data = load_listing(args.listing)
     merged = merge_submission_listing_metadata(
         submission,

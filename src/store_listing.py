@@ -25,6 +25,8 @@ DEFAULT_SKELETON = REPO_ROOT / "store" / "product-update.skeleton.json"
 DEFAULT_SCREENSHOTS = REPO_ROOT / "assets" / "store_listing" / "screenshots"
 DEFAULT_VERSION_PY = REPO_ROOT / "src" / "version.py"
 
+_ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
 
 @dataclass(frozen=True)
 class StoreIdentity:
@@ -349,6 +351,58 @@ def render_metadata_update(
             "Keywords": data.search_terms,
         },
     }
+
+
+def _escape_json_string_control_chars(text: str) -> str:
+    """Escape raw control characters inside JSON string literals."""
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if in_string and ch == "\\":
+            out.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ord(ch) < 32:
+            if ch == "\n":
+                out.append("\\n")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == "\t":
+                out.append("\\t")
+            else:
+                out.append(f"\\u{ord(ch):04x}")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def parse_msstore_submission_json(raw: str) -> dict:
+    """Parse JSON from ``msstore submission get`` stdout.
+
+    The CLI may emit ANSI color codes and JSON with unescaped newlines inside
+    string fields (for example Description). Repair those before parsing.
+    """
+    cleaned = _ANSI_ESCAPE.sub("", raw)
+    start = cleaned.find("{")
+    if start < 0:
+        raise ValueError("msstore submission output does not contain JSON")
+    payload = cleaned[start:]
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        parsed = json.loads(_escape_json_string_control_chars(payload))
+    if not isinstance(parsed, dict):
+        raise ValueError("msstore submission JSON root must be an object")
+    return parsed
 
 
 def merge_submission_listing_metadata(
