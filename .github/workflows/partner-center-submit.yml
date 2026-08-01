@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = MSIX + listing; update_metadata = listing only; get_draft = read; publish_draft = submit"
+        description: "configure = credentials; update_draft = MSIX + listing; update_metadata = ensure draft + listing; get_draft = read; publish_draft = submit"
         type: choice
         options:
           - configure
@@ -61,7 +61,7 @@ jobs:
           if-no-files-found: error
 
       - name: Download release MSIX
-        if: ${{ inputs.mode == 'update_draft' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -97,6 +97,22 @@ jobs:
         if: ${{ inputs.mode == 'configure' }}
         run: msstore info
 
+      - name: Ensure pending Partner Center draft
+        if: ${{ inputs.mode == 'update_metadata' }}
+        id: ensure_draft
+        run: |
+          set -euo pipefail
+          if NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose 2>&1 | grep -q "Pending Submission"; then
+            echo "Pending draft already exists."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::No pending draft (for example after certification). Creating one from release MSIX."
+          msstore publish stemma.msix \
+            --appId "$PRODUCT_ID" \
+            --verbose
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
       - name: Update draft submission (MSIX package)
         if: ${{ inputs.mode == 'update_draft' }}
         id: publish_msix
@@ -124,6 +140,23 @@ jobs:
             --out submission-metadata.json
           metadata="$(cat submission-metadata.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
+
+      - name: Upload merged submission metadata
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: partner-center-submission-metadata
+          path: submission-metadata.json
+          if-no-files-found: warn
+
+      - name: Summarize metadata update
+        if: ${{ inputs.mode == 'update_metadata' && steps.update_metadata.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
+            echo "Created a new Partner Center draft from release MSIX before updating listing metadata."
+          fi
+          echo "Listing metadata update completed. Inspect the draft in Partner Center before publish_draft."
 
       - name: Summarize draft update
         if: ${{ inputs.mode == 'update_draft' }}
