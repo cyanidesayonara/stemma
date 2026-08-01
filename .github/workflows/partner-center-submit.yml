@@ -109,6 +109,8 @@ jobs:
 
       - name: Update draft listing metadata
         if: ${{ inputs.mode == 'update_draft' }}
+        id: update_metadata
+        continue-on-error: true
         run: |
           set -euo pipefail
           metadata="$(cat store/payloads/metadata-update.json)"
@@ -118,12 +120,22 @@ jobs:
         if: ${{ inputs.mode == 'update_draft' }}
         run: |
           set -euo pipefail
-          if [ "${{ steps.publish_msix.outcome }}" != "success" ]; then
+          publish_ok="${{ steps.publish_msix.outcome == 'success' }}"
+          metadata_ok="${{ steps.update_metadata.outcome == 'success' }}"
+          if [ "$publish_ok" != "true" ]; then
             echo "::warning::MSIX upload via msstore publish failed."
-            echo "::warning::Microsoft documents msstore package updates for free products only."
+            echo "::warning::Microsoft documents msstore updates for free products only."
             echo "::warning::Upload stemma.msix manually in Partner Center (Start update) if needed."
           fi
-          echo "Listing metadata update completed."
+          if [ "$metadata_ok" != "true" ]; then
+            echo "::warning::Listing metadata update failed (same free-products limitation may apply)."
+            echo "::warning::Paste listing copy from docs/store-listing.md manually if needed."
+          fi
+          if [ "$publish_ok" != "true" ] && [ "$metadata_ok" != "true" ]; then
+            echo "::error::Neither MSIX upload nor metadata update succeeded."
+            exit 1
+          fi
+          echo "Partner Center draft update completed."
 
       - name: Get draft submission (debug)
         if: ${{ inputs.mode == 'get_draft' }}
