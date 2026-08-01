@@ -216,3 +216,6 @@ data/
 # Generated Partner Center API payloads (local / CI artifacts)
 store/payloads/
 
+# Failed widget snapshot renders written next to their golden file
+tests/fixtures/widget_snapshots/*.actual.png
+
