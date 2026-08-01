@@ -24,6 +24,7 @@ from src.store_listing import (
     merge_submission_listing_metadata,
     parse_msstore_submission_json,
     verify_submission_listing_metadata,
+    verify_submission_listing_metadata_applied,
     render_product_update,
     render_skeleton,
     tag_to_version,
@@ -343,6 +344,67 @@ def test_verify_submission_listing_metadata_raises_on_mismatch() -> None:
             _data(),
             release_version="2.6.0",
         )
+
+
+def test_verify_submission_listing_metadata_applied_normalizes_line_endings() -> None:
+    expected = {
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Line one\nLine two",
+                    "ShortDescription": "Short",
+                    "ReleaseNotes": "Notes",
+                    "Features": ["Feature one"],
+                    "Keywords": ["stem separation"],
+                }
+            }
+        }
+    }
+    actual = {
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Line one\r\nLine two\r\n",
+                    "ShortDescription": "Short",
+                    "ReleaseNotes": "Notes",
+                    "Features": ["Feature one"],
+                    "Keywords": ["stem separation"],
+                }
+            }
+        }
+    }
+    verify_submission_listing_metadata_applied(actual, expected)
+
+
+def test_verify_submission_listing_metadata_applied_raises_on_mismatch() -> None:
+    expected = {
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Expected",
+                    "ShortDescription": "Short",
+                    "ReleaseNotes": "Notes",
+                    "Features": ["Feature one"],
+                    "Keywords": ["stem separation"],
+                }
+            }
+        }
+    }
+    actual = {
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Different",
+                    "ShortDescription": "Short",
+                    "ReleaseNotes": "Notes",
+                    "Features": ["Feature one"],
+                    "Keywords": ["stem separation"],
+                }
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="Description"):
+        verify_submission_listing_metadata_applied(actual, expected)
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:

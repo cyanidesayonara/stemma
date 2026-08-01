@@ -149,6 +149,7 @@ jobs:
           NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission-after.json
           python scripts/verify_partner_center_metadata.py \
             --submission submission-after.json \
+            --expected submission-metadata.json \
             --tag "${{ inputs.tag }}"
 
       - name: Upload merged submission metadata

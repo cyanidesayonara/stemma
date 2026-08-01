@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -15,12 +16,18 @@ from src.store_listing import (  # noqa: E402
     parse_msstore_submission_json,
     tag_to_version,
     verify_submission_listing_metadata,
+    verify_submission_listing_metadata_applied,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--submission", type=Path, required=True)
+    parser.add_argument(
+        "--expected",
+        type=Path,
+        help="Merged submission JSON sent to updateMetadata",
+    )
     parser.add_argument("--tag", required=True, help="Release tag, e.g. v2.6.0")
     parser.add_argument("--listing", type=Path, default=DEFAULT_LISTING_YAML)
     args = parser.parse_args(argv)
@@ -29,16 +36,23 @@ def main(argv: list[str] | None = None) -> int:
     submission = parse_msstore_submission_json(
         args.submission.read_text(encoding="utf-8"),
     )
-    data = load_listing(args.listing)
-    verify_submission_listing_metadata(
-        submission,
-        data,
-        release_version=version,
-    )
-    print(
-        f"Verified Partner Center listing metadata for version {version} "
-        f"against {args.listing.name}.",
-    )
+    if args.expected:
+        expected_submission = json.loads(args.expected.read_text(encoding="utf-8"))
+        verify_submission_listing_metadata_applied(submission, expected_submission)
+        print(
+            "Verified Partner Center listing metadata matches the updateMetadata payload.",
+        )
+    else:
+        data = load_listing(args.listing)
+        verify_submission_listing_metadata(
+            submission,
+            data,
+            release_version=version,
+        )
+        print(
+            f"Verified Partner Center listing metadata for version {version} "
+            f"against {args.listing.name}.",
+        )
     return 0
 
 

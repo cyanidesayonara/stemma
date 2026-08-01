@@ -410,6 +410,61 @@ def parse_msstore_submission_json(raw: str) -> dict:
     return parsed
 
 
+def _normalize_listing_text(text: str) -> str:
+    """Normalize Partner Center listing text for comparison."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+
+
+def _listing_field_equal(actual: object, expected: object) -> bool:
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return False
+        return all(
+            _normalize_listing_text(str(item)) == _normalize_listing_text(str(other))
+            for item, other in zip(actual, expected, strict=True)
+        )
+    return _normalize_listing_text(str(actual)) == _normalize_listing_text(str(expected))
+
+
+def _submission_base_listing(
+    submission: dict,
+    *,
+    language: str,
+) -> dict:
+    listings = submission.get("Listings")
+    if not isinstance(listings, dict):
+        raise ValueError("submission JSON missing Listings object")
+    lang_key = _resolve_listing_language_key(listings, language)
+    base = listings[lang_key].get("BaseListing")
+    if not isinstance(base, dict):
+        raise ValueError(f"submission listing {lang_key!r} missing BaseListing")
+    return base
+
+
+def verify_submission_listing_metadata_applied(
+    submission: dict,
+    expected_submission: dict,
+    *,
+    language: str = "en-us",
+) -> None:
+    """Raise ValueError when GET submission listing differs from pushed payload."""
+    actual_base = _submission_base_listing(submission, language=language)
+    expected_base = _submission_base_listing(expected_submission, language=language)
+    for field in (
+        "Description",
+        "ShortDescription",
+        "ReleaseNotes",
+        "Features",
+        "Keywords",
+    ):
+        actual = actual_base.get(field)
+        want = expected_base.get(field)
+        if not _listing_field_equal(actual, want):
+            raise ValueError(
+                f"submission BaseListing.{field} does not match the updateMetadata payload",
+            )
+
+
 def verify_submission_listing_metadata(
     submission: dict,
     data: ListingData,
@@ -423,13 +478,7 @@ def verify_submission_listing_metadata(
         release_version=release_version,
         language=language,
     )["BaseListing"]
-    listings = submission.get("Listings")
-    if not isinstance(listings, dict):
-        raise ValueError("submission JSON missing Listings object")
-    lang_key = _resolve_listing_language_key(listings, language)
-    base = listings[lang_key].get("BaseListing")
-    if not isinstance(base, dict):
-        raise ValueError(f"submission listing {lang_key!r} missing BaseListing")
+    base = _submission_base_listing(submission, language=language)
     for field in (
         "Description",
         "ShortDescription",
@@ -437,9 +486,7 @@ def verify_submission_listing_metadata(
         "Features",
         "Keywords",
     ):
-        actual = base.get(field)
-        want = expected[field]
-        if actual != want:
+        if not _listing_field_equal(base.get(field), expected[field]):
             raise ValueError(
                 f"submission BaseListing.{field} does not match store/listing.yaml "
                 f"for version {release_version}",
