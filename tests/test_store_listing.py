@@ -21,6 +21,7 @@ from src.store_listing import (
     read_app_version,
     render_markdown,
     render_metadata_update,
+    merge_submission_listing_metadata,
     render_product_update,
     render_skeleton,
     tag_to_version,
@@ -239,13 +240,40 @@ def test_render_product_update_uses_release_msix_url() -> None:
 
 def test_render_metadata_update_maps_listing_fields() -> None:
     payload = render_metadata_update(_data(), release_version="2.6.0")
-    listing = payload["listings"]
-    assert listing["language"] == "en-us"
-    assert listing["shortDescription"] == "Short"
-    assert listing["description"] == "Desc"
-    assert listing["productFeatures"] == ["Feature one"]
-    assert listing["searchTerms"] == ["stem"]
-    assert "What's new in version 2.6.0" in listing["whatsNew"]
+    assert payload["language"] == "en-us"
+    listing = payload["BaseListing"]
+    assert listing["ShortDescription"] == "Short"
+    assert listing["Description"] == "Desc"
+    assert listing["Features"] == ["Feature one"]
+    assert listing["Keywords"] == ["stem"]
+    assert "What's new in version 2.6.0" in listing["ReleaseNotes"]
+
+
+def test_merge_submission_listing_metadata_updates_base_listing() -> None:
+    submission = {
+        "Id": "1152921505701556700",
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Old",
+                    "ReleaseNotes": "Old notes",
+                    "Features": ["old"],
+                    "Keywords": ["old"],
+                }
+            }
+        },
+    }
+    merged = merge_submission_listing_metadata(
+        submission,
+        _data(),
+        release_version="2.6.0",
+    )
+    base = merged["Listings"]["en-us"]["BaseListing"]
+    assert base["Description"] == "Desc"
+    assert base["ShortDescription"] == "Short"
+    assert base["Features"] == ["Feature one"]
+    assert "What's new in version 2.6.0" in base["ReleaseNotes"]
+    assert submission["Listings"]["en-us"]["BaseListing"]["Description"] == "Old"
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:

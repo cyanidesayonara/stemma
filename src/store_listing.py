@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -335,19 +336,56 @@ def render_metadata_update(
     release_version: str,
     language: str = "en-us",
 ) -> dict:
-    """Build msstore submission updateMetadata payload (listings module)."""
+    """Preview BaseListing fields applied by merge_submission_listing_metadata."""
     if release_version not in data.whats_new:
         raise ValueError(f"whats_new missing entry for version {release_version}")
     return {
-        "listings": {
-            "language": language,
-            "description": data.description,
-            "shortDescription": data.short_description,
-            "whatsNew": data.whats_new[release_version],
-            "productFeatures": data.features,
-            "searchTerms": data.search_terms,
-        }
+        "language": language,
+        "BaseListing": {
+            "Description": data.description,
+            "ShortDescription": data.short_description,
+            "ReleaseNotes": data.whats_new[release_version],
+            "Features": data.features,
+            "Keywords": data.search_terms,
+        },
     }
+
+
+def merge_submission_listing_metadata(
+    submission: dict,
+    data: ListingData,
+    *,
+    release_version: str,
+    language: str = "en-us",
+) -> dict:
+    """Patch msstore submission get JSON with listing fields from YAML."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    merged = copy.deepcopy(submission)
+    listings = merged.get("Listings")
+    if not isinstance(listings, dict):
+        raise ValueError("submission JSON missing Listings object")
+    lang_key = _resolve_listing_language_key(listings, language)
+    entry = listings[lang_key]
+    base = entry.get("BaseListing")
+    if not isinstance(base, dict):
+        raise ValueError(f"submission listing {lang_key!r} missing BaseListing")
+    base["Description"] = data.description
+    base["ShortDescription"] = data.short_description
+    base["ReleaseNotes"] = data.whats_new[release_version]
+    base["Features"] = list(data.features)
+    base["Keywords"] = list(data.search_terms)
+    return merged
+
+
+def _resolve_listing_language_key(listings: dict, language: str) -> str:
+    if language in listings:
+        return language
+    target = language.lower()
+    for key in listings:
+        if key.lower() == target:
+            return key
+    raise ValueError(f"submission missing listing for language {language!r}")
 
 
 def write_outputs(
