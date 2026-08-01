@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ import yaml
 
 MAX_FEATURES = 20
 MAX_FEATURE_LENGTH = 200
+MAX_SEARCH_TERMS = 7
 MAX_SHORT_DESCRIPTION_LENGTH = 1000
 MIN_SCREENSHOTS = 3
 MIN_SCREENSHOT_WIDTH = 1366
@@ -23,6 +25,8 @@ DEFAULT_MARKDOWN = REPO_ROOT / "docs" / "store-listing.md"
 DEFAULT_SKELETON = REPO_ROOT / "store" / "product-update.skeleton.json"
 DEFAULT_SCREENSHOTS = REPO_ROOT / "assets" / "store_listing" / "screenshots"
 DEFAULT_VERSION_PY = REPO_ROOT / "src" / "version.py"
+
+_ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
 @dataclass(frozen=True)
@@ -155,6 +159,10 @@ def validate_listing(
         errors.append("short_description exceeds max length")
     if not data.description.strip():
         errors.append("description is empty")
+    if not (1 <= len(data.search_terms) <= MAX_SEARCH_TERMS):
+        errors.append(
+            f"search_terms count {len(data.search_terms)} not in 1..{MAX_SEARCH_TERMS}"
+        )
 
     shot_dir = Path(screenshots_dir)
     shots = sorted(shot_dir.glob("*.png")) if shot_dir.is_dir() else []
@@ -290,6 +298,153 @@ def render_skeleton(data: ListingData, *, release_version: str) -> dict:
         payload["storeUrl"] = data.store.url
         payload["publisherDisplayName"] = data.store.publisher_display_name
     return payload
+
+
+def tag_to_version(tag: str) -> str:
+    """Normalize a release tag (v2.6.0) to a listing version (2.6.0)."""
+    trimmed = tag.strip()
+    if trimmed.startswith("refs/tags/"):
+        trimmed = trimmed[len("refs/tags/") :]
+    if trimmed.startswith("v") or trimmed.startswith("V"):
+        trimmed = trimmed[1:]
+    if not trimmed:
+        raise ValueError(f"empty version from tag: {tag!r}")
+    return trimmed
+
+
+def render_product_update(
+    data: ListingData,
+    *,
+    release_version: str,
+    repository: str = "cyanidesayonara/stemma",
+) -> dict:
+    """Build Partner Center product-update JSON (packages only; reference/debug)."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    return {
+        "packages": [
+            {
+                "packageUrl": (
+                    f"https://github.com/{repository}/releases/"
+                    f"download/v{release_version}/stemma.msix"
+                ),
+                "languages": ["en-us"],
+                "architectures": ["X64"],
+                "installerParameters": "",
+                "isSilentInstall": True,
+            }
+        ]
+    }
+
+
+def render_metadata_update(
+    data: ListingData,
+    *,
+    release_version: str,
+    language: str = "en-us",
+) -> dict:
+    """Preview BaseListing fields applied by merge_submission_listing_metadata."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    return {
+        "language": language,
+        "BaseListing": {
+            "Description": data.description,
+            "ShortDescription": data.short_description,
+            "ReleaseNotes": data.whats_new[release_version],
+            "Features": data.features,
+            "Keywords": data.search_terms,
+        },
+    }
+
+
+def _escape_json_string_control_chars(text: str) -> str:
+    """Escape raw control characters inside JSON string literals."""
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if in_string and ch == "\\":
+            out.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ord(ch) < 32:
+            if ch == "\n":
+                out.append("\\n")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == "\t":
+                out.append("\\t")
+            else:
+                out.append(f"\\u{ord(ch):04x}")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def parse_msstore_submission_json(raw: str) -> dict:
+    """Parse JSON from ``msstore submission get`` stdout.
+
+    The CLI may emit ANSI color codes and JSON with unescaped newlines inside
+    string fields (for example Description). Repair those before parsing.
+    """
+    cleaned = _ANSI_ESCAPE.sub("", raw)
+    start = cleaned.find("{")
+    if start < 0:
+        raise ValueError("msstore submission output does not contain JSON")
+    payload = cleaned[start:]
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        parsed = json.loads(_escape_json_string_control_chars(payload))
+    if not isinstance(parsed, dict):
+        raise ValueError("msstore submission JSON root must be an object")
+    return parsed
+
+
+def merge_submission_listing_metadata(
+    submission: dict,
+    data: ListingData,
+    *,
+    release_version: str,
+    language: str = "en-us",
+) -> dict:
+    """Patch msstore submission get JSON with listing fields from YAML."""
+    if release_version not in data.whats_new:
+        raise ValueError(f"whats_new missing entry for version {release_version}")
+    merged = copy.deepcopy(submission)
+    listings = merged.get("Listings")
+    if not isinstance(listings, dict):
+        raise ValueError("submission JSON missing Listings object")
+    lang_key = _resolve_listing_language_key(listings, language)
+    entry = listings[lang_key]
+    base = entry.get("BaseListing")
+    if not isinstance(base, dict):
+        raise ValueError(f"submission listing {lang_key!r} missing BaseListing")
+    base["Description"] = data.description
+    base["ShortDescription"] = data.short_description
+    base["ReleaseNotes"] = data.whats_new[release_version]
+    base["Features"] = list(data.features)
+    base["Keywords"] = list(data.search_terms)
+    return merged
+
+
+def _resolve_listing_language_key(listings: dict, language: str) -> str:
+    if language in listings:
+        return language
+    target = language.lower()
+    for key in listings:
+        if key.lower() == target:
+            return key
+    raise ValueError(f"submission missing listing for language {language!r}")
 
 
 def write_outputs(

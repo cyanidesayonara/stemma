@@ -117,7 +117,7 @@ Runs entirely on your PC: no account, no subscription, no uploads
 
 ## Search terms
 
-stem separation, vocal remover, play along, backing track, practice, karaoke, transcribe, slow down music, loop, metronome, tempo, key detection, chord detection, guitar practice, bass practice, drum practice, singer, music learning, isolate instrument, music stem separator
+stem separation, vocal remover, play along, backing track, practice, slow down music, music stem separator
 
 ---
 

@@ -20,7 +20,12 @@ from src.store_listing import (
     png_size,
     read_app_version,
     render_markdown,
+    render_metadata_update,
+    merge_submission_listing_metadata,
+    parse_msstore_submission_json,
+    render_product_update,
     render_skeleton,
+    tag_to_version,
     validate_listing,
     write_outputs,
 )
@@ -214,6 +219,84 @@ def test_render_skeleton_includes_store_identity() -> None:
     assert payload["packageFamilyName"] == identity.package_family_name
     assert payload["storeUrl"] == identity.url
     assert payload["publisherDisplayName"] == identity.publisher_display_name
+
+
+def test_tag_to_version_strips_prefix() -> None:
+    assert tag_to_version("v2.6.0") == "2.6.0"
+    assert tag_to_version("refs/tags/v2.6.0") == "2.6.0"
+
+
+def test_render_product_update_uses_release_msix_url() -> None:
+    payload = render_product_update(
+        _data(),
+        release_version="2.6.0",
+        repository="cyanidesayonara/stemma",
+    )
+    assert payload["packages"][0]["architectures"] == ["X64"]
+    assert (
+        payload["packages"][0]["packageUrl"]
+        == "https://github.com/cyanidesayonara/stemma/releases/download/v2.6.0/stemma.msix"
+    )
+
+
+def test_render_metadata_update_maps_listing_fields() -> None:
+    payload = render_metadata_update(_data(), release_version="2.6.0")
+    assert payload["language"] == "en-us"
+    listing = payload["BaseListing"]
+    assert listing["ShortDescription"] == "Short"
+    assert listing["Description"] == "Desc"
+    assert listing["Features"] == ["Feature one"]
+    assert listing["Keywords"] == ["stem"]
+    assert "What's new in version 2.6.0" in listing["ReleaseNotes"]
+
+
+def test_parse_msstore_submission_json_repairs_multiline_strings() -> None:
+    raw = """\
+Retrieving Submission
+{
+  "Id": "1",
+  "Listings": {
+    "en-us": {
+      "BaseListing": {
+        "Description": "Line one
+Line two"
+      }
+    }
+  }
+}
+"""
+    parsed = parse_msstore_submission_json(raw)
+    assert parsed["Id"] == "1"
+    assert parsed["Listings"]["en-us"]["BaseListing"]["Description"] == (
+        "Line one\nLine two"
+    )
+
+
+def test_merge_submission_listing_metadata_updates_base_listing() -> None:
+    submission = {
+        "Id": "1152921505701556700",
+        "Listings": {
+            "en-us": {
+                "BaseListing": {
+                    "Description": "Old",
+                    "ReleaseNotes": "Old notes",
+                    "Features": ["old"],
+                    "Keywords": ["old"],
+                }
+            }
+        },
+    }
+    merged = merge_submission_listing_metadata(
+        submission,
+        _data(),
+        release_version="2.6.0",
+    )
+    base = merged["Listings"]["en-us"]["BaseListing"]
+    assert base["Description"] == "Desc"
+    assert base["ShortDescription"] == "Short"
+    assert base["Features"] == ["Feature one"]
+    assert "What's new in version 2.6.0" in base["ReleaseNotes"]
+    assert submission["Listings"]["en-us"]["BaseListing"]["Description"] == "Old"
 
 
 def test_build_check_detects_stale_markdown(tmp_path: Path) -> None:

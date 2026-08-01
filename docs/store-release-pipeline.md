@@ -34,9 +34,26 @@ CI (`.github/workflows/ci.yml`) also runs on `v*` tag pushes so a tag-only relea
 
   Add a `whats_new` entry for every release version. Screenshots under `assets/store_listing/screenshots/` must meet Store minimum size (1366x768) and count requirements.
 
-Partner Center draft/submit automation remains manual for slice 1 of [#134](https://github.com/cyanidesayonara/stemma/issues/134); use the GitHub Release MSIX upload path below until a later slice wires API submission.
+Partner Center draft/submit automation uses `.github/workflows/partner-center-submit.yml`
+(manual `workflow_dispatch`) with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview) (`msstore`), which supports MSIX products. Modes:
 
-## Manual Store upload (current default)
+- **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
+- **`update_draft`** -- download `stemma.msix` from the release tag, upload and commit
+  it with `msstore publish` (draft only; does not certify), then push listing metadata
+- **`update_metadata`** -- fetch current submission JSON, merge listing fields from
+  `store/listing.yaml`, and push with `submission updateMetadata` (no MSIX upload)
+- **`get_draft`** -- print current submission status and package JSON (debug)
+- **`publish_draft`** -- publish the current Partner Center draft for certification
+
+```powershell
+python scripts/build_partner_center_payloads.py --tag v2.6.0
+```
+
+Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.json`
+(gitignored). After `update_draft`, inspect the draft in Partner Center before
+`publish_draft`.
+
+## Manual Store upload (fallback)
 
 After the GitHub Release exists, download `stemma.msix` (or use the direct URL below) and upload it in [Partner Center](https://partner.microsoft.com/dashboard) under your app submission packages.
 
@@ -46,23 +63,21 @@ Public download URL pattern (public repo):
 
 Example: `https://github.com/cyanidesayonara/stemma/releases/download/v2.5.0/stemma.msix`
 
-## Optional: Partner Center API / GitHub Action
+## Partner Center credentials (GitHub Actions)
 
-Microsoft publishes [microsoft/store-submission](https://github.com/microsoft/store-submission) for automating submissions. It targets the newer Store submission flow (often used for Win32/MSI-style packages with `packageUrl`). MSIX / Desktop Bridge products may use different API fields than the samples in that README.
+Repository secrets for `partner-center-submit.yml`:
 
-Before wiring automation:
+- `PARTNER_CENTER_SELLER_ID`
+- `PARTNER_CENTER_PRODUCT_ID`
+- `PARTNER_CENTER_TENANT_ID`
+- `PARTNER_CENTER_CLIENT_ID`
+- `PARTNER_CENTER_CLIENT_SECRET`
 
-1. Complete [Partner Center prerequisites](https://github.com/microsoft/store-submission#prerequisites) (Azure AD app, Manager role, at least one manual submission).
-2. Confirm in Partner Center whether your listing uses the **packaged (MSIX)** or **Win32** submission path so you pass the correct `type` and `product-update` JSON to the action.
-3. Add repository secrets (names are suggestions; match what you reference in YAML):
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Inspect the Partner Center draft before **`publish_draft`**. Manual MSIX upload remains a fallback if automation fails.
 
-   - `PARTNER_CENTER_SELLER_ID`
-   - `PARTNER_CENTER_PRODUCT_ID`
-   - `PARTNER_CENTER_TENANT_ID`
-   - `PARTNER_CENTER_CLIENT_ID`
-   - `PARTNER_CENTER_CLIENT_SECRET`
+**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; listing metadata can still be pushed via `update_draft`.
 
-This repo includes `.github/workflows/partner-center-submit.yml`, a **manual** workflow (`workflow_dispatch`). Use **mode `configure`** first to verify Partner Center credentials. **mode `submit_and_publish`** runs update + publish using a **template** `product-update` JSON in the YAML; edit that JSON to match your app type in Partner Center before using it. Until then, keep using manual upload from the GitHub Release asset URL.
+Note: [microsoft/store-submission](https://github.com/microsoft/store-submission) targets EXE/MSI (Win32) packaged apps and does not support MSIX; stemma uses `msstore` instead.
 
 ## Local version sync (without tagging)
 

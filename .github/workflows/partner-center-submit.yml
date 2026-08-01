@@ -1,7 +1,5 @@
-# Optional: submit an existing GitHub Release MSIX to Partner Center.
-# See docs/store-release-pipeline.md for prerequisites. The update/publish payload
-# must match your listing type (MSIX vs Win32); edit product-update after validating
-# with Microsoft docs or Partner Center support before using submit_and_publish.
+# Optional: update / publish Partner Center drafts from a GitHub Release MSIX.
+# Uses Microsoft Store CLI (msstore) for MSIX products. See docs/store-release-pipeline.md.
 
 name: Partner Center submit (manual)
 
@@ -9,55 +7,197 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing GitHub release tag (e.g. v2.0.3)"
+        description: "Existing GitHub release tag (e.g. v2.6.0)"
         required: true
         type: string
       mode:
-        description: "configure = test credentials only; submit_and_publish = update + publish (edit YAML payload first)"
+        description: "configure = credentials; update_draft = MSIX + listing; update_metadata = ensure draft + listing; get_draft = read; publish_draft = submit"
         type: choice
         options:
           - configure
-          - submit_and_publish
+          - update_draft
+          - update_metadata
+          - get_draft
+          - publish_draft
         default: configure
 
 jobs:
   submit:
     runs-on: ubuntu-latest
+    env:
+      PRODUCT_ID: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
     steps:
+      - name: Checkout
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Setup Python
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        run: python -m pip install "PyYAML>=6.0"
+
+      - name: Build Partner Center payloads
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python scripts/build_partner_center_payloads.py \
+            --tag "$TAG" \
+            --repository "${{ github.repository }}" \
+            --out-dir store/payloads
+
+      - name: Upload payload artifacts
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: partner-center-payloads
+          path: store/payloads/
+          if-no-files-found: error
+
+      - name: Download release MSIX
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${{ github.repository }}/releases/download/${TAG}/stemma.msix"
+          curl -fsSL -o stemma.msix "$url"
+          ls -lh stemma.msix
+
+      - name: Set up Linux credential storage
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnome-keyring dbus-x11
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
+          echo "anypass_just_to_unlock" | gnome-keyring-daemon --unlock
+          eval "$(echo "anypass_just_to_unlock" | gnome-keyring-daemon --start --components=secrets)"
+          echo "GNOME_KEYRING_CONTROL=$GNOME_KEYRING_CONTROL" >> "$GITHUB_ENV"
+
+      - name: Setup Microsoft Store CLI
+        uses: microsoft/setup-msstore-cli@52af111539fa0c9569714bfca7c79e33bc704f92 # v1
+
       - name: Configure Store credentials
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: configure
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          msstore reconfigure \
+            --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" \
+            --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" \
+            --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" \
+            --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
 
-      # Template only: confirm JSON against Partner Center before choosing submit_and_publish.
-      - name: Update draft submission (MSIX URL)
-        if: ${{ inputs.mode == 'submit_and_publish' }}
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
-        with:
-          command: update
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-          product-update: >-
-            {"packages":[{"packageUrl":"https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/stemma.msix","languages":["en-us"],"architectures":["X64"],"isSilentInstall":true}]}
+      - name: Verify Store credentials
+        if: ${{ inputs.mode == 'configure' }}
+        run: msstore info
 
-      - name: Publish submission
-        if: ${{ inputs.mode == 'submit_and_publish' }}
-        uses: microsoft/store-submission@1dbdf522fd5e751104cf3b325073b47f6f2fc09c # v1
+      - name: Ensure pending Partner Center draft
+        if: ${{ inputs.mode == 'update_metadata' }}
+        id: ensure_draft
+        run: |
+          set -euo pipefail
+          if NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose 2>&1 | grep -q "Pending Submission"; then
+            echo "Pending draft already exists."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::No pending draft (for example after certification). Creating one from release MSIX."
+          msstore publish stemma.msix \
+            --appId "$PRODUCT_ID" \
+            --verbose
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update draft submission (MSIX package)
+        if: ${{ inputs.mode == 'update_draft' }}
+        id: publish_msix
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Commit the uploaded package into the Partner Center draft. This does
+          # not submit for certification; use publish_draft for that step.
+          msstore publish stemma.msix \
+            --appId "$PRODUCT_ID" \
+            --verbose
+
+      - name: Update draft listing metadata
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        id: update_metadata
+        continue-on-error: ${{ inputs.mode == 'update_draft' }}
+        run: |
+          set -euo pipefail
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
+          NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission.json
+          python scripts/merge_partner_center_metadata.py \
+            --submission submission.json \
+            --listing store/listing.yaml \
+            --tag "${{ inputs.tag }}" \
+            --out submission-metadata.json
+          metadata="$(cat submission-metadata.json)"
+          msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
+
+      - name: Commit Partner Center submission changes
+        if: ${{ (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') && steps.update_metadata.outcome == 'success' }}
+        env:
+          PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        id: commit_submission
+        run: |
+          set -euo pipefail
+          python scripts/commit_partner_center_submission.py --verbose
+
+      - name: Upload merged submission metadata
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          command: publish
-          type: packaged
-          seller-id: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
-          product-id: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
-          tenant-id: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
-          client-id: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
-          client-secret: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+          name: partner-center-submission-metadata
+          path: submission-metadata.json
+          if-no-files-found: warn
+
+      - name: Summarize metadata update
+        if: ${{ inputs.mode == 'update_metadata' && steps.update_metadata.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
+            echo "Created a new Partner Center draft from release MSIX before updating listing metadata."
+          fi
+          echo "Listing metadata update completed. Inspect the draft in Partner Center before publish_draft."
+
+      - name: Summarize draft update
+        if: ${{ inputs.mode == 'update_draft' }}
+        run: |
+          set -euo pipefail
+          publish_ok="${{ steps.publish_msix.outcome == 'success' }}"
+          metadata_ok="${{ steps.update_metadata.outcome == 'success' }}"
+          if [ "$publish_ok" != "true" ]; then
+            echo "::warning::MSIX upload via msstore publish failed."
+            echo "::warning::Microsoft documents msstore updates for free products only."
+            echo "::warning::Upload stemma.msix manually in Partner Center (Start update) if needed."
+          fi
+          if [ "$metadata_ok" != "true" ]; then
+            echo "::warning::Listing metadata update failed."
+            echo "::warning::Paste listing copy from docs/store-listing.md manually if needed."
+          fi
+          if [ "$publish_ok" != "true" ] && [ "$metadata_ok" != "true" ]; then
+            echo "::error::Neither MSIX upload nor metadata update succeeded."
+            exit 1
+          fi
+          echo "Partner Center draft update completed."
+
+      - name: Get draft submission (debug)
+        if: ${{ inputs.mode == 'get_draft' }}
+        run: |
+          set -euo pipefail
+          msstore submission status "$PRODUCT_ID" --verbose
+          echo "---"
+          msstore submission get "$PRODUCT_ID" --verbose
+
+      - name: Publish draft submission
+        if: ${{ inputs.mode == 'publish_draft' }}
+        run: msstore submission publish "$PRODUCT_ID" --verbose
