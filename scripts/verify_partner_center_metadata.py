@@ -30,6 +30,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--tag", required=True, help="Release tag, e.g. v2.6.0")
     parser.add_argument(
+        "--listing",
+        type=Path,
+        default=DEFAULT_LISTING_YAML,
+    )
+    parser.add_argument(
         "--fields",
         default="ReleaseNotes",
         help="Comma-separated BaseListing fields to verify (default: ReleaseNotes)",
