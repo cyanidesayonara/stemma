@@ -42,25 +42,26 @@ from src.ui.styles import (
     STEM_COLORS_LIGHT,
 )
 from src.ui.transport_bar import TransportBar
-from src.waveform import compute_peaks, compute_stem_peaks
+from src.waveform import compute_stem_peaks
 
 _PEAK_DEBOUNCE_MS = 80
 
 
-def _compute_peaks_bg(stems, muted, soloed, volumes, num_bins=2000,
-                      mini_bins=200):
-    """Compute peaks on a background thread. Returns (main_peaks, stem_peaks)."""
-    main_peaks = compute_peaks(
-        stems=stems,
-        muted=muted,
-        soloed=soloed,
-        volumes=volumes,
-        num_bins=num_bins,
-    )
-    stem_peaks = {}
-    for name, data in stems.items():
-        stem_peaks[name] = compute_stem_peaks(data, num_bins=mini_bins)
-    return main_peaks, stem_peaks
+def _compute_peaks_bg(stems, stem_bins=2000):
+    """Compute per-stem peaks on a background thread.
+
+    Mute/solo/volume are not applied here: the stacked lanes show each stem
+    at full scale and express mix state as paint opacity, so peaks stay valid
+    across mix changes and only need recomputing when the audio itself does.
+
+    ``stem_bins`` matches the resolution the old single composite waveform
+    used. Bin count is nearly free: the cost is the O(frames) pass over the
+    audio, not the reduction into bins.
+    """
+    return {
+        name: compute_stem_peaks(data, num_bins=stem_bins)
+        for name, data in stems.items()
+    }
 
 
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
@@ -771,9 +772,6 @@ class PlayerControls(QWidget):
         self._peak_future = _get_peak_pool().submit(
             _compute_peaks_bg,
             stems=stems,
-            muted=self._player.muted_stems,
-            soloed=self._player.soloed_stems,
-            volumes=self._player.volumes,
         )
         self._peak_poll_timer.start()
 
@@ -790,21 +788,19 @@ class PlayerControls(QWidget):
         failed = future.cancelled() or future.exception() is not None
         if not stale and not failed:
             try:
-                main_peaks, stem_peaks = future.result()
+                stem_peaks = future.result()
             except Exception:
                 failed = True
             else:
-                self._on_peaks_computed(main_peaks, stem_peaks)
+                self._on_peaks_computed(stem_peaks)
 
         refresh = stale or self._peak_refresh_pending
         self._peak_refresh_pending = False
         if refresh:
             self._start_peak_computation()
 
-    def _on_peaks_computed(self, main_peaks: np.ndarray,
-                           stem_peaks: dict) -> None:
+    def _on_peaks_computed(self, stem_peaks: dict) -> None:
         """Apply peak results from the background thread."""
-        del main_peaks
         self._cached_stem_peaks = stem_peaks
         self._apply_stem_lanes_to_waveform(stem_peaks)
         try:

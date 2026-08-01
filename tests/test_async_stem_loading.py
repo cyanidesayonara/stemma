@@ -817,13 +817,11 @@ class TestPeakGeneration:
         stale_main = np.array([0.1], dtype=np.float32)
         fresh_main = np.array([0.9], dtype=np.float32)
         stale = Future()
-        stale.set_result((stale_main, {"vocals": stale_main}))
+        stale.set_result({"vocals": stale_main})
         controls._peak_generation = 2
         controls._peak_future = stale
         controls._peak_future_generation = 1
-        pool = _FakePeakPool(
-            (fresh_main, {"vocals": fresh_main}),
-        )
+        pool = _FakePeakPool({"vocals": fresh_main})
 
         with patch.object(
             player_controls_module, "_get_peak_pool", return_value=pool,
@@ -837,7 +835,9 @@ class TestPeakGeneration:
             controls._poll_peak_future()
 
         apply_peaks.assert_called_once()
-        assert np.array_equal(apply_peaks.call_args.args[0], fresh_main)
+        assert np.array_equal(
+            apply_peaks.call_args.args[0]["vocals"], fresh_main
+        )
 
     def test_recompute_invalidates_in_flight_generation(self, window):
         controls = window._player_controls
