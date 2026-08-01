@@ -809,7 +809,6 @@ class PlayerControls(QWidget):
         except RuntimeError:
             return  # Widget was destroyed
         self._waveform.set_total_seconds(self._player.total_seconds)
-        self._stem_mixer.set_mini_peaks(stem_peaks)
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""
