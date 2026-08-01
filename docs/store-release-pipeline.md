@@ -38,8 +38,8 @@ Partner Center draft/submit automation uses `.github/workflows/partner-center-su
 (manual `workflow_dispatch`) with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview) (`msstore`), which supports MSIX products. Modes:
 
 - **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
-- **`update_draft`** -- download `stemma.msix` from the release tag, upload it with
-  `msstore publish --noCommit`, then push listing metadata from `store/listing.yaml`
+- **`update_draft`** -- download `stemma.msix` from the release tag, upload and commit
+  it with `msstore publish` (draft only; does not certify), then push listing metadata
 - **`get_draft`** -- print current submission status and package JSON (debug)
 - **`publish_draft`** -- publish the current Partner Center draft for certification
 

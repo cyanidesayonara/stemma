@@ -102,9 +102,10 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          # Commit the uploaded package into the Partner Center draft. This does
+          # not submit for certification; use publish_draft for that step.
           msstore publish stemma.msix \
             --appId "$PRODUCT_ID" \
-            --noCommit \
             --verbose
 
       - name: Update draft listing metadata
