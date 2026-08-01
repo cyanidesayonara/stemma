@@ -1,9 +1,12 @@
 """Player transport controls and per-stem mute/solo mixer.
 
 PlayerControls remains the composition facade over TransportBar,
-StemMixer, PracticeRack, and SongInfoBar. Visual recomposition is
-deferred to a later v3.0 change; this module preserves the shipped
-layout and public integration points.
+StemMixer, PracticeRack, and SongInfoBar. The transport bar hosts a
+~280px stacked stem waveform view (``WaveformStackWidget``); peak jobs
+route stem lanes here and per-stem mini waveforms were removed from the
+mixer. Further practice-cockpit visual recomposition is deferred to later
+v3.0 slices; this module preserves the shipped layout and public
+integration points.
 """
 
 from concurrent.futures import Future, ThreadPoolExecutor
