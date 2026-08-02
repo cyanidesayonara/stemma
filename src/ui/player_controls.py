@@ -240,10 +240,7 @@ class PlayerControls(QWidget):
 
         self._song_info_bar = SongInfoBar(self)
         self._practice_rack = PracticeRack(self._song_info_bar, self)
-        self._transport_bar = TransportBar(
-            self._practice_rack.count_in_controls,
-            self,
-        )
+        self._transport_bar = TransportBar(self)
         self._stem_mixer = StemMixer(self._player, self)
 
         controls_layout.addWidget(self._transport_bar)
@@ -1355,9 +1352,9 @@ class PlayerControls(QWidget):
             f"padding: 1px 6px; color: {dim['text']};"
         )
         self._detected_bpm_label.setStyleSheet(dim_style)
-        self._detected_bpm_label.setText("detecting...")
+        self._detected_bpm_label.setText("Tempo: detecting...")
         self._key_label.setStyleSheet(dim_style)
-        self._key_label.setText("detecting...")
+        self._key_label.setText("Key: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),
@@ -1532,7 +1529,7 @@ class PlayerControls(QWidget):
             f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['text']};"
         )
-        self._key_label.setText("detecting...")
+        self._key_label.setText("Key: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),
@@ -1581,7 +1578,7 @@ class PlayerControls(QWidget):
             f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['text']};"
         )
-        self._detected_bpm_label.setText("detecting...")
+        self._detected_bpm_label.setText("Tempo: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),

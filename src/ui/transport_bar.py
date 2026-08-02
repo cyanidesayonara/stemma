@@ -35,7 +35,6 @@ class TransportBar(QWidget):
 
     def __init__(
         self,
-        count_in_controls: QWidget,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -111,7 +110,6 @@ class TransportBar(QWidget):
         transport.addWidget(self._master_volume_label)
 
         transport.addStretch()
-        transport.addWidget(count_in_controls)
         layout.addLayout(transport)
 
         self._waveform_frame = QFrame()

@@ -5,9 +5,11 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -31,6 +33,37 @@ from src.ui.control_primitives import (
 )
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS
+
+
+def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
+    """Build a titled card and return it with the layout for its contents.
+
+    Matches the label-above-frame idiom StemMixer uses for Stems and
+    Recordings, so the practice controls read as part of the same interface.
+    """
+    container = QWidget()
+    outer = QVBoxLayout(container)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(2)
+
+    label = QLabel(title)
+    label.setObjectName("title-label")
+    outer.addWidget(label)
+
+    frame = QFrame()
+    frame.setObjectName("card-frame")
+    frame.setFrameShape(QFrame.Shape.StyledPanel)
+    # Cards sit side by side, so they should present one shared bottom edge
+    # rather than three ragged ones set by whichever holds the most rows.
+    frame.setSizePolicy(
+        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+    )
+    body = QVBoxLayout(frame)
+    body.setContentsMargins(8, 6, 8, 6)
+    body.setSpacing(4)
+    outer.addWidget(frame)
+
+    return container, body
 
 
 class PracticeRack(QWidget):
@@ -123,26 +156,40 @@ class PracticeRack(QWidget):
             self.count_in_repeats_toggled.emit
         )
         count_in.addWidget(self._count_in_repeats)
+        # Without this the spare card width is distributed between the label
+        # and its controls, stranding them at opposite ends of the row.
+        count_in.addStretch()
 
-        loop_speed = QHBoxLayout()
+        # Key, chord, and tempo read as one strip under the waveform instead
+        # of being split across two unrelated control rows.
+        layout.addWidget(song_info_bar)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(8)
+        layout.addLayout(cards)
+
+        loop_card, loop_body = _make_card("Loop and Trainer")
+        cards.addWidget(loop_card, 4)
+
+        loop_row = QHBoxLayout()
         self._loop_a_button = QPushButton("Set A")
         self._loop_a_button.setToolTip("Set loop start point (A)")
         self._loop_a_button.setAccessibleName("Set loop A")
         self._loop_a_button.clicked.connect(self.loop_a_requested.emit)
-        loop_speed.addWidget(self._loop_a_button)
+        loop_row.addWidget(self._loop_a_button)
 
         self._loop_b_button = QPushButton("Set B")
         self._loop_b_button.setToolTip("Set loop end point (B)")
         self._loop_b_button.setAccessibleName("Set loop B")
         self._loop_b_button.clicked.connect(self.loop_b_requested.emit)
-        loop_speed.addWidget(self._loop_b_button)
+        loop_row.addWidget(self._loop_b_button)
 
         self._loop_toggle_button = QPushButton("Loop")
         self._loop_toggle_button.setCheckable(True)
         self._loop_toggle_button.setToolTip("Toggle A-B loop (L)")
         self._loop_toggle_button.setAccessibleName("Toggle loop")
         self._loop_toggle_button.toggled.connect(self.loop_toggled.emit)
-        loop_speed.addWidget(self._loop_toggle_button)
+        loop_row.addWidget(self._loop_toggle_button)
 
         self._loop_clear_button = QPushButton("Clear")
         self._loop_clear_button.setToolTip("Clear loop points")
@@ -150,17 +197,21 @@ class PracticeRack(QWidget):
         self._loop_clear_button.clicked.connect(
             self.loop_clear_requested.emit
         )
-        loop_speed.addWidget(self._loop_clear_button)
+        loop_row.addWidget(self._loop_clear_button)
 
         self._loop_label = QLabel("")
         self._loop_label.setObjectName("subtle-label")
-        loop_speed.addWidget(self._loop_label)
+        loop_row.addWidget(self._loop_label)
 
-        loop_speed.addWidget(song_info_bar)
-        loop_speed.addStretch()
+        loop_row.addStretch()
+        loop_body.addLayout(loop_row)
 
+        speed_card, speed_body = _make_card("Speed and Pitch")
+        cards.addWidget(speed_card, 2)
+
+        speed_row = QHBoxLayout()
         self._speed_label = QLabel("Speed:")
-        loop_speed.addWidget(self._speed_label)
+        speed_row.addWidget(self._speed_label)
 
         self._speed_combo = QComboBox()
         for preset in SPEED_PRESETS:
@@ -172,14 +223,17 @@ class PracticeRack(QWidget):
         self._speed_combo.currentIndexChanged.connect(
             self._emit_speed_changed
         )
-        loop_speed.addWidget(self._speed_combo)
+        speed_row.addWidget(self._speed_combo)
 
         self._speed_status = QLabel("")
         self._speed_status.setObjectName("subtle-label")
-        loop_speed.addWidget(self._speed_status)
+        speed_row.addWidget(self._speed_status)
+        speed_row.addStretch()
+        speed_body.addLayout(speed_row)
 
+        pitch_row = QHBoxLayout()
         self._pitch_label = QLabel("Pitch:")
-        loop_speed.addWidget(self._pitch_label)
+        pitch_row.addWidget(self._pitch_label)
 
         self._pitch_spin = PitchSpinBox()
         self._pitch_spin.setRange(
@@ -192,8 +246,9 @@ class PracticeRack(QWidget):
         )
         self._pitch_spin.setAccessibleName("Pitch semitones")
         self._pitch_spin.valueChanged.connect(self.pitch_changed.emit)
-        loop_speed.addWidget(self._pitch_spin)
-        layout.addLayout(loop_speed)
+        pitch_row.addWidget(self._pitch_spin)
+        pitch_row.addStretch()
+        speed_body.addLayout(pitch_row)
 
         trainer = QHBoxLayout()
         self._trainer_check = QCheckBox("Loop Trainer")
@@ -224,7 +279,10 @@ class PracticeRack(QWidget):
         self._trainer_status.setObjectName("subtle-label")
         trainer.addWidget(self._trainer_status)
         trainer.addStretch()
-        layout.addLayout(trainer)
+        loop_body.addLayout(trainer)
+
+        metronome_card, metronome_body = _make_card("Metronome and Count-in")
+        cards.addWidget(metronome_card, 5)
 
         metronome = QHBoxLayout()
         self._metronome_label = QLabel("Metronome:")
@@ -323,9 +381,11 @@ class PracticeRack(QWidget):
         )
         metronome.addWidget(self._metronome_volume_combo)
 
-        metronome.addWidget(song_info_bar.detected_bpm_label)
         metronome.addStretch()
-        layout.addLayout(metronome)
+        metronome_body.addLayout(metronome)
+        # Count-in belongs next to the tempo it counts, not alone in the
+        # transport corner.
+        metronome_body.addWidget(self._count_in_controls)
 
     @property
     def count_in_controls(self) -> QWidget:

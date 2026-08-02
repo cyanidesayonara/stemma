@@ -51,6 +51,11 @@ class SongInfoBar(QWidget):
             Qt.CursorShape.PointingHandCursor
         )
         self._detected_bpm_label.installEventFilter(self)
+        # Tempo belongs with key and chord as one readout. It used to be
+        # re-parented into the metronome row, which rendered "detecting..."
+        # twice in different places while detection ran.
+        layout.addWidget(self._detected_bpm_label)
+        layout.addStretch()
 
     @property
     def key_label(self) -> QLabel:
