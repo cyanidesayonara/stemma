@@ -117,7 +117,8 @@ def test_facade_keeps_existing_widget_aliases(controls):
 
     assert controls._play_btn is controls.transport_bar.play_button
     assert controls._record_btn is controls.transport_bar.record_button
-    assert controls._waveform is controls.transport_bar.waveform
+    assert controls._waveform is controls.waveform_panel.waveform
+    assert controls._waveform_frame is controls.waveform_panel.frame
     assert controls._stem_rows is controls.stem_mixer.stem_rows
     assert controls._recording_rows is controls.stem_mixer.recording_rows
     assert controls._speed_combo is controls.practice_rack.speed_combo
@@ -171,7 +172,8 @@ def test_stem_and_recording_lifecycle_delegates_to_mixer(controls):
 
 
 def test_practice_cards_compose_in_intended_order(controls):
-    """Practice controls read as transport, readout, three cards, mixer.
+    """Practice controls read as waveform, readout, three cards, mixer,
+    then the anchored transport.
 
     This replaces the extraction-era order guard. That test pinned the
     pre-recomposition layout deliberately, so #131 slice 2 rewrites it rather
@@ -180,14 +182,6 @@ def test_practice_cards_compose_in_intended_order(controls):
     """
     _component_types()
     expected = [
-        # Transport
-        controls._play_btn,
-        controls._stop_btn,
-        controls._record_btn,
-        controls._time_label,
-        controls._master_vol_label_prefix,
-        controls._master_volume_slider,
-        controls._master_volume_label,
         controls._waveform_frame,
         # Song readout strip: key, chord, and tempo together
         controls._key_label,
@@ -227,6 +221,15 @@ def test_practice_cards_compose_in_intended_order(controls):
         controls._stems_frame,
         controls._recordings_label,
         controls._recordings_frame,
+        # Transport, anchored last: it sits below the scrolling content so it
+        # stays put however far the practice controls are scrolled.
+        controls._play_btn,
+        controls._stop_btn,
+        controls._record_btn,
+        controls._time_label,
+        controls._master_vol_label_prefix,
+        controls._master_volume_slider,
+        controls._master_volume_label,
     ]
     markers = set(expected)
     actual = [
@@ -312,6 +315,26 @@ def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
 
     rack.close()
     rack.deleteLater()
+
+
+def test_transport_is_anchored_outside_the_scrolling_content(controls):
+    """The transport must not scroll away with the practice controls.
+
+    The waveform scrolls with everything else; play, stop, record, and the
+    master volume stay put.
+    """
+    scrolled = set(_layout_widgets(controls._controls_widget))
+
+    assert controls._waveform_frame in scrolled
+    for widget in (
+        controls._play_btn,
+        controls._stop_btn,
+        controls._record_btn,
+        controls._master_volume_slider,
+    ):
+        assert widget not in scrolled
+
+    assert controls._transport_bar.parent() is controls
 
 
 def test_controls_column_scrolls_rather_than_overlapping(controls):

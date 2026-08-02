@@ -44,6 +44,7 @@ from src.ui.styles import (
     STEM_COLORS_LIGHT,
 )
 from src.ui.transport_bar import TransportBar
+from src.ui.waveform_panel import WaveformPanel
 from src.waveform import compute_stem_peaks
 
 _PEAK_DEBOUNCE_MS = 80
@@ -199,6 +200,11 @@ class PlayerControls(QWidget):
         return self._transport_bar
 
     @property
+    def waveform_panel(self) -> WaveformPanel:
+        """Return the framed stem-lane waveform component."""
+        return self._waveform_panel
+
+    @property
     def stem_mixer(self) -> StemMixer:
         """Return the stem and recording mixer component."""
         return self._stem_mixer
@@ -243,9 +249,10 @@ class PlayerControls(QWidget):
         self._song_info_bar = SongInfoBar(self)
         self._practice_rack = PracticeRack(self._song_info_bar, self)
         self._transport_bar = TransportBar(self)
+        self._waveform_panel = WaveformPanel(self)
         self._stem_mixer = StemMixer(self._player, self)
 
-        controls_layout.addWidget(self._transport_bar)
+        controls_layout.addWidget(self._waveform_panel)
         controls_layout.addWidget(self._practice_rack)
         controls_layout.addWidget(self._stem_mixer)
         controls_layout.addStretch()
@@ -264,6 +271,13 @@ class PlayerControls(QWidget):
         )
         self._controls_scroll.setVisible(False)
         layout.addWidget(self._controls_scroll, 1)
+
+        # Anchored below the scroll area rather than inside it: play, stop,
+        # record, and the master volume stay put no matter how far the
+        # practice content is scrolled, and they sit closest to the mixer a
+        # player reaches for between takes.
+        self._transport_bar.setVisible(False)
+        layout.addWidget(self._transport_bar)
 
         self._footer_widget = QWidget()
         self._footer_widget.setObjectName("footer")
@@ -309,8 +323,8 @@ class PlayerControls(QWidget):
         self._master_vol_label_prefix = transport.master_volume_prefix
         self._master_volume_slider = transport.master_volume_slider
         self._master_volume_label = transport.master_volume_label
-        self._waveform_frame = transport.waveform_frame
-        self._waveform = transport.waveform
+        self._waveform_frame = self._waveform_panel.frame
+        self._waveform = self._waveform_panel.waveform
         self._play_icon = transport.play_icon
         self._pause_icon = transport.pause_icon
         self._stop_icon = transport.stop_icon
@@ -368,7 +382,7 @@ class PlayerControls(QWidget):
         transport.master_volume_changed.connect(
             self._on_master_volume_requested
         )
-        transport.seek_requested.connect(self._on_waveform_seek)
+        self._waveform_panel.seek_requested.connect(self._on_waveform_seek)
 
         practice = self._practice_rack
         practice.loop_a_requested.connect(self.set_loop_a)
@@ -432,6 +446,7 @@ class PlayerControls(QWidget):
         """Switch all theme-dependent visuals to *theme*."""
         self._theme = theme
         self._transport_bar.apply_theme(colors, self._player.is_playing)
+        self._waveform_panel.apply_theme(colors)
         self._play_icon = self._transport_bar.play_icon
         self._pause_icon = self._transport_bar.pause_icon
         self._stop_icon = self._transport_bar.stop_icon
@@ -485,6 +500,7 @@ class PlayerControls(QWidget):
         has_stems = bool(stem_names)
         self._empty_widget.setVisible(not has_stems)
         self._controls_scroll.setVisible(has_stems)
+        self._transport_bar.setVisible(has_stems)
         self._stem_mixer.set_stem_names(stem_names)
 
         self._speed_combo.blockSignals(True)
