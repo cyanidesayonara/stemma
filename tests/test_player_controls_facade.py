@@ -4,9 +4,11 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 
 from src.ui.player_controls import PlayerControls
+from src.ui.practice_rack import PracticeRack
+from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 
 
@@ -68,6 +70,14 @@ def _component_types():
 
 def _layout_widgets(widget: QWidget):
     """Yield widgets in visual layout order, descending into containers."""
+    if isinstance(widget, QScrollArea):
+        # A scroll area holds its content via setWidget rather than in a
+        # layout item, so the walk would stop here without this.
+        inner = widget.widget()
+        if inner is not None:
+            yield inner
+            yield from _layout_widgets(inner)
+        return
     layout = widget.layout()
     if layout is None:
         return
@@ -267,6 +277,50 @@ def test_practice_controls_are_grouped_into_titled_cards(controls):
         "Speed and Pitch",
         "Metronome and Count-in",
     }
+
+
+def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
+    """Three cards need ~1140px; the window's 900px minimum gives far less.
+
+    Standing them in one row regardless clipped the metronome card's labels
+    and buttons to fragments ("Metronome:" became "Metr", "Tap" became "aj").
+    """
+    # Standalone: inside PlayerControls the parent layout immediately resizes
+    # the rack back, so an explicit resize would not stick. It must also be
+    # shown, because Qt does not deliver resize events to unrealized widgets.
+    rack = PracticeRack(SongInfoBar())
+    # MainWindow sets an explicit 900x600 minimum, which is what lets the
+    # layout squeeze the rack below the width three cards would need. Without
+    # an explicit minimum here, resize() is clamped and never gets narrow.
+    rack.setMinimumSize(200, 100)
+    rack.show()
+    needed = rack._required_card_width()
+
+    def metronome_row() -> int:
+        grid = rack._cards_grid
+        return grid.getItemPosition(grid.indexOf(rack._metronome_card))[0]
+
+    rack.resize(needed + 80, rack.height())
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+    assert metronome_row() == 0
+
+    rack.resize(needed - 300, rack.height())
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is False
+    assert metronome_row() == 1
+
+    rack.close()
+    rack.deleteLater()
+
+
+def test_controls_column_scrolls_rather_than_overlapping(controls):
+    """A short window must scroll the controls, not compress them past their
+    minimums until the card rows draw on top of each other."""
+    scroll = controls._controls_scroll
+
+    assert scroll.widget() is controls._controls_widget
+    assert scroll.widgetResizable() is True
 
 
 def test_theme_and_session_state_survive_component_delegation(controls):

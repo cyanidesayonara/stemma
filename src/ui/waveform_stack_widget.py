@@ -27,6 +27,10 @@ from PySide6.QtWidgets import QWidget, QSizePolicy
 from src.ui.styles import DARK_COLORS
 
 STACK_HEIGHT = 280
+# The window may be as short as 600px, which cannot afford 280px of waveform
+# on top of the transport, practice controls, and mixer. Below this floor the
+# lanes stop being readable, so the stack shrinks to it and no further.
+STACK_MIN_HEIGHT = 120
 _BAR_WIDTH = 2
 _BAR_GAP = 1
 _BAR_STEP = _BAR_WIDTH + _BAR_GAP
@@ -74,8 +78,10 @@ class WaveformStackWidget(QWidget):
 
         self._apply_colors(DARK_COLORS)
 
-        self.setFixedHeight(STACK_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(STACK_MIN_HEIGHT)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.setMouseTracking(False)
 
     def _apply_colors(self, colors: dict[str, str]) -> None:
@@ -106,8 +112,11 @@ class WaveformStackWidget(QWidget):
         self._invalidate_lane_paths()
         self.update()
 
+    def sizeHint(self) -> QSize:
+        return QSize(600, STACK_HEIGHT)
+
     def minimumSizeHint(self) -> QSize:
-        return QSize(200, STACK_HEIGHT)
+        return QSize(200, STACK_MIN_HEIGHT)
 
     def lane_count(self) -> int:
         return len(self._lanes)

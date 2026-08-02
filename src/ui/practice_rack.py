@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -164,12 +165,13 @@ class PracticeRack(QWidget):
         # of being split across two unrelated control rows.
         layout.addWidget(song_info_bar)
 
-        cards = QHBoxLayout()
-        cards.setSpacing(8)
-        layout.addLayout(cards)
+        self._cards_grid = QGridLayout()
+        self._cards_grid.setSpacing(8)
+        self._cards_grid.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self._cards_grid)
 
         loop_card, loop_body = _make_card("Loop and Trainer")
-        cards.addWidget(loop_card, 4)
+        self._loop_card = loop_card
 
         loop_row = QHBoxLayout()
         self._loop_a_button = QPushButton("Set A")
@@ -207,7 +209,7 @@ class PracticeRack(QWidget):
         loop_body.addLayout(loop_row)
 
         speed_card, speed_body = _make_card("Speed and Pitch")
-        cards.addWidget(speed_card, 2)
+        self._speed_card = speed_card
 
         speed_row = QHBoxLayout()
         self._speed_label = QLabel("Speed:")
@@ -282,7 +284,7 @@ class PracticeRack(QWidget):
         loop_body.addLayout(trainer)
 
         metronome_card, metronome_body = _make_card("Metronome and Count-in")
-        cards.addWidget(metronome_card, 5)
+        self._metronome_card = metronome_card
 
         metronome = QHBoxLayout()
         self._metronome_label = QLabel("Metronome:")
@@ -387,9 +389,52 @@ class PracticeRack(QWidget):
         # transport corner.
         metronome_body.addWidget(self._count_in_controls)
 
+        self._cards_wide: bool | None = None
+        self._reflow_cards()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Reflow the cards when the available width changes."""
+        super().resizeEvent(event)
+        self._reflow_cards()
+
+    def _required_card_width(self) -> int:
+        """Width needed to stand all three cards side by side."""
+        cards = (self._loop_card, self._speed_card, self._metronome_card)
+        spacing = self._cards_grid.horizontalSpacing() * (len(cards) - 1)
+        return sum(c.minimumSizeHint().width() for c in cards) + spacing
+
+    def _reflow_cards(self) -> None:
+        """Stand the cards in one row, or wrap to two when width is short.
+
+        Side by side the three cards need roughly 1140px. The window's
+        minimum is 900px wide, which leaves the rack far less than that, and
+        without wrapping the metronome card's labels and buttons are clipped
+        to fragments. Wrapped, the widest row is the metronome card alone,
+        which fits comfortably at the minimum window size.
+        """
+        wide = self.width() >= self._required_card_width()
+        if wide == self._cards_wide:
+            return
+        self._cards_wide = wide
+
+        grid = self._cards_grid
+        for card in (self._loop_card, self._speed_card, self._metronome_card):
+            grid.removeWidget(card)
+
+        grid.addWidget(self._loop_card, 0, 0)
+        grid.addWidget(self._speed_card, 0, 1)
+        if wide:
+            grid.addWidget(self._metronome_card, 0, 2)
+        else:
+            grid.addWidget(self._metronome_card, 1, 0, 1, 2)
+        grid.setColumnStretch(0, 4)
+        grid.setColumnStretch(1, 2)
+        grid.setColumnStretch(2, 5 if wide else 0)
+
     @property
-    def count_in_controls(self) -> QWidget:
-        return self._count_in_controls
+    def cards_side_by_side(self) -> bool:
+        """Whether the cards currently stand in a single row."""
+        return bool(self._cards_wide)
 
     @property
     def speed_combo(self) -> QComboBox:

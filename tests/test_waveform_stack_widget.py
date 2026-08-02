@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 from src.ui.waveform_stack_widget import (
     _LABEL_WIDTH,
     STACK_HEIGHT,
+    STACK_MIN_HEIGHT,
     WaveformStackWidget,
 )
 from tests.widget_visual import assert_widget_snapshot
@@ -20,9 +21,21 @@ def app():
     return inst
 
 
-def test_stack_has_fixed_height(app):
+def test_stack_prefers_full_height_but_can_shrink(app):
+    """The stack asks for 280px yet yields down to a readable floor.
+
+    It used to be a fixed 280px, which does not fit alongside the transport,
+    practice controls, and mixer in a 600px-tall window -- the minimum the
+    main window allows -- so the lowest lanes were clipped away entirely.
+    """
     w = WaveformStackWidget()
-    assert w.height() == STACK_HEIGHT
+
+    assert w.sizeHint().height() == STACK_HEIGHT
+    assert w.minimumSizeHint().height() == STACK_MIN_HEIGHT
+    assert STACK_MIN_HEIGHT < STACK_HEIGHT
+
+    w.resize(400, STACK_MIN_HEIGHT)
+    assert w.height() == STACK_MIN_HEIGHT
 
 
 def test_update_lane_mix_refreshes_opacity(app):
