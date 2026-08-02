@@ -1,9 +1,13 @@
-"""Core playback transport and waveform presentation."""
+"""Core playback transport controls.
+
+The waveform lives in WaveformPanel rather than here: the transport stays
+anchored to the bottom of the window while the waveform scrolls with the rest
+of the practice content.
+"""
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -21,25 +25,24 @@ from src.ui.control_primitives import (
     make_icon,
 )
 from src.ui.styles import RECORDING_COLOR
-from src.ui.waveform_stack_widget import WaveformStackWidget
 
 
 class TransportBar(QWidget):
-    """Playback, recording, master-volume, seek, and waveform controls."""
+    """Playback, recording, and master-volume controls."""
 
     play_pause_requested = Signal()
     stop_requested = Signal()
     record_toggled = Signal(bool)
     master_volume_changed = Signal(float)
-    seek_requested = Signal(float)
 
     def __init__(
         self,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("transport-bar")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 6, 0, 0)
 
         transport = QHBoxLayout()
         icon_color = QColor("#cdd6f4")
@@ -112,17 +115,6 @@ class TransportBar(QWidget):
         transport.addStretch()
         layout.addLayout(transport)
 
-        self._waveform_frame = QFrame()
-        self._waveform_frame.setObjectName("card-frame")
-        self._waveform_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        waveform_layout = QVBoxLayout(self._waveform_frame)
-        waveform_layout.setContentsMargins(4, 4, 4, 4)
-
-        self._waveform = WaveformStackWidget()
-        self._waveform.seek_requested.connect(self.seek_requested.emit)
-        waveform_layout.addWidget(self._waveform)
-        layout.addWidget(self._waveform_frame)
-
     @property
     def play_button(self) -> QPushButton:
         return self._play_button
@@ -150,14 +142,6 @@ class TransportBar(QWidget):
     @property
     def master_volume_label(self) -> QLabel:
         return self._master_volume_label
-
-    @property
-    def waveform_frame(self) -> QFrame:
-        return self._waveform_frame
-
-    @property
-    def waveform(self) -> WaveformStackWidget:
-        return self._waveform
 
     @property
     def play_icon(self):
@@ -199,7 +183,6 @@ class TransportBar(QWidget):
             self._pause_icon if playing else self._play_icon
         )
         self._stop_button.setIcon(self._stop_icon)
-        self._waveform.set_theme_colors(colors)
 
     def set_playing(self, playing: bool) -> None:
         """Reflect the current player state in the play button."""
