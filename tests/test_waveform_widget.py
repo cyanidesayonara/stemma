@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from src.ui.waveform_widget import WaveformWidget
 from src.ui.player_controls import PlayerControls
-from src.ui.stem_mixer import StemRow
+from src.ui.stem_mixer import RecordingStemRow, StemRow
 
 
 @pytest.fixture(scope="module")
@@ -167,6 +167,43 @@ class TestStemRowLayout:
         assert row._label.text() == "Vocals"
         assert row._mute_btn is not None
         assert row._solo_btn is not None
+
+    def test_stem_row_packs_controls_left(self, app):
+        """A trailing stretch keeps the row compact.
+
+        Every control in the row is fixed width, so without one the layout
+        distributes the slack between them: at 1366px that put roughly 300px
+        of dead space between a stem's name and its own mute button. The mini
+        waveform absorbed it until #149 removed it.
+        """
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        row = StemRow("vocals", player)
+        layout = row.layout()
+
+        last = layout.itemAt(layout.count() - 1)
+        assert last.widget() is None
+        assert last.spacerItem() is not None
+
+    def test_recording_row_controls_come_before_the_stretch(self, app):
+        """Recording controls must land in the packed group, not off to the
+        right of the stretch that packs it."""
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        row = RecordingStemRow("take-1", "Take 1", player)
+        layout = row.layout()
+
+        assert layout.itemAt(layout.count() - 1).spacerItem() is not None
+        packed = [
+            layout.itemAt(index).widget()
+            for index in range(layout.count() - 1)
+        ]
+        assert row._nudge_spin in packed
+        assert row._delete_btn in packed
 
     def test_stem_row_snapshot(self, app):
         from tests.widget_visual import assert_widget_snapshot

@@ -124,6 +124,17 @@ class StemRow(QWidget):
         self._vol_combo.activated.connect(self._on_vol_combo)
         layout.addWidget(self._vol_combo)
 
+        # Every control in this row is fixed width, so without a stretch the
+        # layout spreads the slack between them: at 1366px that left roughly
+        # 300px of dead space between a stem's name and its own mute button.
+        # The mini waveform used to absorb it before #149 removed it.
+        layout.addStretch()
+
+    def _append_control(self, widget: QWidget) -> None:
+        """Add a control at the end of the row, before the packing stretch."""
+        layout = self.layout()
+        layout.insertWidget(layout.count() - 1, widget)
+
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
         self._mute_btn.clearFocus()
@@ -193,8 +204,6 @@ class RecordingStemRow(StemRow):
             f"color: {RECORDING_COLOR}; font-weight: bold;"
         )
 
-        layout = self.layout()
-        insert_position = layout.count()
         self._nudge_spin = QSpinBox()
         self._nudge_spin.setRange(-200, 200)
         self._nudge_spin.setValue(0)
@@ -205,8 +214,7 @@ class RecordingStemRow(StemRow):
         )
         self._nudge_spin.setAccessibleName(f"Nudge {display_name}")
         self._nudge_spin.valueChanged.connect(self._on_nudge_changed)
-        layout.insertWidget(insert_position, self._nudge_spin)
-        insert_position += 1
+        self._append_control(self._nudge_spin)
 
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         self._delete_btn = QPushButton()
@@ -227,7 +235,7 @@ class RecordingStemRow(StemRow):
         self._delete_btn.clicked.connect(
             lambda: self.delete_requested.emit(self._stem_name)
         )
-        layout.insertWidget(insert_position, self._delete_btn)
+        self._append_control(self._delete_btn)
 
     def _on_nudge_changed(self, value: int) -> None:
         self._player.nudge_stem(self._stem_name, float(value))
