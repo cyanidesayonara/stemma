@@ -16,8 +16,10 @@ import numpy as np
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -240,18 +242,28 @@ class PlayerControls(QWidget):
 
         self._song_info_bar = SongInfoBar(self)
         self._practice_rack = PracticeRack(self._song_info_bar, self)
-        self._transport_bar = TransportBar(
-            self._practice_rack.count_in_controls,
-            self,
-        )
+        self._transport_bar = TransportBar(self)
         self._stem_mixer = StemMixer(self._player, self)
 
         controls_layout.addWidget(self._transport_bar)
         controls_layout.addWidget(self._practice_rack)
         controls_layout.addWidget(self._stem_mixer)
         controls_layout.addStretch()
-        self._controls_widget.setVisible(False)
-        layout.addWidget(self._controls_widget, 1)
+
+        # The window may be as short as 600px. Waveform, practice cards, and
+        # mixer together ask for more than that, and a squeezed QVBoxLayout
+        # compresses its children past their minimums until they overlap.
+        # Scrolling keeps every control reachable instead; at normal window
+        # sizes the content fits and no scrollbar appears.
+        self._controls_scroll = QScrollArea()
+        self._controls_scroll.setWidget(self._controls_widget)
+        self._controls_scroll.setWidgetResizable(True)
+        self._controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._controls_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._controls_scroll.setVisible(False)
+        layout.addWidget(self._controls_scroll, 1)
 
         self._footer_widget = QWidget()
         self._footer_widget.setObjectName("footer")
@@ -472,7 +484,7 @@ class PlayerControls(QWidget):
         self._cached_stem_peaks = None
         has_stems = bool(stem_names)
         self._empty_widget.setVisible(not has_stems)
-        self._controls_widget.setVisible(has_stems)
+        self._controls_scroll.setVisible(has_stems)
         self._stem_mixer.set_stem_names(stem_names)
 
         self._speed_combo.blockSignals(True)
@@ -1355,9 +1367,9 @@ class PlayerControls(QWidget):
             f"padding: 1px 6px; color: {dim['text']};"
         )
         self._detected_bpm_label.setStyleSheet(dim_style)
-        self._detected_bpm_label.setText("detecting...")
+        self._detected_bpm_label.setText("Tempo: detecting...")
         self._key_label.setStyleSheet(dim_style)
-        self._key_label.setText("detecting...")
+        self._key_label.setText("Key: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),
@@ -1532,7 +1544,7 @@ class PlayerControls(QWidget):
             f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['text']};"
         )
-        self._key_label.setText("detecting...")
+        self._key_label.setText("Key: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),
@@ -1581,7 +1593,7 @@ class PlayerControls(QWidget):
             f"border-radius: 4px; "
             f"padding: 1px 6px; color: {dim['text']};"
         )
-        self._detected_bpm_label.setText("detecting...")
+        self._detected_bpm_label.setText("Tempo: detecting...")
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),

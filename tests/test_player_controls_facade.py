@@ -4,9 +4,11 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 
 from src.ui.player_controls import PlayerControls
+from src.ui.practice_rack import PracticeRack
+from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 
 
@@ -68,6 +70,14 @@ def _component_types():
 
 def _layout_widgets(widget: QWidget):
     """Yield widgets in visual layout order, descending into containers."""
+    if isinstance(widget, QScrollArea):
+        # A scroll area holds its content via setWidget rather than in a
+        # layout item, so the walk would stop here without this.
+        inner = widget.widget()
+        if inner is not None:
+            yield inner
+            yield from _layout_widgets(inner)
+        return
     layout = widget.layout()
     if layout is None:
         return
@@ -160,10 +170,17 @@ def test_stem_and_recording_lifecycle_delegates_to_mixer(controls):
     assert row.parent() is None
 
 
-def test_extraction_preserves_visual_control_order(controls):
-    """The extraction boundary must not recompose the shipped interface."""
+def test_practice_cards_compose_in_intended_order(controls):
+    """Practice controls read as transport, readout, three cards, mixer.
+
+    This replaces the extraction-era order guard. That test pinned the
+    pre-recomposition layout deliberately, so #131 slice 2 rewrites it rather
+    than deleting it: every control that existed before must still be reachable
+    from the layout, now grouped by purpose instead of by row.
+    """
     _component_types()
     expected = [
+        # Transport
         controls._play_btn,
         controls._stop_btn,
         controls._record_btn,
@@ -171,27 +188,27 @@ def test_extraction_preserves_visual_control_order(controls):
         controls._master_vol_label_prefix,
         controls._master_volume_slider,
         controls._master_volume_label,
-        controls._count_in_label,
-        controls._ci_label,
-        controls._count_in_toggle,
-        controls._count_in_beats_spin,
-        controls._count_in_repeats_cb,
         controls._waveform_frame,
+        # Song readout strip: key, chord, and tempo together
+        controls._key_label,
+        controls._chord_label,
+        controls._detected_bpm_label,
+        # Card: Loop and Trainer
         controls._loop_a_btn,
         controls._loop_b_btn,
         controls._loop_toggle_btn,
         controls._loop_clear_btn,
         controls._loop_label,
-        controls._key_label,
-        controls._chord_label,
+        controls._trainer_check,
+        controls._trainer_start_combo,
+        controls._trainer_status,
+        # Card: Speed and Pitch
         controls._speed_label,
         controls._speed_combo,
         controls._speed_status,
         controls._pitch_label,
         controls._pitch_spin,
-        controls._trainer_check,
-        controls._trainer_start_combo,
-        controls._trainer_status,
+        # Card: Metronome and Count-in
         controls._metro_label,
         controls._metronome_toggle,
         controls._bpm_spin,
@@ -200,7 +217,12 @@ def test_extraction_preserves_visual_control_order(controls):
         controls._beat_nudge_spin,
         controls._metronome_vol_slider,
         controls._metronome_vol_combo,
-        controls._detected_bpm_label,
+        controls._count_in_label,
+        controls._ci_label,
+        controls._count_in_toggle,
+        controls._count_in_beats_spin,
+        controls._count_in_repeats_cb,
+        # Mixer
         controls._mixer_label,
         controls._stems_frame,
         controls._recordings_label,
@@ -212,6 +234,93 @@ def test_extraction_preserves_visual_control_order(controls):
     ]
 
     assert actual == expected
+
+
+def test_count_in_sits_with_the_metronome_not_the_transport(controls):
+    """Count-in moved out of the isolated transport corner (#131)."""
+    transport = set(_layout_widgets(controls.transport_bar))
+    rack = set(_layout_widgets(controls.practice_rack))
+
+    assert controls._count_in_toggle not in transport
+    for widget in (
+        controls._count_in_toggle,
+        controls._count_in_beats_spin,
+        controls._count_in_repeats_cb,
+        controls._ci_label,
+    ):
+        assert widget in rack
+
+
+def test_song_readout_strip_holds_key_chord_and_tempo(controls):
+    """Tempo reads beside key and chord instead of from the metronome row.
+
+    The BPM label used to be re-parented into the metronome layout, so
+    "detecting..." rendered twice in two different places while detection ran.
+    """
+    strip = set(_layout_widgets(controls.song_info_bar))
+
+    assert controls._key_label in strip
+    assert controls._chord_label in strip
+    assert controls._detected_bpm_label in strip
+
+
+def test_practice_controls_are_grouped_into_titled_cards(controls):
+    """Three labeled cards replace the flat equal-weight rows."""
+    titles = {
+        label.text()
+        for label in controls.practice_rack.findChildren(QLabel)
+        if label.objectName() == "title-label"
+    }
+
+    assert titles == {
+        "Loop and Trainer",
+        "Speed and Pitch",
+        "Metronome and Count-in",
+    }
+
+
+def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
+    """Three cards need ~1140px; the window's 900px minimum gives far less.
+
+    Standing them in one row regardless clipped the metronome card's labels
+    and buttons to fragments ("Metronome:" became "Metr", "Tap" became "aj").
+    """
+    # Standalone: inside PlayerControls the parent layout immediately resizes
+    # the rack back, so an explicit resize would not stick. It must also be
+    # shown, because Qt does not deliver resize events to unrealized widgets.
+    rack = PracticeRack(SongInfoBar())
+    # MainWindow sets an explicit 900x600 minimum, which is what lets the
+    # layout squeeze the rack below the width three cards would need. Without
+    # an explicit minimum here, resize() is clamped and never gets narrow.
+    rack.setMinimumSize(200, 100)
+    rack.show()
+    needed = rack._required_card_width()
+
+    def metronome_row() -> int:
+        grid = rack._cards_grid
+        return grid.getItemPosition(grid.indexOf(rack._metronome_card))[0]
+
+    rack.resize(needed + 80, rack.height())
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+    assert metronome_row() == 0
+
+    rack.resize(needed - 300, rack.height())
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is False
+    assert metronome_row() == 1
+
+    rack.close()
+    rack.deleteLater()
+
+
+def test_controls_column_scrolls_rather_than_overlapping(controls):
+    """A short window must scroll the controls, not compress them past their
+    minimums until the card rows draw on top of each other."""
+    scroll = controls._controls_scroll
+
+    assert scroll.widget() is controls._controls_widget
+    assert scroll.widgetResizable() is True
 
 
 def test_theme_and_session_state_survive_component_delegation(controls):
