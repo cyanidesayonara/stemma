@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QFont, QFontDatabase, QImage
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.ui.styles import get_stylesheet
 
@@ -84,6 +84,20 @@ def deterministic_render_state():
         app.setFont(previous_font)
 
 
+def _apply_font_to_tree(widget, font) -> None:
+    """Set *font* on *widget* and every descendant.
+
+    Children created before the UI font was registered can keep resolving to
+    a font with no glyphs, so the first snapshot in a process rendered an
+    editable combo's text as tofu while later ones rendered it correctly.
+    Setting the font explicitly makes a render independent of how much had
+    already been drawn when it ran.
+    """
+    widget.setFont(font)
+    for child in widget.findChildren(QWidget):
+        child.setFont(font)
+
+
 def _snapshot_path(name: str) -> Path:
     return _FIXTURES_DIR / f"{name}.png"
 
@@ -91,7 +105,11 @@ def _snapshot_path(name: str) -> Path:
 def render_widget_png(widget, *, width: int, height: int) -> bytes:
     """Resize *widget*, process pending events, and return PNG bytes."""
     with deterministic_render_state():
+        app = QApplication.instance()
+        if app is not None:
+            _apply_font_to_tree(widget, app.font())
         widget.resize(width, height)
+        widget.ensurePolished()
         QApplication.processEvents()
         pixmap = widget.grab()
     buffer = QBuffer()
