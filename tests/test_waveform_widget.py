@@ -205,6 +205,47 @@ class TestStemRowLayout:
         assert row._nudge_spin in packed
         assert row._delete_btn in packed
 
+    @pytest.mark.parametrize("button", ["_mute_btn", "_solo_btn"])
+    def test_checked_toggle_shows_the_accent_fill(self, app, button):
+        """A muted or soloed stem must look muted or soloed.
+
+        The row set a selector-less ``background: transparent`` stylesheet,
+        which cascades to every child and outranks the application sheet, so
+        a checked mute/solo button lost its accent fill. Its checked icon is
+        drawn dark for that fill, so in the dark theme the button went almost
+        blank exactly when it was switched on.
+        """
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+        from src.ui.styles import DARK_COLORS, get_stylesheet
+
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        # Stand in for the QApplication-wide sheet without touching the app.
+        host = QWidget()
+        host.setStyleSheet(get_stylesheet("dark"))
+        layout = QVBoxLayout(host)
+        row = StemRow("vocals", player)
+        layout.addWidget(row)
+        host.resize(420, 40)
+        host.show()
+
+        toggle = getattr(row, button)
+        toggle.setChecked(True)
+        QApplication.processEvents()
+
+        image = toggle.grab().toImage()
+        # Just inside the border, clear of the icon glyph in the middle.
+        assert image.pixelColor(4, 14).name() == QColor(
+            DARK_COLORS["accent"]
+        ).name()
+
+        host.close()
+        host.deleteLater()
+
     def test_stem_row_snapshot(self, app):
         from tests.widget_visual import assert_widget_snapshot
 
