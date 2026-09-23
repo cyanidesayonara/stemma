@@ -4,8 +4,8 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
-Latest stable release: **v2.5.0**. The current `main` line targets
-**v2.6.0**, which is not released yet.
+Latest stable release: **v2.6.0**. The current `main` line targets
+**v3.0**, which is not released yet.
 
 ## Download
 
@@ -22,6 +22,10 @@ Latest stable release: **v2.5.0**. The current `main` line targets
 ## Features
 
 - AI-powered HTDemucs v4 stem separation (4-stem and 6-stem, CPU-only)
+- MDX-Net two-stem separation (vocals + backing) on the GPU via DirectML,
+  with automatic CPU fallback and a clear report of which one ran
+- Imports run in the background: the library shows queue and separation
+  progress, and multiple imports run one after another
 - ONNX Runtime inference without PyTorch; DirectML support for HTDemucs
   four/six-stem remains research in
   [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
@@ -45,16 +49,18 @@ Latest stable release: **v2.5.0**. The current `main` line targets
 - Dark / light Qt themes; window geometry/state persistence; configurable data folder and audio device (Edit > Preferences)
 - 100% local processing -- no cloud, no subscriptions
 
-## v2.6.0 Target (Unreleased)
+## v3.0 Target (Unreleased)
 
-The current source tree includes these v2.6.0 target features. They are not
-part of the stable v2.5.0 Store or portable downloads yet:
+The current source tree includes the v3.0 practice cockpit. It is not part
+of the stable v2.6.0 Store or portable downloads yet:
 
-- MDX-Net two-stem separation (vocals + backing) requests DirectML when
-  available and explicitly reports whether it selected DirectML GPU or CPU
-  fallback. HTDemucs four/six-stem remains CPU-only.
-- Imports run in the background: the dialog closes after separation is
-  queued, the library shows progress, and multiple imports run serially.
+- A tall stacked waveform with one colored lane per stem, sharing the
+  playhead and A-B loop region; muted stems dim in place.
+- Practice controls grouped into three cards: Loop and Trainer, Speed and
+  Pitch, Metronome and Count-in.
+- Key, chord, and tempo in one readout strip under the waveform.
+- Play, stop, record, and master volume anchored at the bottom while the
+  practice content scrolls.
 
 ## Development Setup
 

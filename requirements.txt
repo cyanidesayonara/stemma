@@ -6,6 +6,10 @@ sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26.0
 lameenc>=1.7.0
-librosa>=0.10.1
+# The release lock ships librosa 0.11. librosa 1.0 reworked the phase
+# vocoder behind time_stretch/pitch_shift, so CI must not silently test a
+# different audio path than the one users get. Lift this cap together with
+# the release lock once 1.0 has been checked by ear (issue #154).
+librosa>=0.10.1,<1.0
 yt-dlp>=2024.1.0
 imageio-ffmpeg>=0.4.9
