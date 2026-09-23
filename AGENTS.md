@@ -72,7 +72,7 @@ rationale and subsystem boundaries.
 9. No placeholder or mock code in `main` branch. Use `NotImplementedError` with clear TODOs.
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
-12. **Dual-Agent Workflow:** We use a builder/reviewer model. The "Builder" agent implements the feature and opens a PR. Do not merge your own PRs. The user will pass the PR to a "Reviewer" agent to audit the code, catch bugs, suggest improvements, and approve it.
+12. **Builder/reviewer workflow:** The builder implements the change and opens a PR, then runs the independent reviewer defined in `.claude/agents/pr-reviewer.md` in a fresh context and its own worktree. The builder posts the reviewer's report on the PR unedited, addresses the findings in follow-up commits, and replies with what changed. Never merge your own PRs; the user merges.
 13. **Imports at module scope by default.** Prefer top-of-file imports. Deferred imports inside a function or method are acceptable when there is a concrete reason (for example: faster cold start, avoiding a heavy or rarely used dependency until needed, or optional/platform-specific modules). Add a short comment at the import site when the reason is not obvious.
 14. **Look at UI changes before handing them off.** Any change under `src/ui/` is rendered with `python scripts/render_ui_review.py` and the images inspected at every size and theme before the PR opens. Leave the human acceptance pass for what a render cannot show (see "Verification tiers" in `docs/DEVELOPMENT.md`).
 

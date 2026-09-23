@@ -204,8 +204,11 @@ artifact, checksum, and Store submission details.
 4. Use tests first for behavior and regression changes.
 5. Run focused tests, Ruff, and the complete fast suite before handoff.
 6. Use a conventional commit message.
-7. Open a pull request. The builder does not merge their own pull request;
-   a separate reviewer audits and approves it.
+7. Open a pull request, then have it reviewed independently: the reviewer
+   in `.claude/agents/pr-reviewer.md` runs in a fresh context and its own
+   worktree, and its report is posted on the PR unedited. Address the
+   findings in follow-up commits. The builder never merges their own pull
+   request; the maintainer merges.
 8. Close issues and move Project items to Done only after the change is
    merged or the issue's acceptance criteria are otherwise satisfied.
 
