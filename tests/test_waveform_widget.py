@@ -4,12 +4,13 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 from PySide6.QtCore import Qt, QEvent, QPointF
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QColor, QMouseEvent
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from src.ui.waveform_widget import WaveformWidget
 from src.ui.player_controls import PlayerControls
 from src.ui.stem_mixer import RecordingStemRow, StemRow
+from src.ui.styles import DARK_COLORS, get_stylesheet
 
 
 @pytest.fixture(scope="module")
@@ -215,11 +216,6 @@ class TestStemRowLayout:
         drawn dark for that fill, so in the dark theme the button went almost
         blank exactly when it was switched on.
         """
-        from PySide6.QtGui import QColor
-        from PySide6.QtWidgets import QVBoxLayout, QWidget
-
-        from src.ui.styles import DARK_COLORS, get_stylesheet
-
         player = MagicMock()
         player.muted_stems = set()
         player.soloed_stems = set()
