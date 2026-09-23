@@ -220,7 +220,7 @@ class PracticeRack(QWidget):
             self._speed_combo.addItem(f"{preset}x", preset)
         self._speed_combo.setCurrentText("1.0x")
         fit_combo_width(self._speed_combo)
-        self._speed_combo.setToolTip("Playback speed ([ / ])")
+        self._speed_combo.setToolTip("Playback speed (Shift+Up / Shift+Down)")
         self._speed_combo.setAccessibleName("Playback speed")
         self._speed_combo.currentIndexChanged.connect(
             self._emit_speed_changed
