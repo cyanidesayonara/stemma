@@ -66,7 +66,9 @@ def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
     # A card shorter than its row neighbors keeps its rows packed at the top
     # instead of spreading them apart.
     body.setAlignment(Qt.AlignmentFlag.AlignTop)
-    outer.addWidget(frame)
+    # The frame takes all of a short card's extra height, so titles and
+    # frame tops stay aligned across a row instead of the title growing.
+    outer.addWidget(frame, 1)
 
     return container, body
 

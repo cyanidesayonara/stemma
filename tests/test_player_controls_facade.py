@@ -4,12 +4,13 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QLabel,
     QScrollArea,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -326,12 +327,18 @@ def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
 
 
 def _hosted_rack():
-    """A PracticeRack inside a plain host whose width the test controls."""
-    host = QWidget()
-    layout = QVBoxLayout(host)
-    layout.setContentsMargins(0, 0, 0, 0)
+    """A PracticeRack hosted the way PlayerControls hosts it.
+
+    A resizable scroll area with the horizontal scrollbar off lets its
+    content be no narrower than the content's minimum size, which is what
+    held the side-by-side cards at three-card width. A plain layout squeezes
+    the rack below its minimum anyway and would hide the bug.
+    """
+    host = QScrollArea()
+    host.setWidgetResizable(True)
+    host.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     rack = PracticeRack(SongInfoBar())
-    layout.addWidget(rack)
+    host.setWidget(rack)
     host.setMinimumSize(200, 100)
     host.show()
     return host, rack
@@ -349,12 +356,14 @@ def test_cards_rewrap_when_the_available_width_shrinks(qapp):
     needed = rack._required_card_width()
 
     host.resize(needed + 80, 400)
-    QApplication.processEvents()
+    for _ in range(3):
+        QApplication.processEvents()
     assert rack.cards_side_by_side is True
 
     host.resize(needed - 40, 400)
-    QApplication.processEvents()
-    assert rack.width() <= host.width()
+    for _ in range(3):
+        QApplication.processEvents()
+    assert rack.width() <= host.viewport().width()
     assert rack.cards_side_by_side is False
 
     host.close()
@@ -419,7 +428,7 @@ def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
     space both inside the cards and below the mixer.
     """
     controls.set_stem_names(["vocals", "drums", "bass", "other"])
-    controls.resize(1500, 1100)
+    controls.resize(1800, 1100)
     controls.show()
     QApplication.processEvents()
 
@@ -439,6 +448,18 @@ def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
     tallest = max(card.sizeHint().height() for card in cards)
     for card in cards:
         assert card.height() <= tallest + 2
+
+    # A shorter card's extra height belongs to its frame, not its title:
+    # titles and frame tops line up across the row.
+    assert controls.practice_rack.cards_side_by_side
+    frame_tops = {
+        card.findChild(QFrame, "card-frame").y() for card in cards
+    }
+    title_heights = {
+        card.findChild(QLabel, "title-label").height() for card in cards
+    }
+    assert len(frame_tops) == 1, frame_tops
+    assert len(title_heights) == 1, title_heights
 
     controls.hide()
 
