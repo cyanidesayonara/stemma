@@ -29,8 +29,10 @@ it, and to say plainly when nothing is.
 3. Run `python -m ruff check .` and `python -m pytest -m "not slow and not hardware"`.
    Report the counts.
 4. For each new or changed test, check it actually guards the change: revert
-   the `src/` part of the diff locally (`git stash` or `git checkout main -- <file>`),
-   run just those tests, confirm they fail, then restore.
+   the `src/` part of the diff locally with `git checkout origin/main -- <file>`
+   (never `git stash`: the stash is shared with every other worktree), run
+   just those tests, confirm they fail, then restore with
+   `git checkout HEAD -- <file>`.
 5. If the diff touches `src/ui/` or styles, render it with
    `scripts/render_ui_review.py` (if the branch predates it, render a local,
    unpushed merge of the branch with `origin/main`). To skip the model
