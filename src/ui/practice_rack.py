@@ -54,14 +54,18 @@ def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("card-frame")
     frame.setFrameShape(QFrame.Shape.StyledPanel)
-    # Cards sit side by side, so they should present one shared bottom edge
-    # rather than three ragged ones set by whichever holds the most rows.
+    # Preferred still stretches each card to its grid row, so side-by-side
+    # cards share one bottom edge. Expanding also pulled a tall window's spare
+    # height into the cards, which belongs to the waveform instead.
     frame.setSizePolicy(
-        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
     )
     body = QVBoxLayout(frame)
     body.setContentsMargins(8, 6, 8, 6)
     body.setSpacing(4)
+    # A card shorter than its row neighbors keeps its rows packed at the top
+    # instead of spreading them apart.
+    body.setAlignment(Qt.AlignmentFlag.AlignTop)
     outer.addWidget(frame)
 
     return container, body
@@ -99,6 +103,7 @@ class PracticeRack(QWidget):
         icon_color = QColor(DARK_COLORS["text"])
 
         self._count_in_controls = QWidget(self)
+        self._count_in_controls.setObjectName("card-row")
         count_in = QHBoxLayout(self._count_in_controls)
         count_in.setContentsMargins(0, 0, 0, 0)
 

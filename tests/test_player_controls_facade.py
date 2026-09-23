@@ -4,12 +4,14 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 
 from src.ui.player_controls import PlayerControls
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
-from src.ui.styles import DARK_COLORS, LIGHT_COLORS
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS, get_stylesheet
+from src.ui.waveform_stack_widget import STACK_HEIGHT, STACK_MAX_HEIGHT
 
 
 @pytest.fixture(scope="module")
@@ -315,6 +317,64 @@ def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
 
     rack.close()
     rack.deleteLater()
+
+
+def test_card_contents_do_not_paint_the_page_background(qapp):
+    """Empty labels and row containers inside a card must be see-through.
+
+    The global ``QWidget`` rule paints every widget in the page color, so
+    each label, checkbox, and row container drew a darker box over the
+    card's own background -- visible as stray tiles beside Clear and Speed,
+    and as a tall dark band behind Count-in in a large window.
+    """
+    rack = PracticeRack(SongInfoBar())
+    rack.setStyleSheet(get_stylesheet("dark"))
+    rack.resize(1400, 400)
+    rack.show()
+    QApplication.processEvents()
+
+    image = rack.grab().toImage()
+    mantle = QColor(DARK_COLORS["mantle"])
+    # The count-in beat label is fixed-width and empty until count-in runs,
+    # so its center shows whatever sits behind it.
+    label = rack._count_in_label
+    center = label.mapTo(rack, label.rect().center())
+    assert image.pixelColor(center).name() == mantle.name()
+
+    rack.close()
+    rack.deleteLater()
+
+
+def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
+    """A tall window should grow the waveform, not stretch the cards.
+
+    Expanding cards pulled the spare height into themselves and spread their
+    rows apart, leaving the waveform at its preferred height with empty
+    space both inside the cards and below the mixer.
+    """
+    controls.set_stem_names(["vocals", "drums", "bass", "other"])
+    controls.resize(1500, 1100)
+    controls.show()
+    QApplication.processEvents()
+
+    waveform = controls._waveform_panel.waveform
+    assert STACK_HEIGHT < waveform.height() <= STACK_MAX_HEIGHT
+    # The frame hugs the lanes; past the cap it must not grow on its own and
+    # leave empty bands above and below them.
+    assert controls._waveform_frame.height() <= waveform.height() + 12
+
+    cards = (
+        controls.practice_rack._loop_card,
+        controls.practice_rack._speed_card,
+        controls.practice_rack._metronome_card,
+    )
+    # Side by side, every card stretches to the tallest one so the row keeps
+    # a shared bottom edge -- but no further than that.
+    tallest = max(card.sizeHint().height() for card in cards)
+    for card in cards:
+        assert card.height() <= tallest + 2
+
+    controls.hide()
 
 
 def test_transport_is_anchored_outside_the_scrolling_content(controls):

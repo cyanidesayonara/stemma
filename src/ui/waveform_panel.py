@@ -6,7 +6,7 @@ window.
 """
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLayout, QVBoxLayout, QWidget
 
 from src.ui.waveform_stack_widget import WaveformStackWidget
 
@@ -20,12 +20,17 @@ class WaveformPanel(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        # Propagate the stack's height cap up through the frame and panel, so
+        # spare height past the cap flows on to the rest of the column rather
+        # than opening empty bands inside the frame around the lanes.
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
 
         self._frame = QFrame()
         self._frame.setObjectName("card-frame")
         self._frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame_layout = QVBoxLayout(self._frame)
         frame_layout.setContentsMargins(4, 4, 4, 4)
+        frame_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
 
         self._waveform = WaveformStackWidget()
         self._waveform.seek_requested.connect(self.seek_requested.emit)
