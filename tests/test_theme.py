@@ -200,8 +200,8 @@ class TestThemeToggleButton:
     """Tests for the theme toggle button in the menu bar."""
 
     def _make_window(self, theme="dark"):
-        from PySide6.QtCore import QSettings
-        settings = QSettings("stemma", "stemma")
+        from src.app_settings import open_settings
+        settings = open_settings()
         settings.setValue("theme", theme)
 
         player = MagicMock()

@@ -12,8 +12,9 @@ It writes one PNG per state, theme, and size plus an ``index.html`` contact
 sheet to ``build/ui-review/`` (ignored by git). Render once on ``main`` and
 once on a branch with different ``--out`` directories to compare.
 
-The window runs against a private data directory with a generated song, so
-the real library is never touched. That directory persists between runs so
+The window runs against a private data directory with a generated song and
+a throwaway settings file per window, so the real library, session, and
+preferences are never touched. That directory persists between runs so
 the beat-detection model downloads only once.
 """
 
@@ -184,6 +185,7 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
     app = QApplication.instance() or QApplication(sys.argv)
     _load_ui_font(app)
 
+    from src.app_settings import SETTINGS_FILE_ENV
     from src.data_paths import platform_user_data_dir
     from src.model_manager import ModelManager
     from src.player import MultiTrackPlayer
@@ -198,6 +200,17 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
     first_load = True
     for theme in themes:
         for width, height in sizes:
+            # A fresh settings file per window, never the user's real store.
+            # Each window saves its session on close, and the next would
+            # otherwise restore it: auto-loading the song into the "empty"
+            # state, and re-applying the previous loop and mute so the
+            # practice staging toggled them back off.
+            settings_path = os.path.join(
+                data_dir, "settings", f"{theme}-{width}x{height}.ini",
+            )
+            if os.path.exists(settings_path):
+                os.remove(settings_path)
+            os.environ[SETTINGS_FILE_ENV] = settings_path
             app.setStyleSheet(get_stylesheet(theme))
             window = MainWindow(
                 library, MultiTrackPlayer(), ModelManager(stemma_dir),
@@ -224,6 +237,12 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
                     _pump(app, 0.4)
                 elif state == "practice":
                     _stage_practice(app, window)
+                    # Setting loop points re-runs detection on the loop.
+                    _pump(app, 0.5)
+                    if not _wait_for_detection(
+                        app, window._player_controls, 20.0,
+                    ):
+                        print("  note: detection still busy at capture")
 
                 name = f"{state}_{theme}_{width}x{height}.png"
                 window.grab().save(os.path.join(out_dir, name))

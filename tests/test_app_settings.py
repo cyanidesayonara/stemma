@@ -4,7 +4,9 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from src.app_settings import (
+    SETTINGS_FILE_ENV,
     normalize_output_device_setting,
+    open_settings,
     parse_stored_output_device_index,
     read_default_export_format,
     read_default_import_6_stem,
@@ -112,3 +114,51 @@ class TestReadDefaultImport6Stem:
     def test_true(self, settings_ini):
         settings_ini.setValue("import/default_6_stem", True)
         assert read_default_import_6_stem(settings_ini) is True
+
+
+class TestOpenSettings:
+    """The one place the app opens its settings store."""
+
+    def test_override_writes_an_ini_file(self, tmp_path, monkeypatch):
+        path = tmp_path / "isolated.ini"
+        monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
+
+        settings = open_settings()
+        settings.setValue("session/last_song_id", "abc")
+        settings.sync()
+
+        assert settings.format() == QSettings.Format.IniFormat
+        assert path.is_file()
+        assert "abc" in path.read_text(encoding="utf-8")
+
+    def test_default_is_the_native_user_store(self, monkeypatch):
+        monkeypatch.delenv(SETTINGS_FILE_ENV, raising=False)
+
+        settings = open_settings()
+
+        assert settings.format() == QSettings.Format.NativeFormat
+        assert settings.organizationName() == "stemma"
+        assert settings.applicationName() == "stemma"
+
+    def test_the_test_suite_never_touches_the_native_store(self):
+        """conftest points every test at a throwaway file. Without it, any test
+        that builds a MainWindow overwrote a real user's session and window
+        state in the registry."""
+        import os
+
+        assert os.environ.get(SETTINGS_FILE_ENV)
+
+    def test_app_code_opens_settings_only_through_the_helper(self):
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parents[1] / "src"
+        offenders = [
+            str(path.relative_to(src))
+            for path in src.rglob("*.py")
+            if path.name != "app_settings.py"
+            and 'QSettings("stemma", "stemma")' in path.read_text(
+                encoding="utf-8"
+            )
+        ]
+
+        assert offenders == []

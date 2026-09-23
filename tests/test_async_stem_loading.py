@@ -8,11 +8,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6.QtCore import QObject, QSettings, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
 from src import player as player_module
+from src.app_settings import open_settings
 from src.beat_detector import DetectionResult
 from src.library import Song
 from src.ui import main_window as main_window_module
@@ -160,7 +161,8 @@ def window(qapp, tmp_path):
     library.get_song.side_effect = lambda song_id: next(
         (song for song in songs if song.id == song_id), None,
     )
-    settings = QSettings("stemma", "stemma")
+    # conftest isolates this from the real user store (STEMMA_SETTINGS_FILE).
+    settings = open_settings()
     settings.clear()
     player = player_module.MultiTrackPlayer()
     # QTimer.singleShot is a Qt built-in and patches safely; the two

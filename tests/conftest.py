@@ -29,6 +29,26 @@ def sample_audio_path(tmp_dir):
     return path
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_app_settings(tmp_path_factory):
+    """Point the app's settings store at a throwaway INI file.
+
+    Tests that build a MainWindow save session and window state, and some
+    clear the store outright. Against the native store that meant running
+    the suite wiped a developer's real stemma preferences in the registry.
+    """
+    from src.app_settings import SETTINGS_FILE_ENV
+
+    path = tmp_path_factory.mktemp("settings") / "stemma-test.ini"
+    previous = os.environ.get(SETTINGS_FILE_ENV)
+    os.environ[SETTINGS_FILE_ENV] = str(path)
+    yield
+    if previous is None:
+        os.environ.pop(SETTINGS_FILE_ENV, None)
+    else:
+        os.environ[SETTINGS_FILE_ENV] = previous
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _collect_qt_garbage_between_modules():
     """Run a full garbage collection at every test-module boundary.

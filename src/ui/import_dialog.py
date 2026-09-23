@@ -9,7 +9,7 @@ import shutil
 import tempfile
 
 import soundfile as sf
-from PySide6.QtCore import Qt, QSettings, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.app_settings import read_default_import_6_stem
+from src.app_settings import open_settings, read_default_import_6_stem
 from src.downloader import (
     DownloadError,
     check_ffmpeg,
@@ -139,7 +139,7 @@ class ImportDialog(QDialog):
 
         self._setup_ui()
 
-        if read_default_import_6_stem(QSettings("stemma", "stemma")):
+        if read_default_import_6_stem(open_settings()):
             self._model_combo.setCurrentIndex(1)
 
         if file_path:

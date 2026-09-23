@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 
 import sounddevice as sd
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    open_settings,
     input_device_indices_with_input,
     output_device_indices_with_output,
     parse_stored_input_device_index,
@@ -59,7 +59,7 @@ class PreferencesDialog(QDialog):
         self.setWindowTitle("Preferences")
         self.setMinimumWidth(480)
 
-        self._settings = QSettings("stemma", "stemma")
+        self._settings = open_settings()
 
         self._data_dir_edit = QLineEdit()
         browse_btn = QPushButton("Browse…")
