@@ -21,7 +21,9 @@ Canonical documents:
   contribution workflow
 - `docs/ROADMAP.md`: concise roadmap backed by live GitHub issues
 - `CHANGELOG.md`: shipped release notes only
-- `docs/DEVELOPMENT_LOG.md`: historical session and implementation notes
+- Pull request descriptions: the record of each change (what, why, how,
+  testing). `docs/DEVELOPMENT_LOG.md` is an archive and is no longer
+  updated.
 
 ## Tech Stack
 

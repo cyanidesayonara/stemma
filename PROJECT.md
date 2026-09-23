@@ -2,7 +2,7 @@
 
 A Windows desktop music player with AI stem separation. Import a song, separate it into stems, mute/solo individual instruments, play along.
 
-**Personal-use tool. No cloud, no subscriptions, no command line needed.**
+**Local-only. No cloud, no subscriptions, no command line needed.** Distributed through the Microsoft Store and GitHub Releases.
 
 Latest stable release: **v2.6.0**. The current source tree targets
 **v3.0**, which is not released. Release notes live in `CHANGELOG.md`;
@@ -12,10 +12,10 @@ future scope lives in `docs/ROADMAP.md`.
 
 ## Concept
 
-1. Import a song (MP3/WAV/FLAC)
+1. Import a song (MP3/WAV/FLAC, or a YouTube URL)
 2. AI separates it into stems (vocals, drums, bass, guitar, piano, other)
-3. Mute/solo any stem — play along with your instrument
-4. Export stems or custom mixes
+3. Mute/solo any stem, loop, slow down, or transpose, and play along
+4. Record takes over the stems; export stems, mixes, or loop regions
 
 ---
 
@@ -81,7 +81,10 @@ stemma/
 │   ├── beat_detector.py    # beat, tempo, key, and chord analysis
 │   └── ui/                 # Qt presentation and interaction
 ├── tests/                  # fast, slow-model, and hardware-marked tests
-├── scripts/                # assets, version sync, model cache, MSIX build
+├── scripts/                # assets, screenshots, version sync, model cache,
+│                           # MSIX build, Store listing and Partner Center
+├── store/                  # Store listing source of truth (listing.yaml)
+├── assets/                 # icons, brand art, startup audio, Store screenshots
 ├── docs/                   # development, roadmap, Store, policy, history
 ├── stemma.spec             # PyInstaller one-folder build
 └── msix/AppxManifest.xml   # Desktop Bridge package identity
@@ -172,13 +175,21 @@ stemma/
   session restore, navigation, and generation-safe asynchronous stem reads.
   Only the current `(song, generation)` may update player/UI state or surface
   an error.
-- **`player_controls.py`** — Composition facade over `transport_bar.py`,
-  `stem_mixer.py`, `practice_rack.py`, and `song_info_bar.py`. Coordinates
-  transport, waveform, mixer, loops, rendered speed/pitch, metronome/count-in,
-  recording, and musical-analysis controls while preserving the current visual
-  layout. Waveform-peak work also uses generations so stale futures cannot
-  overwrite current state.
-- **`waveform_widget.py`** — Custom QPainter widget: mirrored waveform bars, playback cursor, loop region shading, loop marker lines. Click/drag-to-seek. Catppuccin Mocha colors.
+- **`player_controls.py`** — Composition facade and coordinator over the
+  practice cockpit components. It owns the layout: a scrolling column of
+  waveform, song readout, practice cards, and stem mixer, with the transport
+  anchored below it. Waveform-peak and detection work use generations so
+  stale futures cannot overwrite current state.
+  - **`waveform_panel.py`** / **`waveform_stack_widget.py`** — Stacked
+    per-stem waveform lanes in stem colors with a shared playhead, A-B loop
+    shading, click/drag-to-seek, and mute/solo shown as lane dimming. The
+    stack prefers 280px and yields to a 120px floor in short windows.
+  - **`song_info_bar.py`** — Key, live chord, and tempo readout strip.
+  - **`practice_rack.py`** — Loop and Trainer, Speed and Pitch, and
+    Metronome and Count-in cards, which wrap to two rows in narrow windows.
+  - **`stem_mixer.py`** — Stem and recording-take rows (mute, solo, volume,
+    take nudge and delete).
+  - **`transport_bar.py`** — Play, stop, record, time, and master volume.
 - **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
 - **`import_dialog.py`** — File browser or YouTube URL, metadata fields, and
   2/4/6-stem model selection. Missing models download with progress; failures
