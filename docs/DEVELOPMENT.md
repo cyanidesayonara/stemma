@@ -94,6 +94,35 @@ python -m pytest -m hardware
 
 Do not convert slow-model or hardware tests into unmarked PR tests.
 
+## Verification tiers
+
+Each kind of check happens where it is cheapest, so that human testing is
+spent only on what nothing else can judge.
+
+1. **Automated tests, every PR.** Ruff and the fast suite run in PR CI.
+   Slow-model tests run weekly and on demand; hardware tests run locally.
+2. **Rendered UI review, every PR that changes `src/ui/`.** Layout
+   regressions only show in a styled, rendered window, which the fast suite
+   never builds. Render one and inspect it before opening the PR:
+
+   ```powershell
+   python scripts/render_ui_review.py --out build/ui-review/branch
+   ```
+
+   This renders the real `MainWindow` with a generated song in three states
+   (empty, loaded, active practice with an A-B loop and a muted stem), at
+   900x600, 1366x768, and 1920x1080, in both themes. Output is PNGs plus
+   `index.html` under `build/ui-review/`. Use `--stems 6` for the six-stem
+   layout, and render `main` into a second directory to compare. The
+   renderer uses a private data directory and never touches your library.
+   Say in the PR what was checked.
+3. **Human acceptance pass, once per release.** Some things only a person
+   can judge: how speed and pitch renders sound, playback and metronome
+   sync, recording through a real interface, separation quality and GPU
+   use on real songs, and whether the app feels right in use. These checks
+   are collected in the release issue and done in one sitting before
+   tagging, not per PR. A PR that needs one lists it under Testing.
+
 ## Lint
 
 Ruff checks syntax, undefined names, and import correctness:
