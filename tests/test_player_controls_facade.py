@@ -5,7 +5,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.ui.player_controls import PlayerControls
 from src.ui.practice_rack import PracticeRack
@@ -317,6 +323,66 @@ def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
 
     rack.close()
     rack.deleteLater()
+
+
+def _hosted_rack():
+    """A PracticeRack inside a plain host whose width the test controls."""
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    rack = PracticeRack(SongInfoBar())
+    layout.addWidget(rack)
+    host.setMinimumSize(200, 100)
+    host.show()
+    return host, rack
+
+
+def test_cards_rewrap_when_the_available_width_shrinks(qapp):
+    """Standing side by side must not lock the rack at three-card width.
+
+    The cards' minimum width propagated up as the rack's own minimum, so once
+    side by side the rack could never be given less room: when a scrollbar
+    appeared it overflowed the scroll area and was clipped instead of
+    wrapping.
+    """
+    host, rack = _hosted_rack()
+    needed = rack._required_card_width()
+
+    host.resize(needed + 80, 400)
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+
+    host.resize(needed - 40, 400)
+    QApplication.processEvents()
+    assert rack.width() <= host.width()
+    assert rack.cards_side_by_side is False
+
+    host.close()
+    host.deleteLater()
+
+
+def test_cards_rewrap_when_their_content_grows(qapp):
+    """Setting loop points widens the loop card with "A: 0:12  B: 0:21".
+
+    At 1366px with six stems that pushed the cards past the rack's width,
+    and nothing reflowed them because the window itself had not resized.
+    """
+    host, rack = _hosted_rack()
+    host.resize(rack._required_card_width() + 10, 400)
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+
+    rack._loop_label.setText("A: 0:12  B: 0:21  (looping)")
+    # The size change travels label -> card frame -> card -> rack as a chain
+    # of posted layout requests, which takes more than one event-loop pass.
+    for _ in range(3):
+        QApplication.processEvents()
+
+    assert rack._required_card_width() > rack.width()
+    assert rack.cards_side_by_side is False
+
+    host.close()
+    host.deleteLater()
 
 
 def test_card_contents_do_not_paint_the_page_background(qapp):

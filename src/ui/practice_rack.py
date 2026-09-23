@@ -1,6 +1,6 @@
 """Loop, trainer, speed, pitch, metronome, and count-in controls."""
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -394,6 +394,15 @@ class PracticeRack(QWidget):
         # transport corner.
         metronome_body.addWidget(self._count_in_controls)
 
+        # The rack's width comes from the space it is given, never from its
+        # cards. Otherwise three cards side by side hold the rack at their
+        # combined width, so it can never be narrowed enough to wrap them:
+        # when a scrollbar appears, or loop points widen the loop card, the
+        # rack overflows its scroll area and is clipped instead. The explicit
+        # minimum set in _reflow_cards keeps the wrapped layout whole.
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self._cards_wide: bool | None = None
         self._reflow_cards()
 
@@ -402,11 +411,28 @@ class PracticeRack(QWidget):
         super().resizeEvent(event)
         self._reflow_cards()
 
+    def event(self, event) -> bool:
+        """Reflow when card content changes size at a constant width."""
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest:
+            self._reflow_cards()
+        return handled
+
     def _required_card_width(self) -> int:
         """Width needed to stand all three cards side by side."""
         cards = (self._loop_card, self._speed_card, self._metronome_card)
         spacing = self._cards_grid.horizontalSpacing() * (len(cards) - 1)
         return sum(c.minimumSizeHint().width() for c in cards) + spacing
+
+    def _wrapped_card_width(self) -> int:
+        """Width needed with the metronome card wrapped to its own row."""
+        spacing = self._cards_grid.horizontalSpacing()
+        top = (
+            self._loop_card.minimumSizeHint().width()
+            + spacing
+            + self._speed_card.minimumSizeHint().width()
+        )
+        return max(top, self._metronome_card.minimumSizeHint().width())
 
     def _reflow_cards(self) -> None:
         """Stand the cards in one row, or wrap to two when width is short.
@@ -417,6 +443,10 @@ class PracticeRack(QWidget):
         to fragments. Wrapped, the widest row is the metronome card alone,
         which fits comfortably at the minimum window size.
         """
+        floor = self._wrapped_card_width()
+        if self.minimumWidth() != floor:
+            self.setMinimumWidth(floor)
+
         wide = self.width() >= self._required_card_width()
         if wide == self._cards_wide:
             return
