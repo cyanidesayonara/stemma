@@ -1,5 +1,11 @@
 """Tests for QSettings read helpers."""
 
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QSettings
 
@@ -140,25 +146,41 @@ class TestOpenSettings:
         assert settings.organizationName() == "stemma"
         assert settings.applicationName() == "stemma"
 
-    def test_the_test_suite_never_touches_the_native_store(self):
-        """conftest points every test at a throwaway file. Without it, any test
-        that builds a MainWindow overwrote a real user's session and window
-        state in the registry."""
-        import os
+    def test_frozen_builds_ignore_the_override(self, tmp_path, monkeypatch):
+        """A stray variable must never redirect a shipped app's settings."""
+        monkeypatch.setenv(SETTINGS_FILE_ENV, str(tmp_path / "stray.ini"))
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
 
-        assert os.environ.get(SETTINGS_FILE_ENV)
+        settings = open_settings()
+
+        assert settings.format() == QSettings.Format.NativeFormat
+
+    def test_the_suite_uses_a_throwaway_settings_file(self):
+        """conftest points every test at a file under pytest's temp dir.
+
+        Without it, any test that builds a MainWindow overwrote a real user's
+        session and window state in the registry.
+        """
+        path = Path(os.environ[SETTINGS_FILE_ENV]).resolve()
+
+        assert path.is_relative_to(Path(tempfile.gettempdir()).resolve())
+        assert Path(open_settings().fileName()).resolve() == path
 
     def test_app_code_opens_settings_only_through_the_helper(self):
-        from pathlib import Path
+        """No entry point may open the native store behind the helper's back.
 
-        src = Path(__file__).resolve().parents[1] / "src"
+        main.py did, so theme, data folder, and output device were still
+        read from the registry while everything else used the override.
+        """
+        root = Path(__file__).resolve().parents[1]
+        direct = re.compile(r"QSettings\(\s*[\"']stemma[\"']\s*,\s*[\"']stemma[\"']")
+        sources = [root / "main.py", *(root / "src").rglob("*.py"),
+                   *(root / "scripts").rglob("*.py")]
         offenders = [
-            str(path.relative_to(src))
-            for path in src.rglob("*.py")
-            if path.name != "app_settings.py"
-            and 'QSettings("stemma", "stemma")' in path.read_text(
-                encoding="utf-8"
-            )
+            str(path.relative_to(root))
+            for path in sources
+            if path.name != "settings_store.py"
+            and direct.search(path.read_text(encoding="utf-8"))
         ]
 
         assert offenders == []

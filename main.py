@@ -18,6 +18,7 @@ from src.diagnostics import (
     main as diagnostics_main,
 )
 from src.paths import app_root
+from src.settings_store import open_settings
 from src.ui.splash_screen import SplashScreen
 from src.ui.styles import apply_tooltip_palette, get_stylesheet
 from src.version import __version__
@@ -62,7 +63,7 @@ def main() -> int:
         )
         return 1
 
-    settings = QSettings("stemma", "stemma")
+    settings = open_settings()
     theme = settings.value("theme", "dark")
     if theme not in ("dark", "light"):
         theme = "dark"

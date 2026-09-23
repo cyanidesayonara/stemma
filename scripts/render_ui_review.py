@@ -180,17 +180,19 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
     os.environ["LOCALAPPDATA"] = data_dir
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+    # Deferred so importing this module stays light: the tests import its
+    # fixture helpers without creating a QApplication or loading src.ui.
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(sys.argv)
     _load_ui_font(app)
 
-    from src.app_settings import SETTINGS_FILE_ENV
+    from src.app_settings import SETTINGS_FILE_ENV, open_settings
     from src.data_paths import platform_user_data_dir
     from src.model_manager import ModelManager
     from src.player import MultiTrackPlayer
     from src.ui.main_window import MainWindow
-    from src.ui.styles import get_colors, get_stylesheet
+    from src.ui.styles import apply_tooltip_palette, get_stylesheet
 
     stemma_dir = platform_user_data_dir()
     library, song_id = prepare_library(stemma_dir, stem_count)
@@ -211,12 +213,17 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
             if os.path.exists(settings_path):
                 os.remove(settings_path)
             os.environ[SETTINGS_FILE_ENV] = settings_path
+            # Seed the theme and start the way main.py does, so the window
+            # picks it up through its real startup path (theme toggle icon
+            # and tooltip palette included) instead of being re-themed after.
+            seed = open_settings()
+            seed.setValue("theme", theme)
+            seed.sync()
             app.setStyleSheet(get_stylesheet(theme))
+            apply_tooltip_palette(theme)
             window = MainWindow(
                 library, MultiTrackPlayer(), ModelManager(stemma_dir),
             )
-            window._theme = theme
-            window.apply_theme(theme, get_colors(theme))
             window.resize(width, height)
             window.show()
             _pump(app, 0.4)

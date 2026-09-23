@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6.QtCore import QSettings, QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 
+from src.app_settings import open_settings
 from src.library import SongLibrary
 from src.player import MultiTrackPlayer
 from src.ui.library_panel import LibraryPanel
@@ -260,7 +261,7 @@ class TestSessionRoundTrip:
         soloed = {"bass"}
         volumes = {"vocals": 0.5, "drums": 1.5, "bass": 1.0}
 
-        settings = QSettings("stemma", "stemma-test")
+        settings = open_settings()
         settings.clear()
         settings.setValue("session/muted_stems", json.dumps(sorted(muted)))
         settings.setValue("session/soloed_stems", json.dumps(sorted(soloed)))
@@ -276,7 +277,7 @@ class TestSessionRoundTrip:
         settings.clear()
 
     def test_loop_roundtrip(self):
-        settings = QSettings("stemma", "stemma-test")
+        settings = open_settings()
         settings.clear()
         settings.setValue("session/loop_a", 10.5)
         settings.setValue("session/loop_b", 20.3)
@@ -289,7 +290,7 @@ class TestSessionRoundTrip:
         settings.clear()
 
     def test_no_loop_roundtrip(self):
-        settings = QSettings("stemma", "stemma-test")
+        settings = open_settings()
         settings.clear()
         settings.setValue("session/loop_a", -1)
         settings.setValue("session/loop_b", -1)

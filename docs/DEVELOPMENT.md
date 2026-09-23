@@ -34,6 +34,18 @@ Runtime data defaults to `%LOCALAPPDATA%\stemma`. A repository-local `data/`
 directory is legacy development data and is migrated only when the user data
 directory is new.
 
+Settings (theme, session, window, preferences) live in the registry under
+`HKCU\Software\stemma\stemma`. To run from source without touching the
+settings of a stemma you also use day to day, point them at a file:
+
+```powershell
+$env:STEMMA_SETTINGS_FILE = "$PWD\build\dev-settings.ini"
+python main.py
+```
+
+The test suite and `scripts/render_ui_review.py` do this automatically.
+Packaged and Store builds ignore the variable.
+
 ## Release dependency lock
 
 `requirements-release.in` is the human-maintained release input.
