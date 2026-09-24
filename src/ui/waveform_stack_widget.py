@@ -31,6 +31,10 @@ STACK_HEIGHT = 280
 # on top of the transport, practice controls, and mixer. Below this floor the
 # lanes stop being readable, so the stack shrinks to it and no further.
 STACK_MIN_HEIGHT = 120
+# In a tall window the stack takes the spare height rather than leaving it
+# empty below the mixer, up to this cap: past it, lanes gain nothing a player
+# can read and the mixer drifts too far from the transport.
+STACK_MAX_HEIGHT = 520
 _BAR_WIDTH = 2
 _BAR_GAP = 1
 _BAR_STEP = _BAR_WIDTH + _BAR_GAP
@@ -79,8 +83,9 @@ class WaveformStackWidget(QWidget):
         self._apply_colors(DARK_COLORS)
 
         self.setMinimumHeight(STACK_MIN_HEIGHT)
+        self.setMaximumHeight(STACK_MAX_HEIGHT)
         self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self.setMouseTracking(False)
 

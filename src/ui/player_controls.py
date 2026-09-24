@@ -252,7 +252,9 @@ class PlayerControls(QWidget):
         self._waveform_panel = WaveformPanel(self)
         self._stem_mixer = StemMixer(self._player, self)
 
-        controls_layout.addWidget(self._waveform_panel)
+        # The waveform takes a tall window's spare height up to its cap; only
+        # what remains past that collects below the mixer.
+        controls_layout.addWidget(self._waveform_panel, 1)
         controls_layout.addWidget(self._practice_rack)
         controls_layout.addWidget(self._stem_mixer)
         controls_layout.addStretch()

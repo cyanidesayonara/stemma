@@ -386,6 +386,14 @@ QFrame#card-frame {{
     border-radius: 6px;
 }}
 
+/* The global QWidget rule paints the page color, which would tile a darker
+   box behind every label, checkbox, and row container inside a card. */
+QFrame#card-frame QLabel,
+QFrame#card-frame QCheckBox,
+QWidget#card-row {{
+    background-color: transparent;
+}}
+
 QSpinBox {{
     background-color: {c["surface0"]};
     color: {c["text"]};

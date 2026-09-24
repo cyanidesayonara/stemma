@@ -4,12 +4,21 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QWidget,
+)
 
 from src.ui.player_controls import PlayerControls
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
-from src.ui.styles import DARK_COLORS, LIGHT_COLORS
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS, get_stylesheet
+from src.ui.waveform_stack_widget import STACK_HEIGHT, STACK_MAX_HEIGHT
 
 
 @pytest.fixture(scope="module")
@@ -315,6 +324,144 @@ def test_practice_cards_wrap_when_the_rack_is_too_narrow(controls):
 
     rack.close()
     rack.deleteLater()
+
+
+def _hosted_rack():
+    """A PracticeRack hosted the way PlayerControls hosts it.
+
+    A resizable scroll area with the horizontal scrollbar off lets its
+    content be no narrower than the content's minimum size, which is what
+    held the side-by-side cards at three-card width. A plain layout squeezes
+    the rack below its minimum anyway and would hide the bug.
+    """
+    host = QScrollArea()
+    host.setWidgetResizable(True)
+    host.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    rack = PracticeRack(SongInfoBar())
+    host.setWidget(rack)
+    host.setMinimumSize(200, 100)
+    host.show()
+    return host, rack
+
+
+def test_cards_rewrap_when_the_available_width_shrinks(qapp):
+    """Standing side by side must not lock the rack at three-card width.
+
+    The cards' minimum width propagated up as the rack's own minimum, so once
+    side by side the rack could never be given less room: when a scrollbar
+    appeared it overflowed the scroll area and was clipped instead of
+    wrapping.
+    """
+    host, rack = _hosted_rack()
+    needed = rack._required_card_width()
+
+    host.resize(needed + 80, 400)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+
+    host.resize(needed - 40, 400)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert rack.width() <= host.viewport().width()
+    assert rack.cards_side_by_side is False
+
+    host.close()
+    host.deleteLater()
+
+
+def test_cards_rewrap_when_their_content_grows(qapp):
+    """Setting loop points widens the loop card with "A: 0:12  B: 0:21".
+
+    At 1366px with six stems that pushed the cards past the rack's width,
+    and nothing reflowed them because the window itself had not resized.
+    """
+    host, rack = _hosted_rack()
+    host.resize(rack._required_card_width() + 10, 400)
+    QApplication.processEvents()
+    assert rack.cards_side_by_side is True
+
+    rack._loop_label.setText("A: 0:12  B: 0:21  (looping)")
+    # The size change travels label -> card frame -> card -> rack as a chain
+    # of posted layout requests, which takes more than one event-loop pass.
+    for _ in range(3):
+        QApplication.processEvents()
+
+    assert rack._required_card_width() > rack.width()
+    assert rack.cards_side_by_side is False
+
+    host.close()
+    host.deleteLater()
+
+
+def test_card_contents_do_not_paint_the_page_background(qapp):
+    """Empty labels and row containers inside a card must be see-through.
+
+    The global ``QWidget`` rule paints every widget in the page color, so
+    each label, checkbox, and row container drew a darker box over the
+    card's own background -- visible as stray tiles beside Clear and Speed,
+    and as a tall dark band behind Count-in in a large window.
+    """
+    rack = PracticeRack(SongInfoBar())
+    rack.setStyleSheet(get_stylesheet("dark"))
+    rack.resize(1400, 400)
+    rack.show()
+    QApplication.processEvents()
+
+    image = rack.grab().toImage()
+    mantle = QColor(DARK_COLORS["mantle"])
+    # The count-in beat label is fixed-width and empty until count-in runs,
+    # so its center shows whatever sits behind it.
+    label = rack._count_in_label
+    center = label.mapTo(rack, label.rect().center())
+    assert image.pixelColor(center).name() == mantle.name()
+
+    rack.close()
+    rack.deleteLater()
+
+
+def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
+    """A tall window should grow the waveform, not stretch the cards.
+
+    Expanding cards pulled the spare height into themselves and spread their
+    rows apart, leaving the waveform at its preferred height with empty
+    space both inside the cards and below the mixer.
+    """
+    controls.set_stem_names(["vocals", "drums", "bass", "other"])
+    controls.resize(1800, 1100)
+    controls.show()
+    QApplication.processEvents()
+
+    waveform = controls._waveform_panel.waveform
+    assert STACK_HEIGHT < waveform.height() <= STACK_MAX_HEIGHT
+    # The frame hugs the lanes; past the cap it must not grow on its own and
+    # leave empty bands above and below them.
+    assert controls._waveform_frame.height() <= waveform.height() + 12
+
+    cards = (
+        controls.practice_rack._loop_card,
+        controls.practice_rack._speed_card,
+        controls.practice_rack._metronome_card,
+    )
+    # Side by side, every card stretches to the tallest one so the row keeps
+    # a shared bottom edge -- but no further than that.
+    tallest = max(card.sizeHint().height() for card in cards)
+    for card in cards:
+        assert card.height() <= tallest + 2
+
+    # A shorter card's extra height belongs to its frame, not its title:
+    # titles and frame tops line up across the row.
+    assert controls.practice_rack.cards_side_by_side
+    frame_tops = {
+        card.findChild(QFrame, "card-frame").y() for card in cards
+    }
+    title_heights = {
+        card.findChild(QLabel, "title-label").height() for card in cards
+    }
+    assert len(frame_tops) == 1, frame_tops
+    assert len(title_heights) == 1, title_heights
+
+    controls.hide()
 
 
 def test_transport_is_anchored_outside_the_scrolling_content(controls):

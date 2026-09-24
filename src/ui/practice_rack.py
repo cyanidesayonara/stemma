@@ -1,6 +1,6 @@
 """Loop, trainer, speed, pitch, metronome, and count-in controls."""
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -54,15 +54,21 @@ def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("card-frame")
     frame.setFrameShape(QFrame.Shape.StyledPanel)
-    # Cards sit side by side, so they should present one shared bottom edge
-    # rather than three ragged ones set by whichever holds the most rows.
+    # Preferred still stretches each card to its grid row, so side-by-side
+    # cards share one bottom edge. Expanding also pulled a tall window's spare
+    # height into the cards, which belongs to the waveform instead.
     frame.setSizePolicy(
-        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
     )
     body = QVBoxLayout(frame)
     body.setContentsMargins(8, 6, 8, 6)
     body.setSpacing(4)
-    outer.addWidget(frame)
+    # A card shorter than its row neighbors keeps its rows packed at the top
+    # instead of spreading them apart.
+    body.setAlignment(Qt.AlignmentFlag.AlignTop)
+    # The frame takes all of a short card's extra height, so titles and
+    # frame tops stay aligned across a row instead of the title growing.
+    outer.addWidget(frame, 1)
 
     return container, body
 
@@ -99,6 +105,7 @@ class PracticeRack(QWidget):
         icon_color = QColor(DARK_COLORS["text"])
 
         self._count_in_controls = QWidget(self)
+        self._count_in_controls.setObjectName("card-row")
         count_in = QHBoxLayout(self._count_in_controls)
         count_in.setContentsMargins(0, 0, 0, 0)
 
@@ -389,6 +396,15 @@ class PracticeRack(QWidget):
         # transport corner.
         metronome_body.addWidget(self._count_in_controls)
 
+        # The rack's width comes from the space it is given, never from its
+        # cards. Otherwise three cards side by side hold the rack at their
+        # combined width, so it can never be narrowed enough to wrap them:
+        # when a scrollbar appears, or loop points widen the loop card, the
+        # rack overflows its scroll area and is clipped instead. The explicit
+        # minimum set in _reflow_cards keeps the wrapped layout whole.
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self._cards_wide: bool | None = None
         self._reflow_cards()
 
@@ -397,11 +413,28 @@ class PracticeRack(QWidget):
         super().resizeEvent(event)
         self._reflow_cards()
 
+    def event(self, event) -> bool:
+        """Reflow when card content changes size at a constant width."""
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest:
+            self._reflow_cards()
+        return handled
+
     def _required_card_width(self) -> int:
         """Width needed to stand all three cards side by side."""
         cards = (self._loop_card, self._speed_card, self._metronome_card)
         spacing = self._cards_grid.horizontalSpacing() * (len(cards) - 1)
         return sum(c.minimumSizeHint().width() for c in cards) + spacing
+
+    def _wrapped_card_width(self) -> int:
+        """Width needed with the metronome card wrapped to its own row."""
+        spacing = self._cards_grid.horizontalSpacing()
+        top = (
+            self._loop_card.minimumSizeHint().width()
+            + spacing
+            + self._speed_card.minimumSizeHint().width()
+        )
+        return max(top, self._metronome_card.minimumSizeHint().width())
 
     def _reflow_cards(self) -> None:
         """Stand the cards in one row, or wrap to two when width is short.
@@ -412,6 +445,10 @@ class PracticeRack(QWidget):
         to fragments. Wrapped, the widest row is the metronome card alone,
         which fits comfortably at the minimum window size.
         """
+        floor = self._wrapped_card_width()
+        if self.minimumWidth() != floor:
+            self.setMinimumWidth(floor)
+
         wide = self.width() >= self._required_card_width()
         if wide == self._cards_wide:
             return
