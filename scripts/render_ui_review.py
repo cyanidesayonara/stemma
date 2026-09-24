@@ -5,7 +5,7 @@ up in a rendered, styled window, which the fast suite never builds. This
 script renders one so a change can be checked by eye -- by a reviewer or a
 coding agent -- without launching the app and importing a song by hand.
 
-    python scripts/render_ui_review.py [--out DIR] [--stems 4|6]
+    python scripts/render_ui_review.py [--out DIR] [--stems 2|4|6]
         [--sizes 900x600,1366x768,1920x1080] [--themes dark,light]
 
 It writes one PNG per state, theme, and size plus an ``index.html`` contact
@@ -48,6 +48,9 @@ _BPM = 100.0
 # may also download the beat model, which the longer first wait covers.
 _DETECTION_TIMEOUT_S = 90.0
 _BUSY_MARKERS = ("detecting", "downloading")
+# The model each stem count comes from, so the fixture looks exactly like a
+# finished import of that kind: MDX two-stem, HTDemucs four- or six-stem.
+MODEL_KEYS = {2: "mdx_inst_hq3", 4: "htdemucs", 6: "htdemucs_6s"}
 
 
 def synth_stems(stem_count: int = 4, seconds: float = DURATION_S):
@@ -78,7 +81,10 @@ def synth_stems(stem_count: int = 4, seconds: float = DURATION_S):
     vocals = 0.35 * tone(melody) * phrase
 
     stems = {"vocals": vocals, "drums": drums, "bass": bass, "other": other}
-    if stem_count == 6:
+    if stem_count == 2:
+        # MDX two-stem output: vocals plus everything else as the backing.
+        stems = {"vocals": vocals, "other": drums + bass + other}
+    elif stem_count == 6:
         strum = np.exp(-6 * np.mod(t, beat * 2))
         stems["guitar"] = 0.3 * tone(roots * 4) * strum
         stems["piano"] = 0.25 * tone(roots * 3) * np.exp(-3 * phase)
@@ -114,7 +120,7 @@ def prepare_library(data_dir: str, stem_count: int):
     # A real model key plus the completion marker, exactly as a finished
     # separation leaves them; otherwise MainWindow prunes the song at startup
     # as an interrupted import.
-    model_key = "htdemucs_6s" if stem_count == 6 else "htdemucs"
+    model_key = MODEL_KEYS[stem_count]
     library = SongLibrary(data_dir)
     song = library.add_song(FIXTURE_TITLE, FIXTURE_ARTIST, mix_path, model_key)
     for name, data in stems.items():
@@ -192,7 +198,11 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
     from src.model_manager import ModelManager
     from src.player import MultiTrackPlayer
     from src.ui.main_window import MainWindow
-    from src.ui.styles import apply_tooltip_palette, get_stylesheet
+    from src.ui.styles import (
+        apply_tooltip_palette,
+        get_colors,
+        get_stylesheet,
+    )
 
     stemma_dir = platform_user_data_dir()
     library, song_id = prepare_library(stemma_dir, stem_count)
@@ -213,9 +223,10 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
             if os.path.exists(settings_path):
                 os.remove(settings_path)
             os.environ[SETTINGS_FILE_ENV] = settings_path
-            # Seed the theme and start the way main.py does, so the window
-            # picks it up through its real startup path (theme toggle icon
-            # and tooltip palette included) instead of being re-themed after.
+            # Seed the theme and start the way main.py and src/app.py do, so
+            # the window picks it up through its real startup path: theme
+            # toggle icon, tooltip palette, and the apply_theme() call that
+            # repaints icons drawn before the theme was known.
             seed = open_settings()
             seed.setValue("theme", theme)
             seed.sync()
@@ -224,6 +235,7 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
             window = MainWindow(
                 library, MultiTrackPlayer(), ModelManager(stemma_dir),
             )
+            window.apply_theme(theme, get_colors(theme))
             window.resize(width, height)
             window.show()
             _pump(app, 0.4)
@@ -306,7 +318,9 @@ def _parse_sizes(text: str) -> tuple[tuple[int, int], ...]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default=os.path.join(DEFAULT_OUT, "latest"))
-    parser.add_argument("--stems", type=int, choices=(4, 6), default=4)
+    parser.add_argument(
+        "--stems", type=int, choices=sorted(MODEL_KEYS), default=4,
+    )
     parser.add_argument(
         "--sizes",
         type=_parse_sizes,

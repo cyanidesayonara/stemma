@@ -15,6 +15,7 @@ from src.separation_state import separation_is_complete
 
 
 @pytest.mark.parametrize("count, names", [
+    (2, {"vocals", "other"}),
     (4, {"vocals", "drums", "bass", "other"}),
     (6, {"vocals", "drums", "bass", "other", "guitar", "piano"}),
 ])
@@ -30,10 +31,11 @@ def test_synth_stems_are_deterministic_stereo(count, names):
         np.testing.assert_array_equal(data, second[name])
 
 
-def test_prepared_song_survives_the_startup_prune(tmp_path):
+@pytest.mark.parametrize("count", [2, 4, 6])
+def test_prepared_song_survives_the_startup_prune(tmp_path, count):
     """MainWindow prunes songs that do not look fully separated; the fixture
     must look exactly like a finished import or it silently vanishes."""
-    library, song_id = prepare_library(str(tmp_path), 4)
+    library, song_id = prepare_library(str(tmp_path), count)
     song = library.get_song(song_id)
 
     assert [s.title for s in library.songs] == [FIXTURE_TITLE]
