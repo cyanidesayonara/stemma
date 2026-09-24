@@ -53,6 +53,8 @@ _MUTED_LANE_OPACITY = 0.15
 _MUTED_LANE_OPACITY_LIGHT = 0.3
 
 
+# Must match src.player.RECORDING_STEM_PREFIX; not imported, to keep this
+# widget free of the player's sounddevice import.
 _TAKE_PREFIX = "recording_take"
 
 
@@ -65,8 +67,10 @@ def lane_label(stem_name: str) -> str:
     """
     if stem_name.startswith(_TAKE_PREFIX):
         number = stem_name[len(_TAKE_PREFIX):]
-        if number.isdigit():
-            return f"take {number}"
+        # ASCII digits through int(), as the mixer names takes, so a stray
+        # "recording_take01" reads "take 1" in both places.
+        if number.isascii() and number.isdigit():
+            return f"take {int(number)}"
     return stem_name[:6]
 
 
