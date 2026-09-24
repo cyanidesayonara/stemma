@@ -27,7 +27,6 @@ scope or date. Each upcoming version has a GitHub milestone.
   — one hands-on pass on the merged build, then screenshots
   ([#146](https://github.com/cyanidesayonara/stemma/issues/146)),
   changelog, tag, and Store submission.
-- [#158: remove the unused `WaveformWidget`](https://github.com/cyanidesayonara/stemma/issues/158).
 
 ## v3.1 -- library and setlists
 

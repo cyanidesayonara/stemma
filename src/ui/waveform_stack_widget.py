@@ -2,7 +2,7 @@
 
 Each stem gets an equal vertical slice with colored bars, a small label on
 the left, and shared playback cursor / loop markers across the full height.
-Supports click-to-seek and drag-to-seek like WaveformWidget.
+Supports click-to-seek and drag-to-seek.
 """
 
 from __future__ import annotations
