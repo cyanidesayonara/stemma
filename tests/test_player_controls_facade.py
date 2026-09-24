@@ -18,7 +18,11 @@ from src.ui.player_controls import PlayerControls
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS, get_stylesheet
-from src.ui.waveform_stack_widget import STACK_HEIGHT, STACK_MAX_HEIGHT
+from src.ui.waveform_stack_widget import (
+    LANE_MAX_HEIGHT,
+    STACK_HEIGHT,
+    STACK_MAX_HEIGHT,
+)
 
 
 @pytest.fixture(scope="module")
@@ -430,7 +434,8 @@ def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
     controls.set_stem_names(["vocals", "drums", "bass", "other"])
     controls.resize(1800, 1100)
     controls.show()
-    QApplication.processEvents()
+    for _ in range(3):
+        QApplication.processEvents()
 
     waveform = controls._waveform_panel.waveform
     assert STACK_HEIGHT < waveform.height() <= STACK_MAX_HEIGHT
@@ -460,6 +465,40 @@ def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
     }
     assert len(frame_tops) == 1, frame_tops
     assert len(title_heights) == 1, title_heights
+
+    controls.hide()
+
+
+def test_two_stem_songs_do_not_get_giant_lanes(controls):
+    """The waveform's height cap follows the mixer rows, takes included."""
+    controls.set_stem_names(["vocals", "other"])
+    controls.resize(1800, 1100)
+    controls.show()
+    # Layout settles over several posted-event passes.
+    for _ in range(3):
+        QApplication.processEvents()
+
+    waveform = controls._waveform_panel.waveform
+    assert waveform.height() <= STACK_HEIGHT
+    assert controls._waveform_frame.height() <= waveform.height() + 12
+    # With the waveform capped, the leftover height must collect below the
+    # mixer rather than stretch the practice cards.
+    cards = (
+        controls.practice_rack._loop_card,
+        controls.practice_rack._speed_card,
+        controls.practice_rack._metronome_card,
+    )
+    tallest = max(card.sizeHint().height() for card in cards)
+    assert all(card.height() <= tallest + 2 for card in cards)
+
+    controls.add_recording_row("recording_take1", "Take 1")
+    controls.add_recording_row("recording_take2", "Take 2")
+    QApplication.processEvents()
+    assert waveform.maximumHeight() == 4 * LANE_MAX_HEIGHT
+
+    controls.clear_recording_rows()
+    QApplication.processEvents()
+    assert waveform.maximumHeight() == STACK_HEIGHT
 
     controls.hide()
 

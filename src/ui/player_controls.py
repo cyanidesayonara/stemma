@@ -504,6 +504,7 @@ class PlayerControls(QWidget):
         self._controls_scroll.setVisible(has_stems)
         self._transport_bar.setVisible(has_stems)
         self._stem_mixer.set_stem_names(stem_names)
+        self._sync_waveform_lane_capacity()
 
         self._speed_combo.blockSignals(True)
         self._speed_combo.setCurrentText("1.0x")
@@ -1901,15 +1902,23 @@ class PlayerControls(QWidget):
         self, stem_name: str, display_name: str
     ) -> RecordingStemRow:
         """Add a recording take row to the recordings section."""
-        return self._stem_mixer.add_recording_row(stem_name, display_name)
+        row = self._stem_mixer.add_recording_row(stem_name, display_name)
+        self._sync_waveform_lane_capacity()
+        return row
 
     def remove_recording_row(self, stem_name: str) -> None:
         """Remove a recording take row by stem name."""
         self._stem_mixer.remove_recording_row(stem_name)
+        self._sync_waveform_lane_capacity()
 
     def clear_recording_rows(self) -> None:
         """Remove all recording rows."""
         self._stem_mixer.clear_recording_rows()
+        self._sync_waveform_lane_capacity()
+
+    def _sync_waveform_lane_capacity(self) -> None:
+        """Size the waveform's height cap to one lane per mixer row."""
+        self._waveform.set_lane_capacity(len(self._stem_mixer.stem_names()))
 
     @property
     def recording_count(self) -> int:

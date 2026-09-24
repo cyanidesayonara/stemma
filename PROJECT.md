@@ -183,7 +183,9 @@ stemma/
   - **`waveform_panel.py`** / **`waveform_stack_widget.py`** — Stacked
     per-stem waveform lanes in stem colors with a shared playhead, A-B loop
     shading, click/drag-to-seek, and mute/solo shown as lane dimming. The
-    stack prefers 280px and yields to a 120px floor in short windows.
+    stack prefers 280px, yields to a 120px floor in short windows, and in
+    tall windows grows into spare height up to about 110px per lane (520px
+    at most, never capped below 280px).
   - **`song_info_bar.py`** — Key, live chord, and tempo readout strip.
   - **`practice_rack.py`** — Loop and Trainer, Speed and Pitch, and
     Metronome and Count-in cards, which wrap to two rows in narrow windows.

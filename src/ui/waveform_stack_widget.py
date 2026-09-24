@@ -35,6 +35,11 @@ STACK_MIN_HEIGHT = 120
 # empty below the mixer, up to this cap: past it, lanes gain nothing a player
 # can read and the mixer drifts too far from the transport.
 STACK_MAX_HEIGHT = 520
+# Per-lane ceiling within that cap. One overall cap gave a two-stem song two
+# 260px lanes; this keeps each lane readable without turning it into a wall.
+# The cap never drops below STACK_HEIGHT, so few-lane songs keep the
+# preferred height.
+LANE_MAX_HEIGHT = 110
 _BAR_WIDTH = 2
 _BAR_GAP = 1
 _BAR_STEP = _BAR_WIDTH + _BAR_GAP
@@ -83,7 +88,7 @@ class WaveformStackWidget(QWidget):
         self._apply_colors(DARK_COLORS)
 
         self.setMinimumHeight(STACK_MIN_HEIGHT)
-        self.setMaximumHeight(STACK_MAX_HEIGHT)
+        self.set_lane_capacity(0)
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -125,6 +130,17 @@ class WaveformStackWidget(QWidget):
 
     def lane_count(self) -> int:
         return len(self._lanes)
+
+    def set_lane_capacity(self, lanes: int) -> None:
+        """Cap the stack's height for *lanes* rows of waveform.
+
+        Driven by the mixer's row count rather than by the lanes drawn, so
+        the height settles when a song loads instead of jumping when its
+        peaks arrive.
+        """
+        cap = max(STACK_HEIGHT, min(STACK_MAX_HEIGHT, lanes * LANE_MAX_HEIGHT))
+        if self.maximumHeight() != cap:
+            self.setMaximumHeight(cap)
 
     def lane_opacity(self, stem_name: str) -> float:
         """Return paint opacity for *stem_name* based on mute/solo state."""
