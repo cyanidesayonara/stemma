@@ -31,9 +31,9 @@ STACK_HEIGHT = 280
 # on top of the transport, practice controls, and mixer. Below this floor the
 # lanes stop being readable, so the stack shrinks to it and no further.
 STACK_MIN_HEIGHT = 120
-# In a tall window the stack takes the spare height rather than leaving it
-# empty below the mixer, up to this cap: past it, lanes gain nothing a player
-# can read and the mixer drifts too far from the transport.
+# In a tall window the stack takes spare height up to this cap and the
+# per-lane cap below; past them, lanes gain nothing a player can read.
+# Whatever height is left collects below the mixer, above the transport.
 STACK_MAX_HEIGHT = 520
 # Per-lane ceiling within that cap. One overall cap gave a two-stem song two
 # 260px lanes; this keeps each lane readable without turning it into a wall.

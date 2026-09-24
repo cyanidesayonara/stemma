@@ -496,6 +496,11 @@ def test_two_stem_songs_do_not_get_giant_lanes(controls):
     QApplication.processEvents()
     assert waveform.maximumHeight() == 4 * LANE_MAX_HEIGHT
 
+    # Deleting one take is the normal path (MainWindow's delete button).
+    controls.remove_recording_row("recording_take1")
+    QApplication.processEvents()
+    assert waveform.maximumHeight() == 3 * LANE_MAX_HEIGHT
+
     controls.clear_recording_rows()
     QApplication.processEvents()
     assert waveform.maximumHeight() == STACK_HEIGHT
