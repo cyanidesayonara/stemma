@@ -18,6 +18,10 @@ ICON_SIZE = 24
 STEM_ICON_SIZE = 18
 
 _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
+# A disabled glyph is its normal color at this opacity, so it recedes toward
+# whatever sits behind it in either theme. Qt's generated disabled pixmap
+# blends toward white instead, which made light dark-theme glyphs brighter.
+DISABLED_ICON_OPACITY = 0.35
 
 
 def make_display_combo(combo: QComboBox) -> None:
@@ -65,8 +69,8 @@ def fit_combo_width(combo: QComboBox, extra: int = 0) -> None:
     combo.setFixedWidth(widest + 40 + extra)
 
 
-def make_icon(draw_fn, color: QColor, size: int = ICON_SIZE) -> QIcon:
-    """Create a crisp icon by painting ``draw_fn`` into a pixmap."""
+def _paint_glyph(draw_fn, color: QColor, size: int) -> QPixmap:
+    """Paint ``draw_fn`` in *color* into a transparent square pixmap."""
     pixmap = QPixmap(QSize(size, size))
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -75,7 +79,28 @@ def make_icon(draw_fn, color: QColor, size: int = ICON_SIZE) -> QIcon:
     painter.setBrush(color)
     draw_fn(painter, size)
     painter.end()
-    return QIcon(pixmap)
+    return pixmap
+
+
+def add_disabled_pixmaps(icon: QIcon, draw_fn, color: QColor,
+                         size: int) -> None:
+    """Give *icon* a dimmed glyph for the disabled mode, checked or not.
+
+    Both states use the normal color: a disabled button loses its accent
+    fill, so the dark checked-state glyph would vanish on the disabled fill.
+    """
+    dimmed = QColor(color)
+    dimmed.setAlphaF(color.alphaF() * DISABLED_ICON_OPACITY)
+    pixmap = _paint_glyph(draw_fn, dimmed, size)
+    for state in (QIcon.State.Off, QIcon.State.On):
+        icon.addPixmap(pixmap, QIcon.Mode.Disabled, state)
+
+
+def make_icon(draw_fn, color: QColor, size: int = ICON_SIZE) -> QIcon:
+    """Create a crisp icon by painting ``draw_fn`` into a pixmap."""
+    icon = QIcon(_paint_glyph(draw_fn, color, size))
+    add_disabled_pixmaps(icon, draw_fn, color, size)
+    return icon
 
 
 def make_toggle_icon(draw_fn, normal_color: QColor,
@@ -86,20 +111,14 @@ def make_toggle_icon(draw_fn, normal_color: QColor,
         (normal_color, QIcon.State.Off),
         (_CHECKED_ICON_COLOR, QIcon.State.On),
     ):
-        pixmap = QPixmap(QSize(size, size))
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        draw_fn(painter, size)
-        painter.end()
+        pixmap = _paint_glyph(draw_fn, color, size)
         for mode in (
             QIcon.Mode.Normal,
             QIcon.Mode.Active,
             QIcon.Mode.Selected,
         ):
             icon.addPixmap(pixmap, mode, state)
+    add_disabled_pixmaps(icon, draw_fn, normal_color, size)
     return icon
 
 
