@@ -867,7 +867,7 @@ class TestDetectionGeneration:
         worker.setParent.assert_called_once_with(None)
         worker.deleteLater.assert_called_once_with()
 
-    def test_late_detection_result_and_error_are_ignored(self, window):
+    def test_late_detection_result_and_error_are_ignored(self, window, qapp):
         controls = window._player_controls
         window._player._stems = {
             "vocals": np.zeros((64, 2), dtype=np.float32),
@@ -887,8 +887,9 @@ class TestDetectionGeneration:
             late_completed = controls._on_detect_completed
             late_error = controls._on_detect_error
             controls.start_detection()
-            active = workers[1]
-            workers[0].finished.connect(controls._on_detect_finished)
+            # One detection at a time (#168): the second request waits for
+            # the superseded worker instead of running beside it.
+            assert len(workers) == 1
             controls._key_label.setText("current")
 
             with patch.object(
@@ -898,10 +899,17 @@ class TestDetectionGeneration:
             ) as refresh_key:
                 late_completed(DetectionResult(beat_times=[0.1, 0.2]))
                 late_error("old failure")
-                workers[0].finished.emit()
                 set_beats.assert_not_called()
                 refresh_key.assert_not_called()
                 assert controls._key_label.text() == "current"
+
+                # The superseded worker finishing starts the queued request.
+                workers[0].running = False
+                workers[0].finished.emit()
+                qapp.processEvents()
+                assert len(workers) == 2
+                active = workers[1]
+                assert active.started
                 assert controls._detection_worker is active
 
                 active.completed.emit(

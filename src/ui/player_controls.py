@@ -128,6 +128,10 @@ class PlayerControls(QWidget):
         # Keep Python refs to old workers until their OS threads finish;
         # prevents "QThread: Destroyed while thread is still running".
         self._orphaned_workers: list[DetectionWorker] = []
+        # The newest detection request that arrived while a worker was still
+        # running, as (start_sec, end_sec, generation). Only one detection
+        # runs at a time; requests in between are dropped (see _run_detection).
+        self._queued_detection: tuple | None = None
         self._model_manager = None  # set via set_model_manager()
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
@@ -1273,7 +1277,23 @@ class PlayerControls(QWidget):
         self._detection_generation += 1
         self._pending_detect_args = None
         self._pending_detect_generation = None
+        self._queued_detection = None
         self._detach_detection_worker()
+
+    def _detection_running(self) -> bool:
+        """True while any detection worker, current or superseded, runs."""
+        current = self._detection_worker
+        if current is not None and current.isRunning():
+            return True
+        return any(worker.isRunning() for worker in self._orphaned_workers)
+
+    def _start_queued_detection(self) -> None:
+        """Run the newest request that waited for a worker to finish."""
+        if self._queued_detection is None or self._detection_running():
+            return
+        start_sec, end_sec, generation = self._queued_detection
+        self._queued_detection = None
+        self._run_detection(start_sec, end_sec, generation=generation)
 
     def _detach_detection_worker(self) -> None:
         """Disconnect and orphan the current detection worker, if any."""
@@ -1299,6 +1319,7 @@ class PlayerControls(QWidget):
     def _on_orphaned_detection_finished(self) -> None:
         worker = self.sender()
         self._reap_orphaned_detection_worker(worker)
+        self._start_queued_detection()
 
     def _reap_orphaned_detection_worker(self, worker) -> None:
         """Release a stopped detection worker retained across replacement."""
@@ -1391,6 +1412,15 @@ class PlayerControls(QWidget):
         self._detected_bpm_label.setText("Tempo: detecting...")
         self._key_label.setStyleSheet(dim_style)
         self._key_label.setText("Key: detecting...")
+
+        # One detection at a time. A superseded worker keeps running after it
+        # is detached, and rapid A-B loop clicks used to stack six or more
+        # concurrent workers (ONNX, librosa, scipy) until the process crashed
+        # (#168). Keep only the newest request and run it when the running
+        # worker finishes.
+        if self._detection_running():
+            self._queued_detection = (start_sec, end_sec, generation)
+            return
 
         worker = DetectionWorker(
             stems=dict(self._player.stems),
@@ -1543,6 +1573,7 @@ class PlayerControls(QWidget):
     def _on_detect_finished(self) -> None:
         if self._is_active_detection_sender():
             self._detection_worker = None
+        self._start_queued_detection()
 
     def _is_active_detection_sender(self) -> bool:
         worker = self.sender()
