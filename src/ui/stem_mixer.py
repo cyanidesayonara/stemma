@@ -52,7 +52,14 @@ class StemRow(QWidget):
         self._stem_name = stem_name
         self._player = player
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        self.setStyleSheet("background: transparent;")
+        # Scoped by selector: a bare declaration cascades to every child and
+        # outranks the application sheet, which stripped the accent fill from
+        # checked mute/solo buttons and left their dark checked icons blank.
+        self.setObjectName("stem-row")
+        self.setStyleSheet(
+            "QWidget#stem-row, QWidget#stem-row QLabel, "
+            "QWidget#stem-row QSlider { background: transparent; }"
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
