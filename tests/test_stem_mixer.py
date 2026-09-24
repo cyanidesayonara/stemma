@@ -143,15 +143,20 @@ class TestStemRowLayout:
         player.volumes = {}
         # Stand in for the QApplication-wide sheet without touching the app.
         host = QWidget()
-        host.setStyleSheet(get_stylesheet("dark"))
         layout = QVBoxLayout(host)
         row = StemRow("vocals", player)
         layout.addWidget(row)
         host.resize(420, 40)
         host.show()
+        QApplication.processEvents()
+        # Applied after the row is parented and shown, so every child is
+        # re-polished against it. Set before, CI occasionally grabbed the
+        # button still unstyled (Qt's default grey #dbdbdb).
+        host.setStyleSheet(get_stylesheet("dark"))
 
         toggle = getattr(row, button)
         toggle.setChecked(True)
+        toggle.ensurePolished()
         QApplication.processEvents()
 
         image = toggle.grab().toImage()
