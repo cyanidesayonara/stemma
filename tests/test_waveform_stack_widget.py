@@ -14,6 +14,7 @@ from src.ui.waveform_stack_widget import (
     STACK_MIN_HEIGHT,
     WaveformStackWidget,
 )
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 from tests.widget_visual import assert_widget_snapshot
 
 
@@ -103,6 +104,32 @@ def test_set_loop_markers(app):
     assert w._loop_b_ratio == 0.8
 
 
+def test_clear_loop_markers(app):
+    w = WaveformStackWidget()
+    w.set_loop_markers(0.2, 0.8)
+    w.set_loop_markers(None, None)
+    assert w._loop_a_ratio is None
+    assert w._loop_b_ratio is None
+
+
+def test_theme_change_invalidates_cached_lane_paths(app):
+    """A theme switch must repaint lanes in the new colors, not reuse paths."""
+    w = WaveformStackWidget()
+    w.set_stem_lanes(
+        [("vocals", np.array([0.2, 0.8, 0.4], dtype=np.float32), "#bfa3dc")],
+        muted=set(),
+        soloed=set(),
+    )
+    w.resize(300, STACK_HEIGHT)
+    w.repaint()
+    w._lanes[0].cached_size = (300, STACK_HEIGHT)
+
+    w.set_theme_colors(LIGHT_COLORS)
+
+    assert w._lanes[0].cached_size == (0, 0)
+    assert w._lanes[0].cached_path is None
+
+
 def _press_at(w, x: float) -> None:
     event = QMouseEvent(
         QEvent.Type.MouseButtonPress,
@@ -180,6 +207,17 @@ def test_paint_no_crash_without_lanes(app):
     w.repaint()
 
 
+def test_paint_no_crash_at_zero_width(app):
+    w = WaveformStackWidget()
+    w.set_stem_lanes(
+        [("vocals", np.array([0.2, 0.8], dtype=np.float32), "#bfa3dc")],
+        muted=set(),
+        soloed=set(),
+    )
+    w.resize(0, STACK_HEIGHT)
+    w.repaint()
+
+
 def test_set_loading_no_crash(app):
     w = WaveformStackWidget()
     w.resize(200, STACK_HEIGHT)
@@ -198,7 +236,6 @@ def test_muted_lane_low_opacity(app):
 
 def test_muted_lane_is_dimmed_more_gently_on_light_theme(app):
     """At the dark-theme dim level a muted lane vanishes on a light background."""
-    from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 
     w = WaveformStackWidget()
     peaks = np.array([1.0], dtype=np.float32)
