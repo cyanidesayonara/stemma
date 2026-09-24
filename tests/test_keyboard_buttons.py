@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF
 from src.ui.main_window import MainWindow
@@ -41,10 +41,18 @@ def window(app):
     QApplication.processEvents()
 
 
-def _focus(widget) -> None:
-    widget.setFocus(Qt.FocusReason.TabFocusReason)
-    QApplication.processEvents()
-    assert widget.hasFocus()
+def _tab_to(window, widget, limit: int = 200) -> None:
+    """Press real Tab keys until *widget* has focus.
+
+    setFocus(TabFocusReason) would not do: the window tracks keyboard focus
+    from Tab navigation itself.
+    """
+    for _ in range(limit):
+        if widget.hasFocus():
+            return
+        QTest.keyClick(window.windowHandle(), Qt.Key.Key_Tab)
+        QApplication.processEvents()
+    raise AssertionError(f"could not tab to {widget.accessibleName()!r}")
 
 
 def _press(window, key) -> None:
@@ -57,7 +65,7 @@ def _press(window, key) -> None:
 @pytest.mark.parametrize("key", [Qt.Key.Key_Space, Qt.Key.Key_Return])
 def test_key_presses_the_focused_button(window, key):
     panel = window._library_panel
-    _focus(panel._repeat_btn)
+    _tab_to(window, panel._repeat_btn)
     assert panel._repeat_mode == REPEAT_OFF
 
     _press(window, key)
@@ -68,7 +76,7 @@ def test_key_presses_the_focused_button(window, key):
 
 def test_space_on_a_focused_toggle_does_not_also_play(window):
     shuffle = window._library_panel._shuffle_btn
-    _focus(shuffle)
+    _tab_to(window, shuffle)
 
     _press(window, Qt.Key.Key_Space)
 
@@ -78,7 +86,8 @@ def test_space_on_a_focused_toggle_does_not_also_play(window):
 
 
 def test_space_still_plays_when_no_button_has_focus(window):
-    _focus(window._library_panel._list)
+    window._library_panel._list.setFocus()
+    QApplication.processEvents()
 
     _press(window, Qt.Key.Key_Space)
 
@@ -102,8 +111,42 @@ def test_space_after_a_mouse_click_still_plays(window):
 def test_space_after_clicking_away_from_a_tabbed_button_plays(window):
     """Keyboard focus ends when focus moves on by mouse."""
     panel = window._library_panel
-    _focus(panel._repeat_btn)
+    _tab_to(window, panel._repeat_btn)
     QTest.mouseClick(panel._shuffle_btn, Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+    mode = panel._repeat_mode
+
+    _press(window, Qt.Key.Key_Space)
+
+    assert panel._repeat_mode == mode
+    window._player.play.assert_called_once_with()
+
+
+def test_space_after_window_reactivation_still_plays(window):
+    """Qt restores focus when the window is activated again; that restored
+    focus is not keyboard focus, even though no mouse button is held."""
+    shuffle = window._library_panel._shuffle_btn
+    QTest.mouseClick(shuffle, Qt.MouseButton.LeftButton)
+    other = QWidget()
+    other.show()
+    other.activateWindow()
+    QApplication.processEvents()
+    window.activateWindow()
+    QApplication.processEvents()
+    shuffle.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+    QApplication.processEvents()
+
+    _press(window, Qt.Key.Key_Space)
+
+    assert shuffle.isChecked(), "Space re-pressed the restored button"
+    window._player.play.assert_called_once_with()
+    other.close()
+
+
+def test_programmatic_focus_is_not_keyboard_focus(window):
+    """Focus the app moves itself, such as after a dialog closes."""
+    panel = window._library_panel
+    panel._repeat_btn.setFocus(Qt.FocusReason.PopupFocusReason)
     QApplication.processEvents()
     mode = panel._repeat_mode
 

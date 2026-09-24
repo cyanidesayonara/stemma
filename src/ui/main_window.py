@@ -158,11 +158,12 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
-        # The button that last got focus from the keyboard (Tab, Shift+Tab),
-        # if it still has it. Space and Enter press only that one: buttons
-        # also take focus on a mouse click, and re-pressing a clicked button
-        # on Space broke clicking a control, then Space to play. focusChanged
-        # fires only when focus moves, unlike an application event filter.
+        # The button the user last tabbed to, if it still has focus. Space and
+        # Enter press only that one: buttons also take focus on a mouse
+        # click, and Qt restores focus when the window reactivates or a
+        # dialog closes, and re-pressing such a button on Space broke
+        # clicking a control, then Space to play. focusNextPrevChild records
+        # Tab navigation; focusChanged forgets the button when focus leaves.
         self._keyboard_focus_button: QAbstractButton | None = None
         QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self._setup_shortcuts()
@@ -463,21 +464,23 @@ class MainWindow(QMainWindow):
         if not self._press_focused_button(animate=False):
             self._on_shortcut_play_pause()
 
-    def _on_focus_changed(self, _old, new) -> None:
-        """Remember a button focused from the keyboard, forget anything else.
+    def focusNextPrevChild(self, next: bool) -> bool:  # noqa: A002, N802
+        """Record the button the user tabs to.
 
-        Focus that moves while a mouse button is held came from a click.
+        Tab and Shift+Tab bubble up to the window through
+        QWidget.focusNextPrevChild, so this sees keyboard navigation only:
+        not mouse clicks, window reactivation, or focus restored after a
+        dialog closes.
         """
-        from_keyboard = (
-            QApplication.mouseButtons() == Qt.MouseButton.NoButton
-        )
-        if (
-            from_keyboard
-            and isinstance(new, QAbstractButton)
-            and self.isAncestorOf(new)
-        ):
-            self._keyboard_focus_button = new
-        else:
+        moved = super().focusNextPrevChild(next)
+        widget = QApplication.focusWidget()
+        if isinstance(widget, QAbstractButton) and self.isAncestorOf(widget):
+            self._keyboard_focus_button = widget
+        return moved
+
+    def _on_focus_changed(self, _old, new) -> None:
+        """Forget the tabbed-to button once focus is anywhere else."""
+        if new is not self._keyboard_focus_button:
             self._keyboard_focus_button = None
 
     def _press_focused_button(self, *, animate: bool = True) -> bool:
