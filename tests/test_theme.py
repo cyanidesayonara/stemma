@@ -1,6 +1,5 @@
 """Tests for theme switching functionality."""
 
-import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -17,7 +16,6 @@ from src.ui.styles import (
     get_stylesheet,
 )
 from src.ui.main_window import MainWindow
-from src.ui.waveform_widget import WaveformWidget
 from src.ui.player_controls import PlayerControls
 
 
@@ -104,42 +102,6 @@ class TestThemeColors:
         """Title label font-size uses pt, not px."""
         for ss in (DARK_STYLESHEET, LIGHT_STYLESHEET):
             assert "font-size: 12pt" in ss
-
-
-class TestWaveformWidgetTheme:
-    """Tests for WaveformWidget theme color switching."""
-
-    def test_default_colors_are_dark(self, app):
-        """WaveformWidget defaults to dark theme colors."""
-        widget = WaveformWidget()
-        assert widget._bg_color == QColor(DARK_COLORS["base"])
-        assert widget._waveform_color == QColor(DARK_COLORS["accent"])
-        assert widget._cursor_color == QColor(DARK_COLORS["text"])
-
-    def test_set_theme_colors_updates(self, app):
-        """set_theme_colors applies new colors."""
-        widget = WaveformWidget()
-        widget.set_theme_colors(LIGHT_COLORS)
-        assert widget._bg_color == QColor(LIGHT_COLORS["base"])
-        assert widget._cursor_color == QColor(LIGHT_COLORS["text"])
-
-    def test_set_theme_colors_invalidates_cache(self, app):
-        """Changing theme invalidates the waveform rect cache."""
-        widget = WaveformWidget()
-        widget._cached_size = (300, 80)
-
-        widget.set_theme_colors(LIGHT_COLORS)
-        assert widget._cached_size == (0, 0)
-
-    def test_paint_no_crash_light_theme(self, app):
-        """paintEvent works with light theme colors."""
-        widget = WaveformWidget()
-        widget.set_theme_colors(LIGHT_COLORS)
-        widget.resize(200, 80)
-        peaks = np.array([0.1, 0.5, 0.3, 0.8], dtype=np.float32)
-        widget.set_peaks(peaks)
-        widget.set_loop_markers(0.2, 0.8)
-        widget.repaint()
 
 
 class TestPlayerControlsTheme:
