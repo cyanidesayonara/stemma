@@ -33,7 +33,7 @@ STACK_HEIGHT = 280
 STACK_MIN_HEIGHT = 120
 # In a tall window the stack takes spare height up to this cap and the
 # per-lane cap below; past them, lanes gain nothing a player can read.
-# Whatever height is left collects below the mixer, above the transport.
+# Whatever height is left opens between the practice cards and the mixer.
 STACK_MAX_HEIGHT = 520
 # Per-lane ceiling within that cap. One overall cap gave a two-stem song two
 # 260px lanes; this keeps each lane readable without turning it into a wall.

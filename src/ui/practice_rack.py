@@ -403,7 +403,7 @@ class PracticeRack(QWidget):
         # rack overflows its scroll area and is clipped instead. The explicit
         # minimum set in _reflow_cards keeps the wrapped layout whole.
         # Vertically the rack never grows past its content: once the waveform
-        # reaches its cap, spare height collects below the mixer instead of
+        # reaches its cap, spare height opens above the mixer instead of
         # stretching the cards.
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Maximum

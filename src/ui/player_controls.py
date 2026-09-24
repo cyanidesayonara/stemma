@@ -252,12 +252,14 @@ class PlayerControls(QWidget):
         self._waveform_panel = WaveformPanel(self)
         self._stem_mixer = StemMixer(self._player, self)
 
-        # The waveform takes a tall window's spare height up to its cap; only
-        # what remains past that collects below the mixer.
+        # The waveform takes a tall window's spare height up to its cap.
+        # Whatever is left opens between the practice cards and the mixer,
+        # so the mixer stays on the anchored transport below it: those are
+        # the controls a player reaches for between takes.
         controls_layout.addWidget(self._waveform_panel, 1)
         controls_layout.addWidget(self._practice_rack)
-        controls_layout.addWidget(self._stem_mixer)
         controls_layout.addStretch()
+        controls_layout.addWidget(self._stem_mixer)
 
         # The window may be as short as 600px. Waveform, practice cards, and
         # mixer together ask for more than that, and a squeezed QVBoxLayout

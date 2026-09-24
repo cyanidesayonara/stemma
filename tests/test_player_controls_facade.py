@@ -491,6 +491,14 @@ def test_two_stem_songs_do_not_get_giant_lanes(controls):
     tallest = max(card.sizeHint().height() for card in cards)
     assert all(card.height() <= tallest + 2 for card in cards)
 
+    # The leftover opens between the cards and the mixer, so the mixer sits
+    # on the anchored transport, where a player reaches between takes.
+    rack = controls.practice_rack
+    mixer = controls.stem_mixer
+    column = controls._controls_widget
+    assert mixer.geometry().bottom() >= column.height() - 12
+    assert mixer.geometry().top() - rack.geometry().bottom() > 100
+
     controls.add_recording_row("recording_take1", "Take 1")
     controls.add_recording_row("recording_take2", "Take 2")
     QApplication.processEvents()
