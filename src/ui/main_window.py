@@ -15,6 +15,7 @@ from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
+    QKeyEvent,
     QKeySequence,
     QPainter,
     QPixmap,
@@ -157,6 +158,13 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
+        # The button that last got focus from the keyboard (Tab, Shift+Tab),
+        # if it still has it. Space and Enter press only that one: buttons
+        # also take focus on a mouse click, and re-pressing a clicked button
+        # on Space broke clicking a control, then Space to play. focusChanged
+        # fires only when focus moves, unlike an application event filter.
+        self._keyboard_focus_button: QAbstractButton | None = None
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self._setup_shortcuts()
         self._connect_signals()
         self._restore_state()
@@ -293,7 +301,9 @@ class MainWindow(QMainWindow):
         u = self._unguarded_shortcut  # Unguarded: always fires.
 
         # -- Playback --
-        g(Qt.Key.Key_Space, self._on_space_shortcut)
+        # No auto-repeat: holding Space flipped a focused toggle about 30
+        # times a second, and made play/pause flutter.
+        g(Qt.Key.Key_Space, self._on_space_shortcut).setAutoRepeat(False)
         g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
@@ -357,7 +367,7 @@ class MainWindow(QMainWindow):
         # -- Help -- unguarded: F-keys don't collide with text entry.
         u(Qt.Key.Key_F1, self._on_keyboard_shortcuts)
 
-    def _guarded_shortcut(self, key, handler) -> None:
+    def _guarded_shortcut(self, key, handler) -> QShortcut:
         """Register *handler* for *key*, skipped when a text input is focused.
 
         Prevents single-letter/digit shortcuts from stealing keystrokes
@@ -367,7 +377,9 @@ class MainWindow(QMainWindow):
             if self._text_input_has_focus():
                 return
             handler()
-        QShortcut(QKeySequence(key), self).activated.connect(wrapped)
+        shortcut = QShortcut(QKeySequence(key), self)
+        shortcut.activated.connect(wrapped)
+        return shortcut
 
     def _unguarded_shortcut(self, key, handler) -> None:
         """Register *handler* for *key*. Fires regardless of focus."""
@@ -451,11 +463,33 @@ class MainWindow(QMainWindow):
         if not self._press_focused_button(animate=False):
             self._on_shortcut_play_pause()
 
+    def _on_focus_changed(self, _old, new) -> None:
+        """Remember a button focused from the keyboard, forget anything else.
+
+        Focus that moves while a mouse button is held came from a click.
+        """
+        from_keyboard = (
+            QApplication.mouseButtons() == Qt.MouseButton.NoButton
+        )
+        if (
+            from_keyboard
+            and isinstance(new, QAbstractButton)
+            and self.isAncestorOf(new)
+        ):
+            self._keyboard_focus_button = new
+        else:
+            self._keyboard_focus_button = None
+
     def _press_focused_button(self, *, animate: bool = True) -> bool:
-        """Click the focused enabled button in this window, if there is one."""
+        """Click the keyboard-focused enabled button, if there is one.
+
+        Only keyboard focus counts: a clicked button keeps focus, but Space
+        should still play or pause afterwards.
+        """
         widget = QApplication.focusWidget()
         if (
-            isinstance(widget, QAbstractButton)
+            widget is self._keyboard_focus_button
+            and isinstance(widget, QAbstractButton)
             and widget.isEnabled()
             and widget.isVisible()
             and self.isAncestorOf(widget)
@@ -467,7 +501,7 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Let Enter press the focused button.
 
         Buttons outside dialogs ignore Enter, so it bubbles up to here.
@@ -576,6 +610,7 @@ class MainWindow(QMainWindow):
             + section("Playback", first=True)
             + row("Space", "Play / Pause (presses a focused button)")
             + row("Enter", "Press the focused button")
+            + row("Tab", "Move keyboard focus between controls")
             + row("S", "Stop")
             + section("Navigation")
             + row("0-9", "Jump to 0%–90% position")
