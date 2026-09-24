@@ -1,8 +1,9 @@
 # Changelog
 
-Shipped releases are listed in reverse chronological order. Detailed
-implementation-session notes, including unreleased development work, are
-preserved in [`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md).
+Shipped releases are listed in reverse chronological order. The detail
+behind each change lives in its pull request; implementation notes up to
+August 2026 are archived in
+[`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md).
 
 Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is

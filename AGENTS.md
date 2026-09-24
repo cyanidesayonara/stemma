@@ -11,8 +11,8 @@ mute/solo any stem, and play along with your instrument.
 
 Local-only. No cloud, no subscriptions, no command line needed by the end user.
 
-Latest stable release: **v2.5.0**. The current `main` line and this branch
-target **v2.6.0**, which is not released.
+Latest stable release: **v2.6.0**. The current `main` line targets
+**v3.0**, which is not released. See "Current Status" below.
 
 Canonical documents:
 
@@ -21,7 +21,9 @@ Canonical documents:
   contribution workflow
 - `docs/ROADMAP.md`: concise roadmap backed by live GitHub issues
 - `CHANGELOG.md`: shipped release notes only
-- `docs/DEVELOPMENT_LOG.md`: historical session and implementation notes
+- Pull request descriptions: the record of each change (what, why, how,
+  testing). `docs/DEVELOPMENT_LOG.md` is an archive and is no longer
+  updated.
 
 ## Tech Stack
 
@@ -77,7 +79,7 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Verified against GitHub Releases on 2026-08-01:
+Verified against GitHub Releases on 2026-09-23:
 
 - Latest stable: **v2.6.0**
 - Current source on `main` targets **v3.0** (unreleased)

@@ -384,3 +384,13 @@ def test_shutdown_is_idempotent_before_component_deletion(
     qapp.processEvents()
 
     worker.wait.assert_called_once_with()
+
+
+def test_speed_tooltip_names_the_real_shortcut(controls):
+    """The Speed tooltip advertised [ / ], which are not bound; speed is on
+    Shift+Up / Shift+Down (see MainWindow shortcuts and Help > Keyboard
+    Shortcuts)."""
+    tip = controls.practice_rack.speed_combo.toolTip()
+
+    assert "Shift+Up" in tip
+    assert "[" not in tip

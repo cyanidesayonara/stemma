@@ -1,9 +1,10 @@
-# Development log
+# Development log (archived)
 
-Historical development-session and implementation notes are preserved here
-in reverse chronological order. These notes describe work performed; they do
-not establish release status. See `../CHANGELOG.md` and GitHub Releases for
-shipped versions.
+This log is no longer updated. Since August 2026 the record of each change
+is its pull request description, and shipped releases are summarized in
+`../CHANGELOG.md`. The notes below are kept for history, in reverse
+chronological order. They describe work performed and do not establish
+release status.
 
 ---
 
