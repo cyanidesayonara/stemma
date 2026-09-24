@@ -436,9 +436,6 @@ class LibraryPanel(QWidget):
         # Repeat (cycles: off → all → one)
         self._repeat_btn = QPushButton()
         self._repeat_btn.setObjectName("icon-btn")
-        # Checkable so :checked styling applies. A click toggles it first,
-        # then _on_repeat_clicked sets it from the new mode.
-        self._repeat_btn.setCheckable(True)
         self._repeat_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
         self._repeat_btn.setToolTip("Repeat: off")
         self._repeat_btn.setAccessibleName("Repeat")
@@ -541,11 +538,21 @@ class LibraryPanel(QWidget):
         self._repeat_btn.setIcon(self._repeat_icons[self._repeat_mode])
         labels = {REPEAT_OFF: "off", REPEAT_ALL: "all", REPEAT_ONE: "one"}
         self._repeat_btn.setToolTip(f"Repeat: {labels[self._repeat_mode]}")
-        # The button stays checkable and its checked state mirrors the mode,
-        # so the app sheet's :checked rules give it the accent fill plus the
-        # same hover, pressed, and focus feedback as every other toggle. A
-        # widget stylesheet here outranked all of that.
-        self._repeat_btn.setChecked(self._repeat_mode != REPEAT_OFF)
+        self._repeat_btn.setAccessibleName(
+            f"Repeat {labels[self._repeat_mode]}"
+        )
+        # Repeat cycles three modes, so it stays a plain button: checkable, it
+        # became a checkbox to assistive tech, whose Toggle action flipped the
+        # look without changing the mode. The "active" property lets the app
+        # sheet style it with the :checked rules (accent fill plus hover and
+        # focus feedback); a widget stylesheet here outranked all of that.
+        active = self._repeat_mode != REPEAT_OFF
+        if self._repeat_btn.property("active") != active:
+            self._repeat_btn.setProperty("active", active)
+            style = self._repeat_btn.style()
+            style.unpolish(self._repeat_btn)
+            style.polish(self._repeat_btn)
+            self._repeat_btn.update()
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"

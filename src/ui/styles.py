@@ -193,21 +193,28 @@ QPushButton#icon-btn:pressed {{
 }}
 
 QPushButton#icon-btn:focus {{
-    border: 1px solid {c["surface2"]};
+    border: 1px solid {c["accent"]};
 }}
 
-QPushButton#icon-btn:checked {{
+/* [active="true"] is for multi-state buttons (library Repeat) that must
+   not be checkable; it matches :checked in specificity. */
+QPushButton#icon-btn:checked,
+QPushButton#icon-btn[active="true"] {{
     background-color: {c["accent"]};
     color: {c["on_accent"]};
     border: 1px solid {c["accent"]};
 }}
 
-QPushButton#icon-btn:checked:hover {{
+QPushButton#icon-btn:checked:hover,
+QPushButton#icon-btn[active="true"]:hover {{
     border: 1px solid {c["on_accent"]};
 }}
 
-QPushButton#icon-btn:checked:focus {{
-    border: 1px solid {c["on_accent"]};
+/* The text color, not on_accent: a near-black border vanishes against the
+   dark page, and a focus ring identical to hover looked stuck in hover. */
+QPushButton#icon-btn:checked:focus,
+QPushButton#icon-btn[active="true"]:focus {{
+    border: 1px solid {c["text"]};
 }}
 
 QPushButton#icon-btn:disabled {{
