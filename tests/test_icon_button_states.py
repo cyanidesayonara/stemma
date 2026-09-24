@@ -227,13 +227,15 @@ def test_every_icon_builder_dims_its_disabled_glyph(app, builder):
     assert disabled < normal * 0.5
 
 
-@pytest.mark.parametrize("theme", ["dark", "light"])
-def test_focused_icon_button_shows_it(app, theme):
-    """Tabbing through the controls must show where keyboard focus is."""
-    host, button, colors = _hosted_button(theme)
+@pytest.mark.parametrize("checked", [False, True])
+def test_focus_is_left_to_the_native_focus_rectangle(app, checked):
+    """No stylesheet focus border: the native Windows style draws its own
+    focus rectangle on keyboard focus and hides it after a mouse click. A
+    :focus border doubled that ring and stayed after clicks."""
+    host, button, colors = _hosted_button("dark")
+    button.setChecked(checked)
+    QApplication.processEvents()
 
-    # The only focusable widget in the window holds focus, so strip the flag
-    # for the unfocused render rather than relying on focus moving away.
     unfocused = _render_in_state(
         button,
         QStyle.StateFlag.State_None,
@@ -241,23 +243,7 @@ def test_focused_icon_button_shows_it(app, theme):
     )
     focused = _render_in_state(button, QStyle.StateFlag.State_HasFocus)
 
-    assert _border(unfocused) == QColor(colors["surface1"]).name()
-    # The accent, as sliders, lists, and text fields use: surface2 was under
-    # 3:1 against the page and hard to see at 1x.
-    assert _border(focused) == QColor(colors["accent"]).name()
-    host.close()
-
-
-def test_checked_focused_icon_button_keeps_accent_and_shows_focus(app):
-    host, button, colors = _hosted_button("dark")
-    button.setChecked(True)
-    QApplication.processEvents()
-
-    focused = _render_in_state(button, QStyle.StateFlag.State_HasFocus)
-
-    assert focused.pixelColor(4, 18).name() == QColor(colors["accent"]).name()
-    # Distinct from checked hover (on_accent), and visible on the dark page.
-    assert _border(focused) == QColor(colors["text"]).name()
+    assert _border(focused) == _border(unfocused)
     host.close()
 
 
