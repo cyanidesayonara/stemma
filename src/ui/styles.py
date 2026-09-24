@@ -183,7 +183,10 @@ QPushButton#icon-btn {{
 /* The ID selector above outranks QPushButton:hover/:pressed/:disabled, so
    icon buttons restate them. Hover and pressed come before the :checked
    rules so a checked button keeps its accent; disabled comes after them so
-   a disabled button always reads as disabled. */
+   a disabled button always reads as disabled. There is deliberately no
+   :focus rule: the native Windows style already draws a focus rectangle on
+   keyboard focus and hides it after a mouse click; a :focus border stayed
+   after clicks and doubled the native ring. */
 QPushButton#icon-btn:hover {{
     background-color: {c["surface1"]};
 }}
@@ -192,13 +195,17 @@ QPushButton#icon-btn:pressed {{
     background-color: {c["surface2"]};
 }}
 
-QPushButton#icon-btn:checked {{
+/* [active="true"] is for multi-state buttons (library Repeat) that must
+   not be checkable; it matches :checked in specificity. */
+QPushButton#icon-btn:checked,
+QPushButton#icon-btn[active="true"] {{
     background-color: {c["accent"]};
     color: {c["on_accent"]};
     border: 1px solid {c["accent"]};
 }}
 
-QPushButton#icon-btn:checked:hover {{
+QPushButton#icon-btn:checked:hover,
+QPushButton#icon-btn[active="true"]:hover {{
     border: 1px solid {c["on_accent"]};
 }}
 
