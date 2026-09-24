@@ -34,7 +34,7 @@ sys.path.insert(0, _ROOT)
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 
-from scripts.generate_screenshots import _load_ui_font, _pump  # noqa: E402
+from scripts.qt_capture import load_ui_font, pump  # noqa: E402
 
 DEFAULT_OUT = os.path.join(_ROOT, "build", "ui-review")
 DEFAULT_SIZES = ((900, 600), (1366, 768), (1920, 1080))
@@ -148,7 +148,7 @@ def _wait_for_detection(app, controls, timeout_s: float) -> bool:
             marker in text for marker in _BUSY_MARKERS for text in texts
         ):
             return True
-        _pump(app, 0.2)
+        pump(app, 0.2)
     return False
 
 
@@ -163,10 +163,10 @@ def _stage_practice(app, window) -> None:
     player = window._player
     total = player.total_seconds
     player.seek(total * 0.25)
-    _pump(app, 0.1)
+    pump(app, 0.1)
     controls._loop_a_btn.click()
     player.seek(total * 0.45)
-    _pump(app, 0.1)
+    pump(app, 0.1)
     controls._loop_b_btn.click()
     if not controls._loop_toggle_btn.isChecked():
         controls._loop_toggle_btn.click()
@@ -174,27 +174,34 @@ def _stage_practice(app, window) -> None:
     if drums is not None:
         drums._mute_btn.click()
     player.seek(total * 0.34)
-    _pump(app, 0.4)
+    pump(app, 0.4)
 
 
 STATES = ("empty", "loaded", "practice")
 
 
-def render(out_dir, sizes, themes, stem_count) -> list[dict]:
-    """Render every state/theme/size and return one record per image."""
-    data_dir = os.path.join(DEFAULT_OUT, ".data")
+def start_app(data_dir: str):
+    """Create the offscreen QApplication with a private LOCALAPPDATA."""
     os.environ["LOCALAPPDATA"] = data_dir
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
     # Deferred so importing this module stays light: the tests import its
     # fixture helpers without creating a QApplication or loading src.ui.
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(sys.argv)
-    _load_ui_font(app)
+    load_ui_font(app)
+    return app
 
+
+def open_window(app, library, stemma_dir, settings_path, theme, size):
+    """Open a MainWindow in *theme* at *size* on a fresh settings file.
+
+    A fresh settings file per window, never the user's real store: each
+    window saves its session on close, and the next would otherwise restore
+    it (auto-loading the song into the "empty" state, and re-applying the
+    previous loop and mute so the practice staging toggled them back off).
+    """
     from src.app_settings import SETTINGS_FILE_ENV, open_settings
-    from src.data_paths import platform_user_data_dir
     from src.model_manager import ModelManager
     from src.player import MultiTrackPlayer
     from src.ui.main_window import MainWindow
@@ -204,6 +211,51 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
         get_stylesheet,
     )
 
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    if os.path.exists(settings_path):
+        os.remove(settings_path)
+    os.environ[SETTINGS_FILE_ENV] = settings_path
+    # Seed the theme and start the way main.py and src/app.py do, so the
+    # window picks it up through its real startup path: theme toggle icon,
+    # tooltip palette, and the apply_theme() call that repaints icons drawn
+    # before the theme was known.
+    seed = open_settings()
+    seed.setValue("theme", theme)
+    seed.sync()
+    app.setStyleSheet(get_stylesheet(theme))
+    apply_tooltip_palette(theme)
+    window = MainWindow(library, MultiTrackPlayer(), ModelManager(stemma_dir))
+    window.apply_theme(theme, get_colors(theme))
+    window.resize(*size)
+    window.show()
+    pump(app, 0.4)
+    return window
+
+
+def load_song(app, window, song_id, timeout_s: float) -> None:
+    """Select *song_id* and wait for its detection to settle."""
+    window._library_panel.select_song(song_id)
+    pump(app, 1.5)
+    if not _wait_for_detection(app, window._player_controls, timeout_s):
+        print("  note: detection still busy at capture")
+    window._player.seek(window._player.total_seconds * 0.34)
+    pump(app, 0.4)
+
+
+def close_window(app, window) -> None:
+    window._player.shutdown()
+    window._player_controls.shutdown()
+    window.close()
+    pump(app, 0.2)
+
+
+def render(out_dir, sizes, themes, stem_count) -> list[dict]:
+    """Render every state/theme/size and return one record per image."""
+    data_dir = os.path.join(DEFAULT_OUT, ".data")
+    app = start_app(data_dir)
+
+    from src.data_paths import platform_user_data_dir
+
     stemma_dir = platform_user_data_dir()
     library, song_id = prepare_library(stemma_dir, stem_count)
     os.makedirs(out_dir, exist_ok=True)
@@ -212,52 +264,25 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
     first_load = True
     for theme in themes:
         for width, height in sizes:
-            # A fresh settings file per window, never the user's real store.
-            # Each window saves its session on close, and the next would
-            # otherwise restore it: auto-loading the song into the "empty"
-            # state, and re-applying the previous loop and mute so the
-            # practice staging toggled them back off.
             settings_path = os.path.join(
                 data_dir, "settings", f"{theme}-{width}x{height}.ini",
             )
-            if os.path.exists(settings_path):
-                os.remove(settings_path)
-            os.environ[SETTINGS_FILE_ENV] = settings_path
-            # Seed the theme and start the way main.py and src/app.py do, so
-            # the window picks it up through its real startup path: theme
-            # toggle icon, tooltip palette, and the apply_theme() call that
-            # repaints icons drawn before the theme was known.
-            seed = open_settings()
-            seed.setValue("theme", theme)
-            seed.sync()
-            app.setStyleSheet(get_stylesheet(theme))
-            apply_tooltip_palette(theme)
-            window = MainWindow(
-                library, MultiTrackPlayer(), ModelManager(stemma_dir),
+            window = open_window(
+                app, library, stemma_dir, settings_path, theme,
+                (width, height),
             )
-            window.apply_theme(theme, get_colors(theme))
-            window.resize(width, height)
-            window.show()
-            _pump(app, 0.4)
 
             for state in STATES:
                 if state == "loaded":
-                    window._library_panel.select_song(song_id)
-                    _pump(app, 1.5)
-                    settled = _wait_for_detection(
-                        app,
-                        window._player_controls,
+                    load_song(
+                        app, window, song_id,
                         _DETECTION_TIMEOUT_S if first_load else 20.0,
                     )
                     first_load = False
-                    if not settled:
-                        print("  note: detection still busy at capture")
-                    window._player.seek(window._player.total_seconds * 0.34)
-                    _pump(app, 0.4)
                 elif state == "practice":
                     _stage_practice(app, window)
                     # Setting loop points re-runs detection on the loop.
-                    _pump(app, 0.5)
+                    pump(app, 0.5)
                     if not _wait_for_detection(
                         app, window._player_controls, 20.0,
                     ):
@@ -271,10 +296,7 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
                 })
                 print("wrote", name)
 
-            window._player.shutdown()
-            window._player_controls.shutdown()
-            window.close()
-            _pump(app, 0.2)
+            close_window(app, window)
     return records
 
 

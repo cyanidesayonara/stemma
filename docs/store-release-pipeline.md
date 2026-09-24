@@ -61,6 +61,29 @@ Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.
 the workflow verification step or `get_draft`, then submit for certification
 manually in Partner Center.
 
+## Screenshots
+
+The Store screenshot set is generated from the real window, never captured
+by hand:
+
+```powershell
+python scripts/generate_screenshots.py --song-dir "C:\path\to\separated\song" --title "Title" --artist "Artist"
+```
+
+- `--song-dir` is a separated song folder (`vocals.wav`, `drums.wav`, ...,
+  2, 4, or 6 stems). Use a song you have the rights to show. Without it the
+  script falls back to the generated review fixture, which is for layout
+  checks only: its waveforms look too regular for Store art.
+- It writes five 1920x1080 PNGs to `assets/store_listing/screenshots/`,
+  replacing the old set: two composed shots (headline beside the window)
+  and three full-window shots. The shot list, headlines, and captions live
+  in `SHOTS` in the script; the plan behind them is issue #146.
+- `captions.txt` in the same folder holds the Partner Center caption for
+  each image, in upload order.
+- Release validation checks the count and minimum size. Upload stays
+  manual: in Partner Center, replace the screenshots in file-name order and
+  paste each caption.
+
 ## Privacy policy
 
 Partner Center holds the privacy policy as pasted text (Properties >

@@ -23,7 +23,7 @@ from src.ui.styles import get_stylesheet
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "widget_snapshots"
 
-# Same list scripts/generate_screenshots.py uses.
+# Same list scripts/qt_capture.py uses.
 _UI_FONTS = (
     r"C:\Windows\Fonts\segoeui.ttf",
     r"C:\Windows\Fonts\arial.ttf",
