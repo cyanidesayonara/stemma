@@ -192,6 +192,10 @@ QPushButton#icon-btn:pressed {{
     background-color: {c["surface2"]};
 }}
 
+QPushButton#icon-btn:focus {{
+    border: 1px solid {c["surface2"]};
+}}
+
 QPushButton#icon-btn:checked {{
     background-color: {c["accent"]};
     color: {c["on_accent"]};
@@ -199,6 +203,10 @@ QPushButton#icon-btn:checked {{
 }}
 
 QPushButton#icon-btn:checked:hover {{
+    border: 1px solid {c["on_accent"]};
+}}
+
+QPushButton#icon-btn:checked:focus {{
     border: 1px solid {c["on_accent"]};
 }}
 

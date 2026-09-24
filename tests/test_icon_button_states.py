@@ -7,6 +7,7 @@ unchecked icon button in the app reacted to the pointer, and a disabled one
 """
 
 from importlib import import_module
+from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtCore import QSize
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.ui.control_primitives import draw_power, make_toggle_icon
+from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, LibraryPanel
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS, get_stylesheet
 
 
@@ -53,16 +55,19 @@ def _fill(button) -> str:
     return button.grab().toImage().pixelColor(4, 18).name()
 
 
-def _hover_fill(button) -> str:
-    """Paint the button as the style would under the pointer.
+def _render_in_state(
+    button, state, without=QStyle.StateFlag.State_None,
+) -> QImage:
+    """Paint the button as the style would with *state* added.
 
-    Offscreen Qt never delivers a real hover (a plain QPushButton's working
-    :hover rule does not show either), so set State_MouseOver on the style
-    option, which is exactly what the stylesheet engine matches :hover on.
+    Offscreen Qt never delivers real hover or focus changes (a plain
+    QPushButton's working :hover rule does not show either), so add the flag
+    to the style option, which is exactly what the stylesheet engine matches
+    :hover and :focus on.
     """
     option = QStyleOptionButton()
     button.initStyleOption(option)
-    option.state |= QStyle.StateFlag.State_MouseOver
+    option.state = (option.state | state) & ~without
     image = QImage(button.size(), QImage.Format.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
@@ -70,7 +75,18 @@ def _hover_fill(button) -> str:
         QStyle.ControlElement.CE_PushButton, option, painter, button,
     )
     painter.end()
+    return image
+
+
+def _hover_fill(button) -> str:
+    """Fill with the pointer over the button."""
+    image = _render_in_state(button, QStyle.StateFlag.State_MouseOver)
     return image.pixelColor(4, 18).name()
+
+
+def _border(image) -> str:
+    """The left border, halfway down, clear of the rounded corners."""
+    return image.pixelColor(0, image.height() // 2).name()
 
 
 def _luminance(color: QColor) -> float:
@@ -189,3 +205,67 @@ def test_every_icon_builder_dims_its_disabled_glyph(app, builder):
     normal = peak_alpha(QIcon.Mode.Normal)
     disabled = peak_alpha(QIcon.Mode.Disabled)
     assert disabled < normal * 0.5
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_focused_icon_button_shows_it(app, theme):
+    """Tabbing through the controls must show where keyboard focus is."""
+    host, button, colors = _hosted_button(theme)
+
+    # The only focusable widget in the window holds focus, so strip the flag
+    # for the unfocused render rather than relying on focus moving away.
+    unfocused = _render_in_state(
+        button,
+        QStyle.StateFlag.State_None,
+        without=QStyle.StateFlag.State_HasFocus,
+    )
+    focused = _render_in_state(button, QStyle.StateFlag.State_HasFocus)
+
+    assert _border(unfocused) == QColor(colors["surface1"]).name()
+    assert _border(focused) == QColor(colors["surface2"]).name()
+    host.close()
+
+
+def test_checked_focused_icon_button_keeps_accent_and_shows_focus(app):
+    host, button, colors = _hosted_button("dark")
+    button.setChecked(True)
+    QApplication.processEvents()
+
+    focused = _render_in_state(button, QStyle.StateFlag.State_HasFocus)
+
+    assert focused.pixelColor(4, 18).name() == QColor(colors["accent"]).name()
+    assert _border(focused) == QColor(colors["on_accent"]).name()
+    host.close()
+
+
+def test_active_repeat_uses_the_shared_checked_styling(app):
+    """Active Repeat set its own widget stylesheet, which outranked the app
+    sheet and cost it hover, pressed, and focus feedback."""
+    library = MagicMock()
+    library.songs = []
+    host = QWidget()
+    host.setStyleSheet(get_stylesheet("dark"))
+    layout = QHBoxLayout(host)
+    panel = LibraryPanel(library)
+    panel.apply_theme("dark", DARK_COLORS)
+    layout.addWidget(panel)
+    host.show()
+    QApplication.processEvents()
+    button = panel._repeat_btn
+
+    button.click()
+    QApplication.processEvents()
+    assert panel._repeat_mode == REPEAT_ALL
+    assert button.isChecked()
+    assert button.styleSheet() == ""
+    assert _fill(button) == QColor(DARK_COLORS["accent"]).name()
+    hovered = _render_in_state(button, QStyle.StateFlag.State_MouseOver)
+    assert _border(hovered) == QColor(DARK_COLORS["on_accent"]).name()
+
+    button.click()
+    button.click()
+    QApplication.processEvents()
+    assert panel._repeat_mode == REPEAT_OFF
+    assert not button.isChecked()
+    assert _fill(button) == QColor(DARK_COLORS["surface0"]).name()
+    host.close()

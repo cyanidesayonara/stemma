@@ -392,7 +392,6 @@ class LibraryPanel(QWidget):
         self._library = library
         self._repeat_mode: str = REPEAT_OFF
         self._shuffle_enabled: bool = False
-        self._ctrl_accent: str = DARK_COLORS["accent"]
         # song_id -> progress text for songs still separating in the
         # background. Rows in this state are unselectable (their stems
         # are half-written) and offer only "Cancel separation".
@@ -437,6 +436,9 @@ class LibraryPanel(QWidget):
         # Repeat (cycles: off → all → one)
         self._repeat_btn = QPushButton()
         self._repeat_btn.setObjectName("icon-btn")
+        # Checkable so :checked styling applies. A click toggles it first,
+        # then _on_repeat_clicked sets it from the new mode.
+        self._repeat_btn.setCheckable(True)
         self._repeat_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
         self._repeat_btn.setToolTip("Repeat: off")
         self._repeat_btn.setAccessibleName("Repeat")
@@ -539,18 +541,11 @@ class LibraryPanel(QWidget):
         self._repeat_btn.setIcon(self._repeat_icons[self._repeat_mode])
         labels = {REPEAT_OFF: "off", REPEAT_ALL: "all", REPEAT_ONE: "one"}
         self._repeat_btn.setToolTip(f"Repeat: {labels[self._repeat_mode]}")
-        # Apply teal background when active. The :checked pseudo-class is
-        # unreliable here because setCheckable(False) resets the checked
-        # state before Qt renders it, so we set the style directly.
-        if self._repeat_mode != REPEAT_OFF:
-            self._repeat_btn.setStyleSheet(
-                f"QPushButton#icon-btn {{"
-                f"background-color: {self._ctrl_accent};"
-                f"border: 1px solid {self._ctrl_accent};"
-                f"}}"
-            )
-        else:
-            self._repeat_btn.setStyleSheet("")
+        # The button stays checkable and its checked state mirrors the mode,
+        # so the app sheet's :checked rules give it the accent fill plus the
+        # same hover, pressed, and focus feedback as every other toggle. A
+        # widget stylesheet here outranked all of that.
+        self._repeat_btn.setChecked(self._repeat_mode != REPEAT_OFF)
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"
@@ -576,8 +571,6 @@ class LibraryPanel(QWidget):
         # Selected rows use the teal accent fill, so the text must be
         # readable on teal in BOTH themes -- use ON_ACCENT (near-black).
         self._song_delegate.set_selected_text_color(ON_ACCENT)
-        self._ctrl_accent = colors["accent"]
-        self._update_repeat_ui()  # Refresh button color with new accent.
 
         icon_color = QColor(colors["text"])
         # When a button sits on the teal accent fill, use ON_ACCENT (fixed
