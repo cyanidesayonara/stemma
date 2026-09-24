@@ -2,6 +2,7 @@
 *.log
 tests_out.txt
 .agent-local/
+.claude/worktrees/
 __pycache__/
 *.py[codz]
 *$py.class

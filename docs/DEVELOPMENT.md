@@ -34,6 +34,18 @@ Runtime data defaults to `%LOCALAPPDATA%\stemma`. A repository-local `data/`
 directory is legacy development data and is migrated only when the user data
 directory is new.
 
+Settings (theme, session, window, preferences) live in the registry under
+`HKCU\Software\stemma\stemma`. To run from source without touching the
+settings of a stemma you also use day to day, point them at a file:
+
+```powershell
+$env:STEMMA_SETTINGS_FILE = "$PWD\build\dev-settings.ini"
+python main.py
+```
+
+The test suite and `scripts/render_ui_review.py` do this automatically.
+Packaged and Store builds ignore the variable.
+
 ## Release dependency lock
 
 `requirements-release.in` is the human-maintained release input.
@@ -93,6 +105,35 @@ python -m pytest -m hardware
 ```
 
 Do not convert slow-model or hardware tests into unmarked PR tests.
+
+## Verification tiers
+
+Each kind of check happens where it is cheapest, so that human testing is
+spent only on what nothing else can judge.
+
+1. **Automated tests, every PR.** Ruff and the fast suite run in PR CI.
+   Slow-model tests run weekly and on demand; hardware tests run locally.
+2. **Rendered UI review, every PR that changes `src/ui/`.** Layout
+   regressions only show in a styled, rendered window, which the fast suite
+   never builds. Render one and inspect it before opening the PR:
+
+   ```powershell
+   python scripts/render_ui_review.py --out build/ui-review/branch
+   ```
+
+   This renders the real `MainWindow` with a generated song in three states
+   (empty, loaded, active practice with an A-B loop and a muted stem), at
+   900x600, 1366x768, and 1920x1080, in both themes. Output is PNGs plus
+   `index.html` under `build/ui-review/`. Use `--stems 6` for the six-stem
+   layout, and render `main` into a second directory to compare. The
+   renderer uses a private data directory and never touches your library.
+   Say in the PR what was checked.
+3. **Human acceptance pass, once per release.** Some things only a person
+   can judge: how speed and pitch renders sound, playback and metronome
+   sync, recording through a real interface, separation quality and GPU
+   use on real songs, and whether the app feels right in use. These checks
+   are collected in the release issue and done in one sitting before
+   tagging, not per PR. A PR that needs one lists it under Testing.
 
 ## Lint
 
@@ -163,8 +204,11 @@ artifact, checksum, and Store submission details.
 4. Use tests first for behavior and regression changes.
 5. Run focused tests, Ruff, and the complete fast suite before handoff.
 6. Use a conventional commit message.
-7. Open a pull request. The builder does not merge their own pull request;
-   a separate reviewer audits and approves it.
+7. Open a pull request, then have it reviewed independently: the reviewer
+   in `.claude/agents/pr-reviewer.md` runs in a fresh context and its own
+   worktree, and its report is posted on the PR unedited. Address the
+   findings in follow-up commits. The builder never merges their own pull
+   request; the maintainer merges.
 8. Close issues and move Project items to Done only after the change is
    merged or the issue's acceptance criteria are otherwise satisfied.
 

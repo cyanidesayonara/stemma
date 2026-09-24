@@ -11,7 +11,7 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    open_settings,
     normalize_input_device_setting,
     normalize_output_device_setting,
     output_device_indices_with_output,
@@ -142,7 +143,7 @@ class MainWindow(QMainWindow):
         self._pending_restore_callbacks: list[tuple[object, object]] = []
         self._suppress_recording_reload = False
 
-        self._settings = QSettings("stemma", "stemma")
+        self._settings = open_settings()
         self._theme = self._settings.value("theme", "dark")
         if self._theme not in ("dark", "light"):
             self._theme = "dark"

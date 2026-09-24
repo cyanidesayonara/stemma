@@ -36,6 +36,9 @@ _UI_FONTS = (
     r"C:\Windows\Fonts\segoeui.ttf",
     r"C:\Windows\Fonts\arial.ttf",
 )
+# Glyphs Segoe UI lacks, such as the theme toggle's sun, fall back to this.
+# A real Windows session does that on its own; offscreen Qt does not.
+_SYMBOL_FONT = r"C:\Windows\Fonts\seguisym.ttf"
 _STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 
 
@@ -43,12 +46,20 @@ def _load_ui_font(app) -> None:
     """Register a real UI font: offscreen Qt otherwise draws tofu boxes."""
     from PySide6.QtGui import QFont, QFontDatabase
 
+    symbol_family = None
+    if os.path.isfile(_SYMBOL_FONT):
+        fid = QFontDatabase.addApplicationFont(_SYMBOL_FONT)
+        found = QFontDatabase.applicationFontFamilies(fid)
+        symbol_family = found[0] if found else None
+
     for path in _UI_FONTS:
         if not os.path.isfile(path):
             continue
         fid = QFontDatabase.addApplicationFont(path)
         families = QFontDatabase.applicationFontFamilies(fid)
         if families:
+            if symbol_family:
+                QFont.insertSubstitution(families[0], symbol_family)
             app.setFont(QFont(families[0], 9))
             print(f"  ui font: {families[0]}")
             return

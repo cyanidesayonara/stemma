@@ -5,6 +5,9 @@ from __future__ import annotations
 import sounddevice as sd
 from PySide6.QtCore import QSettings
 
+# Re-exported so UI code keeps one import site for settings helpers.
+from src.settings_store import SETTINGS_FILE_ENV, open_settings  # noqa: F401
+
 
 def output_device_indices_with_output() -> frozenset[int] | None:
     """Return indices with at least one output channel, or None if query fails."""

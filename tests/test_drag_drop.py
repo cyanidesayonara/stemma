@@ -35,6 +35,8 @@ def main_window(app):
     library = MagicMock()
     library.songs = []
     player = MagicMock()
+    # Saved to settings on close; a MagicMock here cannot be serialized.
+    player.current_seconds = 0.0
     model_manager = MagicMock()
     win = MainWindow(library, player, model_manager)
     yield win

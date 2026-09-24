@@ -43,8 +43,8 @@ def audio_devices(monkeypatch):
 
 def _dialog(monkeypatch, settings):
     monkeypatch.setattr(
-        "src.ui.preferences_dialog.QSettings",
-        lambda *_args: settings,
+        "src.ui.preferences_dialog.open_settings",
+        lambda: settings,
     )
     return PreferencesDialog()
 
