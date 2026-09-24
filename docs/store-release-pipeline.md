@@ -61,6 +61,15 @@ Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.
 the workflow verification step or `get_draft`, then submit for certification
 manually in Partner Center.
 
+## Privacy policy
+
+Partner Center holds the privacy policy as pasted text (Properties >
+Privacy policy > "Provide privacy policy text"), not as a URL. The text
+comes from `docs/privacy-policy-plain.txt`, a plain-text rendering of
+`docs/privacy-policy.md`. When the policy changes, update both files and
+paste the plain-text version into Partner Center by hand; the listing
+automation does not submit it.
+
 ## Manual Store upload (fallback)
 
 After the GitHub Release exists, download `stemma.msix` (or use the direct URL below) and upload it in [Partner Center](https://partner.microsoft.com/dashboard) under your app submission packages.

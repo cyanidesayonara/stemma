@@ -124,10 +124,10 @@ spent only on what nothing else can judge.
    This renders the real `MainWindow` with a generated song in three states
    (empty, loaded, active practice with an A-B loop and a muted stem), at
    900x600, 1366x768, and 1920x1080, in both themes. Output is PNGs plus
-   `index.html` under `build/ui-review/`. Use `--stems 6` for the six-stem
-   layout, and render `main` into a second directory to compare. The
-   renderer uses a private data directory and never touches your library.
-   Say in the PR what was checked.
+   `index.html` under `build/ui-review/`. Use `--stems 2` or `--stems 6`
+   for the two- or six-stem layout, and render `main` into a second
+   directory to compare. The renderer uses a private data directory and
+   never touches your library. Say in the PR what was checked.
 3. **Human acceptance pass, once per release.** Some things only a person
    can judge: how speed and pitch renders sound, playback and metronome
    sync, recording through a real interface, separation quality and GPU

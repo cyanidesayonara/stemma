@@ -8,7 +8,9 @@ from PySide6.QtWidgets import QApplication
 
 from src.ui.waveform_stack_widget import (
     _LABEL_WIDTH,
+    LANE_MAX_HEIGHT,
     STACK_HEIGHT,
+    STACK_MAX_HEIGHT,
     STACK_MIN_HEIGHT,
     WaveformStackWidget,
 )
@@ -19,6 +21,26 @@ from tests.widget_visual import assert_widget_snapshot
 def app():
     inst = QApplication.instance() or QApplication([])
     return inst
+
+
+@pytest.mark.parametrize("lanes, expected", [
+    (0, STACK_HEIGHT),
+    (2, STACK_HEIGHT),
+    (4, 4 * LANE_MAX_HEIGHT),
+    (6, STACK_MAX_HEIGHT),
+    (9, STACK_MAX_HEIGHT),
+])
+def test_height_cap_follows_the_lane_count(app, lanes, expected):
+    """Tall windows grow the stack, but never past a readable lane height.
+
+    A single 520px cap gave a two-stem song two 260px lanes. The cap is now
+    per lane, never below the stack's preferred height, and never above the
+    overall ceiling.
+    """
+    w = WaveformStackWidget()
+    w.set_lane_capacity(lanes)
+
+    assert w.maximumHeight() == expected
 
 
 def test_stack_prefers_full_height_but_can_shrink(app):
