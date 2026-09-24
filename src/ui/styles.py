@@ -180,6 +180,18 @@ QPushButton#icon-btn {{
     padding: 2px;
 }}
 
+/* The ID selector above outranks QPushButton:hover/:pressed/:disabled, so
+   icon buttons restate them. Hover and pressed come before the :checked
+   rules so a checked button keeps its accent; disabled comes after them so
+   a disabled button always reads as disabled. */
+QPushButton#icon-btn:hover {{
+    background-color: {c["surface1"]};
+}}
+
+QPushButton#icon-btn:pressed {{
+    background-color: {c["surface2"]};
+}}
+
 QPushButton#icon-btn:checked {{
     background-color: {c["accent"]};
     color: {c["on_accent"]};
@@ -188,6 +200,11 @@ QPushButton#icon-btn:checked {{
 
 QPushButton#icon-btn:checked:hover {{
     border: 1px solid {c["on_accent"]};
+}}
+
+QPushButton#icon-btn:disabled {{
+    background-color: {c["base"]};
+    border-color: {c["surface0"]};
 }}
 
 QSlider::groove:horizontal {{

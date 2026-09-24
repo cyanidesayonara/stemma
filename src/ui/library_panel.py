@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.library import Song, SongLibrary
+from src.ui.control_primitives import add_disabled_pixmaps
 from src.ui.styles import DARK_COLORS, ON_ACCENT
 
 # Custom data roles for two-line display.
@@ -63,7 +64,9 @@ def _make_icon(draw_fn, color: QColor, size: int = _CTRL_ICON) -> QIcon:
     p.setBrush(color)
     draw_fn(p, size)
     p.end()
-    return QIcon(pixmap)
+    icon = QIcon(pixmap)
+    add_disabled_pixmaps(icon, draw_fn, color, size)
+    return icon
 
 
 def _make_toggle_icon(draw_fn, normal_color: QColor,
@@ -91,6 +94,7 @@ def _make_toggle_icon(draw_fn, normal_color: QColor,
         draw_fn(p, size)
         p.end()
         icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
+    add_disabled_pixmaps(icon, draw_fn, normal_color, size)
     return icon
 
 
