@@ -13,6 +13,7 @@ from src.ui.waveform_stack_widget import (
     STACK_MAX_HEIGHT,
     STACK_MIN_HEIGHT,
     WaveformStackWidget,
+    lane_label,
 )
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 from tests.widget_visual import assert_widget_snapshot
@@ -339,3 +340,15 @@ def test_solo_vocals_snapshot(app):
     )
     w.set_total_seconds(60.0)
     assert_widget_snapshot(w, "waveform_stack_solo_vocals", width=640, height=280)
+
+
+@pytest.mark.parametrize("name, label", [
+    ("vocals", "vocals"),
+    ("guitar", "guitar"),
+    ("recording_take1", "take 1"),
+    ("recording_take2", "take 2"),
+])
+def test_lane_labels_name_takes_like_the_mixer(name, label):
+    """Take lanes showed the first six letters of the internal stem name,
+    so both takes read "record" beside mixer rows labelled Take 1 and 2."""
+    assert lane_label(name) == label

@@ -53,6 +53,23 @@ _MUTED_LANE_OPACITY = 0.15
 _MUTED_LANE_OPACITY_LIGHT = 0.3
 
 
+_TAKE_PREFIX = "recording_take"
+
+
+def lane_label(stem_name: str) -> str:
+    """Short gutter label for a lane.
+
+    Recording takes are named ``recording_takeN`` internally; label them
+    "take N" to match the mixer's "Take N" rows. Stems use their first six
+    letters, which covers every stem name.
+    """
+    if stem_name.startswith(_TAKE_PREFIX):
+        number = stem_name[len(_TAKE_PREFIX):]
+        if number.isdigit():
+            return f"take {number}"
+    return stem_name[:6]
+
+
 @dataclass
 class _StemLane:
     name: str
@@ -339,7 +356,7 @@ class WaveformStackWidget(QWidget):
         self, painter: QPainter, name: str, y: int, lane_h: int
     ) -> None:
         painter.setPen(self._label_color)
-        label = name[:6]
+        label = lane_label(name)
         text_rect = QRectF(
             _LABEL_PADDING,
             float(y),
