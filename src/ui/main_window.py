@@ -15,12 +15,14 @@ from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
+    QKeyEvent,
     QKeySequence,
     QPainter,
     QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractSpinBox,
     QApplication,
     QCheckBox,
@@ -156,6 +158,14 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
+        # The button the user last tabbed to, if it still has focus. Space and
+        # Enter press only that one: buttons also take focus on a mouse
+        # click, and Qt restores focus when the window reactivates or a
+        # dialog closes, and re-pressing such a button on Space broke
+        # clicking a control, then Space to play. focusNextPrevChild records
+        # Tab navigation; focusChanged forgets the button when focus leaves.
+        self._keyboard_focus_button: QAbstractButton | None = None
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self._setup_shortcuts()
         self._connect_signals()
         self._restore_state()
@@ -292,7 +302,9 @@ class MainWindow(QMainWindow):
         u = self._unguarded_shortcut  # Unguarded: always fires.
 
         # -- Playback --
-        g(Qt.Key.Key_Space, self._on_shortcut_play_pause)
+        # No auto-repeat: holding Space flipped a focused toggle about 30
+        # times a second, and made play/pause flutter.
+        g(Qt.Key.Key_Space, self._on_space_shortcut).setAutoRepeat(False)
         g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
@@ -356,7 +368,7 @@ class MainWindow(QMainWindow):
         # -- Help -- unguarded: F-keys don't collide with text entry.
         u(Qt.Key.Key_F1, self._on_keyboard_shortcuts)
 
-    def _guarded_shortcut(self, key, handler) -> None:
+    def _guarded_shortcut(self, key, handler) -> QShortcut:
         """Register *handler* for *key*, skipped when a text input is focused.
 
         Prevents single-letter/digit shortcuts from stealing keystrokes
@@ -366,7 +378,9 @@ class MainWindow(QMainWindow):
             if self._text_input_has_focus():
                 return
             handler()
-        QShortcut(QKeySequence(key), self).activated.connect(wrapped)
+        shortcut = QShortcut(QKeySequence(key), self)
+        shortcut.activated.connect(wrapped)
+        return shortcut
 
     def _unguarded_shortcut(self, key, handler) -> None:
         """Register *handler* for *key*. Fires regardless of focus."""
@@ -437,6 +451,70 @@ class MainWindow(QMainWindow):
         self._volume_toast.show()
         self._volume_toast.raise_()
         self._volume_toast_timer.start()
+
+    def _on_space_shortcut(self) -> None:
+        """Press the focused button, or toggle play/pause if none has focus.
+
+        Window shortcuts fire before the focused widget sees the key, so
+        without this a keyboard user could tab to a button but never press
+        it: Space always played or paused instead.
+        """
+        # An immediate click: animateClick would leave the button down, and
+        # the Space key release that follows would click it a second time.
+        if not self._press_focused_button(animate=False):
+            self._on_shortcut_play_pause()
+
+    def focusNextPrevChild(self, next: bool) -> bool:  # noqa: A002, N802
+        """Record the button the user tabs to.
+
+        Tab and Shift+Tab bubble up to the window through
+        QWidget.focusNextPrevChild, so this sees keyboard navigation only:
+        not mouse clicks, window reactivation, or focus restored after a
+        dialog closes.
+        """
+        moved = super().focusNextPrevChild(next)
+        widget = QApplication.focusWidget()
+        if isinstance(widget, QAbstractButton) and self.isAncestorOf(widget):
+            self._keyboard_focus_button = widget
+        return moved
+
+    def _on_focus_changed(self, _old, new) -> None:
+        """Forget the tabbed-to button once focus is anywhere else."""
+        if new is not self._keyboard_focus_button:
+            self._keyboard_focus_button = None
+
+    def _press_focused_button(self, *, animate: bool = True) -> bool:
+        """Click the keyboard-focused enabled button, if there is one.
+
+        Only keyboard focus counts: a clicked button keeps focus, but Space
+        should still play or pause afterwards.
+        """
+        widget = QApplication.focusWidget()
+        if (
+            widget is self._keyboard_focus_button
+            and isinstance(widget, QAbstractButton)
+            and widget.isEnabled()
+            and widget.isVisible()
+            and self.isAncestorOf(widget)
+        ):
+            if animate:
+                widget.animateClick()
+            else:
+                widget.click()
+            return True
+        return False
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Let Enter press the focused button.
+
+        Buttons outside dialogs ignore Enter, so it bubbles up to here.
+        """
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and (
+            self._press_focused_button()
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _on_shortcut_play_pause(self) -> None:
         """Toggle play/pause via keyboard shortcut."""
@@ -533,7 +611,9 @@ class MainWindow(QMainWindow):
         shortcuts_text = (
             "<table cellspacing='0' cellpadding='0'>"
             + section("Playback", first=True)
-            + row("Space", "Play / Pause")
+            + row("Space", "Play / Pause (presses a focused button)")
+            + row("Enter", "Press the focused button")
+            + row("Tab", "Move keyboard focus between controls")
             + row("S", "Stop")
             + section("Navigation")
             + row("0-9", "Jump to 0%–90% position")
