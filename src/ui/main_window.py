@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractSpinBox,
     QApplication,
     QCheckBox,
@@ -292,7 +293,7 @@ class MainWindow(QMainWindow):
         u = self._unguarded_shortcut  # Unguarded: always fires.
 
         # -- Playback --
-        g(Qt.Key.Key_Space, self._on_shortcut_play_pause)
+        g(Qt.Key.Key_Space, self._on_space_shortcut)
         g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
@@ -438,6 +439,46 @@ class MainWindow(QMainWindow):
         self._volume_toast.raise_()
         self._volume_toast_timer.start()
 
+    def _on_space_shortcut(self) -> None:
+        """Press the focused button, or toggle play/pause if none has focus.
+
+        Window shortcuts fire before the focused widget sees the key, so
+        without this a keyboard user could tab to a button but never press
+        it: Space always played or paused instead.
+        """
+        # An immediate click: animateClick would leave the button down, and
+        # the Space key release that follows would click it a second time.
+        if not self._press_focused_button(animate=False):
+            self._on_shortcut_play_pause()
+
+    def _press_focused_button(self, *, animate: bool = True) -> bool:
+        """Click the focused enabled button in this window, if there is one."""
+        widget = QApplication.focusWidget()
+        if (
+            isinstance(widget, QAbstractButton)
+            and widget.isEnabled()
+            and widget.isVisible()
+            and self.isAncestorOf(widget)
+        ):
+            if animate:
+                widget.animateClick()
+            else:
+                widget.click()
+            return True
+        return False
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Let Enter press the focused button.
+
+        Buttons outside dialogs ignore Enter, so it bubbles up to here.
+        """
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and (
+            self._press_focused_button()
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _on_shortcut_play_pause(self) -> None:
         """Toggle play/pause via keyboard shortcut."""
         if self._player.is_playing:
@@ -533,7 +574,8 @@ class MainWindow(QMainWindow):
         shortcuts_text = (
             "<table cellspacing='0' cellpadding='0'>"
             + section("Playback", first=True)
-            + row("Space", "Play / Pause")
+            + row("Space", "Play / Pause (presses a focused button)")
+            + row("Enter", "Press the focused button")
             + row("S", "Stop")
             + section("Navigation")
             + row("0-9", "Jump to 0%–90% position")
