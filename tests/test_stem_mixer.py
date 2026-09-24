@@ -21,7 +21,7 @@ def app():
 
 
 class TestMixChangedWiring:
-    """Test that mute/solo/volume changes recompute waveform peaks."""
+    """Mute and solo refresh lane opacity without recomputing peaks."""
 
     def _make_player_mock(self):
         """Create a mock MultiTrackPlayer with stem data."""

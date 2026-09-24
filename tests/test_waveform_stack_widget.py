@@ -113,7 +113,11 @@ def test_clear_loop_markers(app):
 
 
 def test_theme_change_invalidates_cached_lane_paths(app):
-    """A theme switch must repaint lanes in the new colors, not reuse paths."""
+    """A theme switch drops the cached lane paths so the next paint rebuilds.
+
+    The paths hold shape only; this guards the cache bookkeeping in
+    set_theme_colors rather than a visible color.
+    """
     w = WaveformStackWidget()
     w.set_stem_lanes(
         [("vocals", np.array([0.2, 0.8, 0.4], dtype=np.float32), "#bfa3dc")],
@@ -121,8 +125,9 @@ def test_theme_change_invalidates_cached_lane_paths(app):
         soloed=set(),
     )
     w.resize(300, STACK_HEIGHT)
-    w.repaint()
-    w._lanes[0].cached_size = (300, STACK_HEIGHT)
+    # grab() really paints; repaint() on an unshown widget does nothing.
+    w.grab()
+    assert w._lanes[0].cached_path is not None
 
     w.set_theme_colors(LIGHT_COLORS)
 
@@ -201,30 +206,48 @@ def test_ratio_and_x_round_trip(app, ratio):
     assert w._ratio_for_x(x) == pytest.approx(ratio, abs=1e-6)
 
 
+# The paint tests use grab(), which runs paintEvent for real; repaint() on
+# an unshown widget is a no-op, so a crash in paintEvent would go unseen.
+
 def test_paint_no_crash_without_lanes(app):
     w = WaveformStackWidget()
     w.resize(200, STACK_HEIGHT)
-    w.repaint()
+    assert not w.grab().isNull()
 
 
-def test_paint_no_crash_at_zero_width(app):
+def test_paint_no_crash_narrower_than_the_label_gutter(app):
+    """Below the label gutter the lane width goes negative."""
     w = WaveformStackWidget()
     w.set_stem_lanes(
         [("vocals", np.array([0.2, 0.8], dtype=np.float32), "#bfa3dc")],
         muted=set(),
         soloed=set(),
     )
-    w.resize(0, STACK_HEIGHT)
-    w.repaint()
+    w.set_loop_markers(0.2, 0.8)
+    w.resize(_LABEL_WIDTH - 22, STACK_HEIGHT)
+    assert not w.grab().isNull()
+
+
+def test_paint_no_crash_with_loop_in_light_theme(app):
+    w = WaveformStackWidget()
+    w.set_theme_colors(LIGHT_COLORS)
+    w.set_stem_lanes(
+        [("vocals", np.array([0.1, 0.5, 0.3, 0.8], dtype=np.float32), "#9878b8")],
+        muted=set(),
+        soloed=set(),
+    )
+    w.set_loop_markers(0.2, 0.8)
+    w.resize(300, STACK_HEIGHT)
+    assert not w.grab().isNull()
 
 
 def test_set_loading_no_crash(app):
     w = WaveformStackWidget()
     w.resize(200, STACK_HEIGHT)
     w.set_loading(True)
-    w.repaint()
+    assert not w.grab().isNull()
     w.set_loading(False)
-    w.repaint()
+    assert not w.grab().isNull()
 
 
 def test_muted_lane_low_opacity(app):
