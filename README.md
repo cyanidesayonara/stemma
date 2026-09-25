@@ -100,7 +100,9 @@ python -m pytest -m "not slow and not hardware"
 
 | Key | Action |
 |-----|--------|
-| Space | Play / Pause |
+| Space | Play / Pause (presses the focused button, if one has focus) |
+| Enter | Press the focused button |
+| Tab | Move keyboard focus between controls |
 | S | Stop |
 | Left / Right | Seek -/+ 5 seconds |
 | Home / End | Jump to start / end |

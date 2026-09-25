@@ -144,12 +144,10 @@ class StemRow(QWidget):
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
-        self._mute_btn.clearFocus()
         self.mix_changed.emit()
 
     def _on_solo(self, checked: bool) -> None:
         self._player.set_solo(self._stem_name, checked)
-        self._solo_btn.clearFocus()
         self.mix_changed.emit()
 
     def _on_volume(self, value: int) -> None:
