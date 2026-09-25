@@ -50,13 +50,13 @@ from PySide6.QtSvg import QSvgRenderer  # noqa: E402
 from scripts.qt_capture import pump  # noqa: E402
 from scripts.render_ui_review import (  # noqa: E402
     MODEL_KEYS,
-    _stage_practice,
-    _wait_for_detection,
     close_window,
     load_song,
     open_window,
     prepare_library,
+    stage_practice,
     start_app,
+    wait_for_detection,
 )
 from src.library import SongLibrary  # noqa: E402
 from src.separation_state import (  # noqa: E402
@@ -100,6 +100,24 @@ class Shot:
     @property
     def composed(self) -> bool:
         return bool(self.headline)
+
+
+# Every shot that shows a loaded song: keep the metronome BPM next to
+# the detected tempo, including shot 3 ("loaded"), which never enters
+# the practice staging path.
+SYNC_METRONOME_STATES = frozenset(
+    ("practice", "loop_trainer", "takes", "loaded"),
+)
+
+# Detector chord roots, longest first so "C#" matches before "C".
+_CHORD_ROOTS = ("C#", "F#", "Eb", "Ab", "Bb",
+                "C", "D", "E", "F", "G", "A", "B")
+_CHORD_ROOT_INDEX = {
+    "C": 0, "C#": 1, "D": 2, "Eb": 3, "E": 4, "F": 5,
+    "F#": 6, "G": 7, "Ab": 8, "A": 9, "Bb": 10, "B": 11,
+}
+_CHORD_ROOT_NAMES = ["C", "C#", "D", "Eb", "E", "F",
+                     "F#", "G", "Ab", "A", "Bb", "B"]
 
 
 SHOTS = (
@@ -207,27 +225,56 @@ def write_takes(song_dir: str) -> None:
     sf.write(os.path.join(song_dir, "recording_take1.wav"), shifted, sr)
 
 
+def transpose_chord_label(chord: str, n_steps: int) -> str:
+    """Shift a detector chord label (``C``, ``Am``) by *n_steps* semitones.
+
+    The live badge does not do this yet; Store art would otherwise show
+    "C major -> Bb major" beside "Chord: C". See issue #174.
+    """
+    if not chord or n_steps == 0:
+        return chord
+    for root in _CHORD_ROOTS:
+        if chord == root or chord.startswith(root) and chord[len(root):] in (
+            "", "m",
+        ):
+            idx = _CHORD_ROOT_INDEX[root]
+            suffix = chord[len(root):]
+            return f"{_CHORD_ROOT_NAMES[(idx + int(n_steps)) % 12]}{suffix}"
+    return chord
+
+
+def shot_shows_metronome_on(shot: Shot) -> bool:
+    """Shot 2 advertises the metronome, so the power button should be on."""
+    return "Metronome" in shot.chips
+
+
 def show_current_chord(window) -> None:
     """Show the chord at the playhead, as the badge does during playback.
 
     Paused, the badge deliberately reads "--"; the shots are stills of a
-    playing session.
+    playing session. Transpose to match the key badge until the app does.
     """
     controls = window._player_controls
     player = window._player
     chord = player.chord_at(int(player.current_seconds * player.sample_rate))
     if chord:
-        controls._chord_label.setText(controls._badge_html("Chord:", chord))
+        shown = transpose_chord_label(chord, player.pitch_semitones)
+        controls._chord_label.setText(controls._badge_html("Chord:", shown))
 
 
 def stage(app, window, shot, song_id) -> None:
     """Drive the window into the state *shot* shows."""
     load_song(app, window, song_id, 90.0)
     if shot.state in ("practice", "loop_trainer", "takes"):
-        _stage_practice(app, window)
+        stage_practice(app, window)
         pump(app, 0.5)
-        _wait_for_detection(app, window._player_controls, 20.0)
+        wait_for_detection(app, window._player_controls, 20.0)
+    if shot.state in SYNC_METRONOME_STATES:
         sync_metronome(window)
+    if shot_shows_metronome_on(shot):
+        toggle = window._player_controls._metronome_toggle
+        if not toggle.isChecked():
+            toggle.click()
     if shot.state == "loop_trainer":
         renders = {"finished": 0, "last": time.monotonic()}
 

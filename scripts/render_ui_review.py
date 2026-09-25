@@ -131,7 +131,7 @@ def prepare_library(data_dir: str, stem_count: int):
     return library, song.id
 
 
-def _wait_for_detection(app, controls, timeout_s: float) -> bool:
+def wait_for_detection(app, controls, timeout_s: float) -> bool:
     """Pump events until key and tempo both show a detected result.
 
     Both badges start empty and pass through "detecting" (and, on the first
@@ -160,7 +160,7 @@ def part_to_mute(stem_names) -> str | None:
     return None
 
 
-def _stage_practice(app, window) -> None:
+def stage_practice(app, window) -> None:
     """Drive the UI into an active practice state through its own buttons.
 
     An A-B loop around the playhead and a muted stem exercise the loop
@@ -244,7 +244,7 @@ def load_song(app, window, song_id, timeout_s: float) -> None:
     """Select *song_id* and wait for its detection to settle."""
     window._library_panel.select_song(song_id)
     pump(app, 1.5)
-    if not _wait_for_detection(app, window._player_controls, timeout_s):
+    if not wait_for_detection(app, window._player_controls, timeout_s):
         print("  note: detection still busy at capture")
     window._player.seek(window._player.total_seconds * 0.34)
     pump(app, 0.4)
@@ -288,10 +288,10 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
                     )
                     first_load = False
                 elif state == "practice":
-                    _stage_practice(app, window)
+                    stage_practice(app, window)
                     # Setting loop points re-runs detection on the loop.
                     pump(app, 0.5)
-                    if not _wait_for_detection(
+                    if not wait_for_detection(
                         app, window._player_controls, 20.0,
                     ):
                         print("  note: detection still busy at capture")

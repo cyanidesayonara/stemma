@@ -12,12 +12,15 @@ from scripts.generate_screenshots import (
     CANVAS,
     LEGACY_SHOTS,
     SHOTS,
+    SYNC_METRONOME_STATES,
     clear_previous_set,
     compose,
     import_song_dir,
+    shot_shows_metronome_on,
+    transpose_chord_label,
     write_takes,
 )
-from scripts.render_ui_review import part_to_mute
+from scripts.render_ui_review import part_to_mute, stage_practice, wait_for_detection
 from src.separation_state import separation_is_complete
 from src.ui.styles import DARK_COLORS
 
@@ -108,6 +111,40 @@ def test_clear_previous_set_removes_only_screenshot_files(tmp_path):
 ])
 def test_practice_staging_mutes_a_part_every_stem_set_has(stems, muted):
     assert part_to_mute(stems) == muted
+
+
+def test_screenshot_helpers_are_imported_from_the_public_names():
+    assert callable(stage_practice)
+    assert callable(wait_for_detection)
+
+
+def test_loaded_and_practice_shots_sync_the_metronome():
+    """Shot 3 is the tempo shot; it used to keep the 120 BPM default."""
+    assert "loaded" in SYNC_METRONOME_STATES
+    assert {shot.state for shot in SHOTS if shot.state != "import"} <= (
+        SYNC_METRONOME_STATES | {"import"}
+    )
+    loaded = next(shot for shot in SHOTS if shot.state == "loaded")
+    assert "tempo" in loaded.caption.lower()
+
+
+def test_loop_trainer_chip_turns_the_metronome_on():
+    trainer = next(shot for shot in SHOTS if shot.state == "loop_trainer")
+    assert shot_shows_metronome_on(trainer)
+    assert not shot_shows_metronome_on(
+        next(shot for shot in SHOTS if shot.state == "practice")
+    )
+
+
+@pytest.mark.parametrize("chord, steps, expected", [
+    ("C", -2, "Bb"),
+    ("Am", 2, "Bm"),
+    ("F#", 1, "G"),
+    ("C", 0, "C"),
+    ("", -2, ""),
+])
+def test_transpose_chord_label_follows_the_pitch_shift(chord, steps, expected):
+    assert transpose_chord_label(chord, steps) == expected
 
 
 def test_write_takes_adds_one_take(tmp_path):
