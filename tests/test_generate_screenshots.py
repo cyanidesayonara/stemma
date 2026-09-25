@@ -10,11 +10,14 @@ from PySide6.QtWidgets import QApplication
 
 from scripts.generate_screenshots import (
     CANVAS,
+    LEGACY_SHOTS,
     SHOTS,
+    clear_previous_set,
     compose,
     import_song_dir,
     write_takes,
 )
+from scripts.render_ui_review import part_to_mute
 from src.separation_state import separation_is_complete
 from src.ui.styles import DARK_COLORS
 
@@ -65,12 +68,46 @@ def test_import_song_dir_looks_like_a_finished_import(tmp_path, stems, model):
     assert [s.title for s in library.songs] == ["Title"]
 
 
-def test_import_song_dir_rejects_an_unsupported_stem_set(tmp_path):
+@pytest.mark.parametrize("stems", [
+    ("vocals", "drums", "bass"),
+    # Two stems, but not the vocals + other pair MDX writes.
+    ("vocals", "drums"),
+])
+def test_import_song_dir_rejects_an_unsupported_stem_set(tmp_path, stems):
     source = tmp_path / "song"
-    _write_stems(source, ("vocals", "drums", "bass"))
+    _write_stems(source, stems)
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="need one of"):
         import_song_dir(str(tmp_path / "data"), str(source), "T", "A")
+
+
+def test_import_song_dir_rejects_a_missing_folder(tmp_path):
+    with pytest.raises(SystemExit, match="not a folder"):
+        import_song_dir(
+            str(tmp_path / "data"), str(tmp_path / "missing"), "T", "A",
+        )
+
+
+def test_clear_previous_set_removes_only_screenshot_files(tmp_path):
+    ours = [f"{shot.name}.png" for shot in SHOTS] + list(LEGACY_SHOTS)
+    for name in ours + ["holiday.png", "notes.txt"]:
+        (tmp_path / name).write_bytes(b"x")
+
+    clear_previous_set(str(tmp_path))
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "holiday.png", "notes.txt",
+    ]
+
+
+@pytest.mark.parametrize("stems, muted", [
+    (("vocals", "drums", "bass", "other"), "drums"),
+    (("vocals", "drums", "bass", "other", "guitar", "piano"), "drums"),
+    # Two-stem songs have no drums: mute the vocal and sing along.
+    (("vocals", "other"), "vocals"),
+])
+def test_practice_staging_mutes_a_part_every_stem_set_has(stems, muted):
+    assert part_to_mute(stems) == muted
 
 
 def test_write_takes_adds_one_take(tmp_path):

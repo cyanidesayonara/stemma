@@ -17,7 +17,8 @@ UI_FONTS = (
 # Glyphs Segoe UI lacks, such as the theme toggle's sun, fall back to this.
 # A real Windows session does that on its own; offscreen Qt does not.
 SYMBOL_FONT = r"C:\Windows\Fonts\seguisym.ttf"
-# Heavier weights for headline text in composed Store art.
+# Real bold and semibold faces, so bold UI labels and Store headlines match a
+# Windows session instead of using Qt's synthesized bold.
 BOLD_FONTS = (
     r"C:\Windows\Fonts\segoeuib.ttf",
     r"C:\Windows\Fonts\seguisb.ttf",

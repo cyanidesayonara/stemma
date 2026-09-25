@@ -152,10 +152,18 @@ def _wait_for_detection(app, controls, timeout_s: float) -> bool:
     return False
 
 
+def part_to_mute(stem_names) -> str | None:
+    """The stem practice staging mutes: drums, or the vocal on two stems."""
+    for name in ("drums", "vocals"):
+        if name in stem_names:
+            return name
+    return None
+
+
 def _stage_practice(app, window) -> None:
     """Drive the UI into an active practice state through its own buttons.
 
-    An A-B loop around the playhead and a muted drum stem exercise the loop
+    An A-B loop around the playhead and a muted stem exercise the loop
     shading and lane dimming, and go through the same signal wiring a click
     would rather than poking the player directly.
     """
@@ -170,9 +178,9 @@ def _stage_practice(app, window) -> None:
     controls._loop_b_btn.click()
     if not controls._loop_toggle_btn.isChecked():
         controls._loop_toggle_btn.click()
-    drums = controls._stem_rows.get("drums")
-    if drums is not None:
-        drums._mute_btn.click()
+    muted = part_to_mute(controls._stem_rows)
+    if muted is not None:
+        controls._stem_rows[muted]._mute_btn.click()
     player.seek(total * 0.34)
     pump(app, 0.4)
 
