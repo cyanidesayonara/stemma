@@ -122,3 +122,20 @@ def test_a_request_while_idle_starts_at_once(controls):
 
     assert len(_GatedWorker.instances) == 2
     assert _GatedWorker.instances[1].kwargs["start_sec"] == 3.0
+
+
+@pytest.mark.parametrize(
+    "redetect",
+    [
+        PlayerControls._redetect_key_only,
+        PlayerControls._redetect_bpm_only,
+    ],
+)
+def test_badge_redetection_does_not_bypass_running_worker(controls, redetect):
+    controls.start_detection(1.0, 2.0)
+    controls.start_detection(3.0, 4.0)
+
+    redetect(controls)
+
+    assert len(_GatedWorker.instances) == 1
+    assert len(_running()) == 1

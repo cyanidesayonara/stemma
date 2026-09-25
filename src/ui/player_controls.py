@@ -1585,7 +1585,7 @@ class PlayerControls(QWidget):
 
     def _redetect_key_only(self) -> None:
         """Re-run detection but only update the key label."""
-        if self._detection_worker is not None:
+        if self._detection_running():
             return  # Already running.
         self._detection_generation += 1
         generation = self._detection_generation
@@ -1634,7 +1634,7 @@ class PlayerControls(QWidget):
 
     def _redetect_bpm_only(self) -> None:
         """Re-run detection but only update the BPM label."""
-        if self._detection_worker is not None:
+        if self._detection_running():
             return  # Already running.
         self._detection_generation += 1
         generation = self._detection_generation
