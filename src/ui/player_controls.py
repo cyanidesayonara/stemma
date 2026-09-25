@@ -1096,6 +1096,10 @@ class PlayerControls(QWidget):
         # Refresh the detected-key label to show the transposed key.
         self._refresh_key_label()
         self.update_record_button_state()
+        # A pitch change supersedes a pending speed render, and the combined
+        # render emits only pitch_changed, so the trainer readout would
+        # otherwise keep showing the old speed.
+        self._update_trainer_status()
 
     def bump_pitch(self, direction: int) -> None:
         """Nudge the pitch spinbox by one semitone.

@@ -174,6 +174,21 @@ class TestTrainerRamp:
         assert seq[-1] == 1.0
         assert seq == sorted(seq)  # monotonic non-decreasing
 
+    def test_pitch_render_refreshes_trainer_status(self, controls, loaded):
+        """A pitch change supersedes a pending speed render, so the combined
+        render reports only pitch_changed. The readout must still show the
+        speed that render applied."""
+        self._make_loop(controls)
+        controls._trainer_enabled = True
+        controls._update_trainer_status()
+        assert controls._trainer_status.text() == "at 1.0x"
+
+        loaded._playback_speed = 0.75
+        loaded._pitch_semitones = -2
+        controls._on_pitch_applied(-2)
+
+        assert controls._trainer_status.text() == "now 0.75x"
+
 
 # -----------------------------------------------------------------------
 # UI: reset on song load + session round-trip
