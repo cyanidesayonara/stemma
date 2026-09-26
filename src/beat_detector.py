@@ -261,6 +261,23 @@ def transpose_key(key_str: str, n_steps: int) -> str:
     return f"{_KEY_NAMES[new_idx]} {mode}"
 
 
+def transpose_chord(chord: str, n_steps: int) -> str:
+    """Transpose a detector chord label (``"C"``, ``"Am"``) by semitones.
+
+    Spelled like :func:`transpose_key`, so the chord badge agrees with the
+    key badge (``C major -> Bb major`` beside ``Bb``). Returns the input
+    unchanged when it is not a major or minor triad label.
+    """
+    if not chord or n_steps == 0:
+        return chord
+    quality = "m" if chord.endswith("m") else ""
+    root = chord[:-1] if quality else chord
+    idx = _TONIC_TO_INDEX.get(root)
+    if idx is None:
+        return chord
+    return f"{_KEY_NAMES[(idx + int(n_steps)) % 12]}{quality}"
+
+
 def _detect_key(
     audio_mono: np.ndarray, sr: int,
 ) -> tuple[str, float]:

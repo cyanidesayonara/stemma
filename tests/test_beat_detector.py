@@ -19,6 +19,7 @@ from src.beat_detector import (
     _sigmoid,
     _viterbi_smooth,
     detect_bpm_and_key,
+    transpose_chord,
     transpose_key,
 )
 
@@ -569,3 +570,22 @@ class TestTransposeKey:
 
     def test_case_insensitive_mode(self):
         assert transpose_key("C MAJOR", 2) == "D major"
+
+
+# ---------------------------------------------------------------------------
+# transpose_chord (#174)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("chord, steps, expected", [
+    ("C", 0, "C"),
+    ("C", -2, "Bb"),
+    ("Am", 3, "Cm"),
+    ("B", 1, "C"),
+    ("F#m", -1, "Fm"),
+    ("Eb", 12, "Eb"),
+    ("", 2, ""),
+    ("N.C.", 2, "N.C."),
+])
+def test_transpose_chord_follows_the_pitch_shift(chord, steps, expected):
+    """Chord labels shift with pitch, spelled like the key badge."""
+    assert transpose_chord(chord, steps) == expected

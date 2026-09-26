@@ -17,7 +17,6 @@ from scripts.generate_screenshots import (
     compose,
     import_song_dir,
     shot_shows_metronome_on,
-    transpose_chord_label,
     write_takes,
 )
 from scripts.render_ui_review import part_to_mute, stage_practice, wait_for_detection
@@ -134,17 +133,6 @@ def test_loop_trainer_chip_turns_the_metronome_on():
     assert not shot_shows_metronome_on(
         next(shot for shot in SHOTS if shot.state == "practice")
     )
-
-
-@pytest.mark.parametrize("chord, steps, expected", [
-    ("C", -2, "Bb"),
-    ("Am", 2, "Bm"),
-    ("F#", 1, "G"),
-    ("C", 0, "C"),
-    ("", -2, ""),
-])
-def test_transpose_chord_label_follows_the_pitch_shift(chord, steps, expected):
-    assert transpose_chord_label(chord, steps) == expected
 
 
 def test_write_takes_adds_one_take(tmp_path):
