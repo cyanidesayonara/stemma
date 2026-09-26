@@ -15,6 +15,8 @@ MAX_FEATURES = 20
 MAX_FEATURE_LENGTH = 200
 MAX_SEARCH_TERMS = 7
 MAX_SHORT_DESCRIPTION_LENGTH = 1000
+# Partner Center's "What's new in this version" field.
+MAX_WHATS_NEW_LENGTH = 1500
 MIN_SCREENSHOTS = 3
 MIN_SCREENSHOT_WIDTH = 1366
 MIN_SCREENSHOT_HEIGHT = 768
@@ -142,6 +144,11 @@ def validate_listing(
     notes = data.whats_new.get(version, "").strip()
     if not notes:
         errors.append(f"whats_new missing entry for version {version}")
+    elif len(notes) > MAX_WHATS_NEW_LENGTH:
+        errors.append(
+            f"whats_new for {version} is {len(notes)} chars, "
+            f"exceeds {MAX_WHATS_NEW_LENGTH}"
+        )
     if not (1 <= len(data.features) <= MAX_FEATURES):
         errors.append(
             f"features count {len(data.features)} not in 1..{MAX_FEATURES}"
