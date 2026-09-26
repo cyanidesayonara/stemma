@@ -1,26 +1,28 @@
-"""Generate Microsoft Store screenshots from the real application UI.
+"""Generate the Microsoft Store screenshot set from the real application UI.
 
-Renders the actual MainWindow offscreen at Store dimensions, so the
-screenshots always match the shipped build instead of being hand-captured
-and going stale.
+    python scripts/generate_screenshots.py [--song-dir DIR]
+        [--title TITLE] [--artist ARTIST] [--out DIR]
 
-    python scripts/generate_screenshots.py [song_dir]
+Renders the real MainWindow offscreen, scripted into each state, so the Store
+art always matches the build instead of going stale. The set follows the
+plan in issue #146: two composed shots (headline and trust line beside the
+window) lead, then bare full-window shots, each showing one feature. Every
+shot is 1920x1080. Captions for Partner Center are written to
+``captions.txt`` next to the images.
 
-Outputs 1366x768 PNGs (Partner Center desktop minimum) to
-assets/store_listing/screenshots/.
-
-By default it uses the newest fully separated song in the per-user data
-directory. Pass a song directory to pick one deliberately -- for store
-art, choose a track whose waveform looks interesting.
-
-Note: the offscreen QPA platform registers no system fonts, so text
-would render as empty boxes. Segoe UI is loaded from disk explicitly
-before any widget is built.
+``--song-dir`` points at a separated song folder (``vocals.wav``,
+``drums.wav``, ...). Use a song you have the rights to show: the generated
+fixture used without it is for layout checks only, since its waveforms look
+too regular for Store art. Like ``render_ui_review.py``, it runs against a
+private data directory and throwaway settings files, never your library.
 """
 
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import os
+import shutil
 import sys
 import time
 
@@ -30,133 +32,544 @@ sys.path.insert(0, _ROOT)
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_OUT_DIR = os.path.join(_ROOT, "assets", "store_listing", "screenshots")
-_SIZE = (1366, 768)
-_UI_FONTS = (
-    r"C:\Windows\Fonts\segoeui.ttf",
-    r"C:\Windows\Fonts\arial.ttf",
+import numpy as np  # noqa: E402
+import soundfile as sf  # noqa: E402
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt  # noqa: E402
+from PySide6.QtGui import (  # noqa: E402
+    QColor,
+    QFont,
+    QFontDatabase,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QRadialGradient,
 )
-# Glyphs Segoe UI lacks, such as the theme toggle's sun, fall back to this.
-# A real Windows session does that on its own; offscreen Qt does not.
-_SYMBOL_FONT = r"C:\Windows\Fonts\seguisym.ttf"
-_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
+from PySide6.QtSvg import QSvgRenderer  # noqa: E402
+
+from scripts.qt_capture import pump  # noqa: E402
+from scripts.render_ui_review import (  # noqa: E402
+    MODEL_KEYS,
+    close_window,
+    load_song,
+    open_window,
+    prepare_library,
+    stage_practice,
+    start_app,
+    wait_for_detection,
+)
+from src.library import SongLibrary  # noqa: E402
+from src.separation_state import (  # noqa: E402
+    EXPECTED_STEMS,
+    write_completion_marker,
+)
+
+DEFAULT_OUT = os.path.join(_ROOT, "assets", "store_listing", "screenshots")
+# The v2.x set this one replaces; cleared from the output folder so the
+# release gate does not count stale shots.
+LEGACY_SHOTS = ("01_empty_dark.png", "02_player_dark.png",
+                "02_player_light.png")
+_WORDMARK_SVG = os.path.join(_ROOT, "assets", "icons",
+                             "logo_arpeggio_dark.svg")
+# The wordmark SVG uses live <text> in Palatino italic, which offscreen Qt
+# only renders once the font file is registered.
+_WORDMARK_FONTS = (
+    r"C:\Windows\Fonts\palai.ttf",
+    r"C:\Windows\Fonts\georgiai.ttf",
+)
+CANVAS = (1920, 1080)
+# Composed shots frame a window at the Partner Center minimum size, so its
+# UI text stays legible after scaling into the art.
+COMPOSED_WINDOW = (1366, 768)
+STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
+_DATA_DIR = os.path.join(_ROOT, "build", "store-screenshots", ".data")
 
 
-def _load_ui_font(app) -> None:
-    """Register a real UI font: offscreen Qt otherwise draws tofu boxes."""
-    from PySide6.QtGui import QFont, QFontDatabase
+@dataclasses.dataclass(frozen=True)
+class Shot:
+    """One Store screenshot: what to stage, and how to present it."""
 
-    symbol_family = None
-    if os.path.isfile(_SYMBOL_FONT):
-        fid = QFontDatabase.addApplicationFont(_SYMBOL_FONT)
-        found = QFontDatabase.applicationFontFamilies(fid)
-        symbol_family = found[0] if found else None
+    name: str
+    state: str
+    theme: str
+    caption: str
+    headline: str = ""
+    subline: str = ""
+    chips: tuple[str, ...] = ()
 
-    for path in _UI_FONTS:
-        if not os.path.isfile(path):
-            continue
-        fid = QFontDatabase.addApplicationFont(path)
-        families = QFontDatabase.applicationFontFamilies(fid)
-        if families:
-            if symbol_family:
-                QFont.insertSubstitution(families[0], symbol_family)
-            app.setFont(QFont(families[0], 9))
-            print(f"  ui font: {families[0]}")
-            return
-    print("  WARNING: no UI font found; text may render as boxes")
+    @property
+    def composed(self) -> bool:
+        return bool(self.headline)
 
 
-def _pump(app, seconds: float) -> None:
-    """Process events for *seconds* so async work (peaks) can land."""
-    end = time.monotonic() + seconds
+# Every shot that shows a loaded song: keep the metronome BPM next to
+# the detected tempo, including shot 3 ("loaded"), which never enters
+# the practice staging path.
+SYNC_METRONOME_STATES = frozenset(
+    ("practice", "loop_trainer", "takes", "loaded"),
+)
+
+# Detector chord roots, longest first so "C#" matches before "C".
+_CHORD_ROOTS = ("C#", "F#", "Eb", "Ab", "Bb",
+                "C", "D", "E", "F", "G", "A", "B")
+_CHORD_ROOT_INDEX = {
+    "C": 0, "C#": 1, "D": 2, "Eb": 3, "E": 4, "F": 5,
+    "F#": 6, "G": 7, "Ab": 8, "A": 9, "Bb": 10, "B": 11,
+}
+_CHORD_ROOT_NAMES = ["C", "C#", "D", "Eb", "E", "F",
+                     "F#", "G", "Ab", "A", "Bb", "B"]
+
+
+SHOTS = (
+    Shot(
+        "01_practice", "practice", "dark",
+        caption="Mute your part and play along with the band",
+        headline="Mute your part.\nPlay along.",
+        subline=(
+            "stemma splits any song into stems, so you can drop the part "
+            "you play and loop the bars you are learning."
+        ),
+        chips=("Runs on your PC", "No account", "No subscription"),
+    ),
+    Shot(
+        "02_loop_trainer", "loop_trainer", "dark",
+        caption="Slow down, transpose, and loop the hard bars",
+        headline="Slow it down.\nLoop the hard bars.",
+        subline=(
+            "Loop Trainer speeds a passage up one step each time it "
+            "repeats, until you play it at full tempo."
+        ),
+        chips=("Slow down, same pitch", "Transpose", "Metronome"),
+    ),
+    Shot(
+        "03_detected", "loaded", "light",
+        caption="Key, chords, and tempo detected for you",
+    ),
+    Shot(
+        "04_import", "import", "dark",
+        caption="Split into 2, 4, or 6 stems; two-stem mode can use your GPU",
+    ),
+    Shot(
+        "05_takes", "takes", "dark",
+        caption="Record takes over the stems and line them up",
+    ),
+)
+
+
+def import_song_dir(stemma_dir, song_dir, title, artist):
+    """Copy a separated song folder into the private library."""
+    if not os.path.isdir(song_dir):
+        raise SystemExit(f"{song_dir}: not a folder")
+    stems = [s for s in STEM_NAMES
+             if os.path.isfile(os.path.join(song_dir, f"{s}.wav"))]
+    supported = _expected_stems()
+    model_key = next(
+        (key for key, names in supported.items() if set(names) == set(stems)),
+        None,
+    )
+    if model_key is None:
+        options = "; ".join(
+            ", ".join(names) for names in supported.values()
+        )
+        raise SystemExit(
+            f"{song_dir}: found stems {stems}; need one of: {options}"
+        )
+    for stale in ("songs", "library.json", "library.json.bak"):
+        path = os.path.join(stemma_dir, stale)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        elif os.path.isfile(path):
+            os.remove(path)
+    os.makedirs(stemma_dir, exist_ok=True)
+    library = SongLibrary(stemma_dir)
+    first = os.path.join(song_dir, f"{stems[0]}.wav")
+    song = library.add_song(title, artist, first, model_key)
+    for name in stems:
+        shutil.copy2(os.path.join(song_dir, f"{name}.wav"), song.stems_path)
+    write_completion_marker(song.stems_path, model_key)
+    return library, song.id
+
+
+def _expected_stems():
+    return {k: v for k, v in EXPECTED_STEMS.items() if k in MODEL_KEYS.values()}
+
+
+def clear_previous_set(out_dir: str) -> None:
+    """Delete the screenshots this script writes, and the v2.x set.
+
+    Only those names: ``--out`` may point at a folder holding other images.
+    """
+    for name in [f"{shot.name}.png" for shot in SHOTS] + list(LEGACY_SHOTS):
+        path = os.path.join(out_dir, name)
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def write_takes(song_dir: str) -> None:
+    """Add a recording take derived from the song's own stems.
+
+    It stands in for a player's take: a quieter, offset copy of an
+    instrument stem, so the take lane reads as music rather than silence.
+    """
+    source = next(
+        (os.path.join(song_dir, f"{s}.wav") for s in ("guitar", "other", "bass")
+         if os.path.isfile(os.path.join(song_dir, f"{s}.wav"))),
+        None,
+    )
+    if source is None:
+        return
+    data, sr = sf.read(source, dtype="float32", always_2d=True)
+    # One take: at the two-take limit Record disables itself, which would
+    # read as broken in Store art.
+    shifted = np.roll(data, int(sr * 0.25), axis=0) * 0.7
+    sf.write(os.path.join(song_dir, "recording_take1.wav"), shifted, sr)
+
+
+def transpose_chord_label(chord: str, n_steps: int) -> str:
+    """Shift a detector chord label (``C``, ``Am``) by *n_steps* semitones.
+
+    The live badge does not do this yet; Store art would otherwise show
+    "C major -> Bb major" beside "Chord: C". See issue #174.
+    """
+    if not chord or n_steps == 0:
+        return chord
+    for root in _CHORD_ROOTS:
+        if chord == root or chord.startswith(root) and chord[len(root):] in (
+            "", "m",
+        ):
+            idx = _CHORD_ROOT_INDEX[root]
+            suffix = chord[len(root):]
+            return f"{_CHORD_ROOT_NAMES[(idx + int(n_steps)) % 12]}{suffix}"
+    return chord
+
+
+def shot_shows_metronome_on(shot: Shot) -> bool:
+    """Shot 2 advertises the metronome, so the power button should be on."""
+    return "Metronome" in shot.chips
+
+
+def show_current_chord(window) -> None:
+    """Show the chord at the playhead, as the badge does during playback.
+
+    Paused, the badge deliberately reads "--"; the shots are stills of a
+    playing session. Transpose to match the key badge until the app does.
+    """
+    controls = window._player_controls
+    player = window._player
+    chord = player.chord_at(int(player.current_seconds * player.sample_rate))
+    if chord:
+        shown = transpose_chord_label(chord, player.pitch_semitones)
+        controls._chord_label.setText(controls._badge_html("Chord:", shown))
+
+
+def stage(app, window, shot, song_id) -> None:
+    """Drive the window into the state *shot* shows."""
+    load_song(app, window, song_id, 90.0)
+    if shot.state in ("practice", "loop_trainer", "takes"):
+        stage_practice(app, window)
+        pump(app, 0.5)
+        wait_for_detection(app, window._player_controls, 20.0)
+    if shot.state in SYNC_METRONOME_STATES:
+        sync_metronome(window)
+    if shot_shows_metronome_on(shot):
+        toggle = window._player_controls._metronome_toggle
+        if not toggle.isChecked():
+            toggle.click()
+    if shot.state == "loop_trainer":
+        renders = {"finished": 0, "last": time.monotonic()}
+
+        def note(finished: bool) -> None:
+            renders["last"] = time.monotonic()
+            if finished:
+                renders["finished"] += 1
+
+        player = window._player
+        player.stretch_started.connect(lambda: note(False))
+        player.stretch_finished.connect(lambda: note(True))
+        rack = window._player_controls.practice_rack
+        rack._trainer_check.setChecked(True)
+        index = rack.speed_combo.findData(0.75)
+        if index >= 0 and rack.speed_combo.currentIndex() != index:
+            rack.speed_combo.setCurrentIndex(index)
+        # Let the speed render land before changing pitch. A pitch change
+        # supersedes a pending speed render, and the shot must show one
+        # settled state.
+        if player.speed != 0.75:
+            _wait_for_renders(app, renders)
+        renders["finished"] = 0
+        rack.pitch_spin.setValue(-2)
+        _wait_for_renders(app, renders)
+    show_current_chord(window)
+    pump(app, 0.2)
+
+
+def sync_metronome(window) -> None:
+    """Set the metronome to the detected tempo and sync it to the beats.
+
+    Otherwise it reads its 120 BPM default beside the detected tempo. Sync
+    alone does not fix that in a still: its live BPM updates only while
+    playing.
+    """
+    controls = window._player_controls
+    digits = "".join(c for c in controls._detected_bpm_raw if c.isdigit())
+    if digits:
+        controls._bpm_spin.setValue(int(digits))
+    button = controls._beat_sync_btn
+    if button.isEnabled() and not button.isChecked():
+        button.click()
+
+
+def _wait_for_renders(app, renders, timeout_s: float = 120.0) -> None:
+    """Wait until speed/pitch rendering has finished and gone quiet.
+
+    Otherwise the capture shows progress text such as "-2 semi (0/6)".
+    Counting starts against finishes does not work: a render superseded by
+    the next change starts but never finishes. So wait for at least one
+    finish followed by two quiet seconds.
+    """
+    end = time.monotonic() + timeout_s
     while time.monotonic() < end:
-        app.processEvents()
-        time.sleep(0.01)
+        pump(app, 0.25)
+        quiet = time.monotonic() - renders["last"]
+        if renders["finished"] and quiet >= 2.0:
+            return
+    print("  note: speed/pitch render still running at capture")
 
 
-def _pick_song(data_dir: str) -> str | None:
-    """Newest song directory that has at least two stems on disk."""
-    songs_dir = os.path.join(data_dir, "songs")
-    if not os.path.isdir(songs_dir):
-        return None
-    candidates = []
-    for name in os.listdir(songs_dir):
-        d = os.path.join(songs_dir, name)
-        stems = [
-            s for s in _STEM_NAMES
-            if os.path.isfile(os.path.join(d, f"{s}.wav"))
-        ]
-        if len(stems) >= 2:
-            candidates.append((os.path.getmtime(d), d))
-    if not candidates:
-        return None
-    return max(candidates)[1]
-
-
-def main() -> None:
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication(sys.argv)
-    _load_ui_font(app)
-
-    from src.data_paths import platform_user_data_dir
-    from src.library import SongLibrary
+def grab_import_over(app, window, library, stemma_dir):
+    """The window with the import dialog open over it, as the user sees it."""
+    # Deferred: src.ui is imported only after start_app() has pointed
+    # LOCALAPPDATA at the private data directory.
     from src.model_manager import ModelManager
-    from src.player import MultiTrackPlayer
-    from src.ui.main_window import MainWindow
-    from src.ui.styles import get_colors, get_stylesheet
+    from src.ui.import_dialog import ImportDialog
 
-    data_dir = platform_user_data_dir()
-    library = SongLibrary(data_dir)
+    dialog = ImportDialog(library, ModelManager(stemma_dir), window)
+    # Show the GPU two-stem option, one of stemma's differentiators.
+    index = dialog._model_combo.findData(MODEL_KEYS[2])
+    if index >= 0:
+        dialog._model_combo.setCurrentIndex(index)
+    dialog.show()
+    pump(app, 0.5)
+    base = window.grab().toImage()
+    top = dialog.grab().toImage()
+    painter = QPainter(base)
+    painter.fillRect(base.rect(), _rgba(0, 0, 0, 90))
+    origin = QPoint((base.width() - top.width()) // 2,
+                    (base.height() - top.height()) // 2)
+    _shadow(painter, origin.x(), origin.y(), top.width(), top.height())
+    painter.drawImage(origin, top)
+    painter.end()
+    dialog.close()
+    pump(app, 0.2)
+    return base
 
-    wanted = sys.argv[1] if len(sys.argv) > 1 else None
-    if wanted is None:
-        wanted = _pick_song(data_dir)
-    song_id = None
-    if wanted:
-        target = os.path.normcase(os.path.abspath(wanted))
-        for song in library.songs:
-            if os.path.normcase(os.path.abspath(song.stems_path)) == target:
-                song_id = song.id
-                break
-    if song_id is None and library.songs:
-        song_id = library.songs[0].id
 
-    os.makedirs(_OUT_DIR, exist_ok=True)
-    written: list[str] = []
+def _rgba(r, g, b, a):
+    return QColor(r, g, b, a)
 
-    for theme in ("dark", "light"):
-        app.setStyleSheet(get_stylesheet(theme))
-        window = MainWindow(library, MultiTrackPlayer(), ModelManager(data_dir))
-        window._theme = theme
-        window.apply_theme(theme, get_colors(theme))
-        window.resize(*_SIZE)
-        window.show()
-        _pump(app, 0.6)
 
-        if theme == "dark":
-            out = os.path.join(_OUT_DIR, "01_empty_dark.png")
-            window.grab().save(out)
-            written.append(out)
+def _shadow(painter, x, y, w, h, radius=10, spread=18) -> None:
+    """A soft drop shadow: stacked translucent rounded rectangles."""
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    for i in range(spread, 0, -3):
+        painter.setBrush(_rgba(0, 0, 0, max(4, 40 - i * 2)))
+        painter.drawRoundedRect(
+            QRectF(x - i, y - i + 8, w + 2 * i, h + 2 * i),
+            radius + i, radius + i,
+        )
+    painter.restore()
 
-        if song_id is not None:
-            window._library_panel.select_song(song_id)
-            # Peaks are computed on a worker thread; give it time to land
-            # so the waveform is populated rather than a flat line.
-            _pump(app, 3.5)
-            window._player.seek(window._player.total_seconds * 0.34)
-            _pump(app, 0.5)
-            out = os.path.join(_OUT_DIR, f"02_player_{theme}.png")
-            window.grab().save(out)
-            written.append(out)
 
-        window._player.shutdown()
-        window._player_controls.shutdown()
-        window.close()
-        _pump(app, 0.2)
+HEADLINE_PX = 56
+WORDMARK_HEIGHT = 56
 
-    for path in written:
-        print("wrote", os.path.relpath(path, _ROOT))
+
+def _draw_wordmark(painter, left: float, top: float) -> None:
+    """Draw the stemma arpeggio wordmark, the logo the app footer shows."""
+    for path in _WORDMARK_FONTS:
+        if os.path.isfile(path):
+            QFontDatabase.addApplicationFont(path)
+    renderer = QSvgRenderer(_WORDMARK_SVG)
+    size = renderer.defaultSize()
+    width = WORDMARK_HEIGHT * size.width() / size.height()
+    renderer.render(painter, QRectF(left, top, width, WORDMARK_HEIGHT))
+
+
+def _text_block_height(painter, shot, font_family, text_width) -> float:
+    """Height of the brand, headline, subline, and chips as compose() lays them."""
+    height = WORDMARK_HEIGHT + 14.0
+    headline = QFont(font_family, 1)
+    headline.setPixelSize(HEADLINE_PX)
+    headline.setWeight(QFont.Weight.Bold)
+    painter.setFont(headline)
+    height += painter.boundingRect(
+        QRectF(0, 0, text_width, 400), Qt.TextFlag.TextWordWrap, shot.headline,
+    ).height() + 28
+    sub = QFont(font_family, 1)
+    sub.setPixelSize(25)
+    painter.setFont(sub)
+    height += painter.boundingRect(
+        QRectF(0, 0, text_width - 20, 400), Qt.TextFlag.TextWordWrap,
+        shot.subline,
+    ).height() + 36
+    chip = QFont(font_family, 1)
+    chip.setPixelSize(20)
+    painter.setFont(chip)
+    rows, x = 1, 0.0
+    for label in shot.chips:
+        width = painter.fontMetrics().horizontalAdvance(label) + 36
+        if x and x + width > text_width:
+            rows, x = rows + 1, 0.0
+        x += width + 12
+    return height + rows * 52 - 12
+
+
+def compose(window_image, shot, colors, font_family):
+    """Lay the window out beside the shot's headline, subline, and chips."""
+    canvas = QImage(*CANVAS, QImage.Format.Format_ARGB32)
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+    ground = QLinearGradient(0, 0, 0, CANVAS[1])
+    ground.setColorAt(0.0, QColor("#11111b"))
+    ground.setColorAt(1.0, QColor(colors["base"]))
+    painter.fillRect(canvas.rect(), ground)
+    glow = QRadialGradient(QPointF(CANVAS[0] * 0.78, CANVAS[1] * 0.9), 900)
+    accent = QColor(colors["accent"])
+    glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 60))
+    glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+    painter.fillRect(canvas.rect(), glow)
+
+    left, text_width = 110, 560
+    # Lay the text out once off-canvas to measure it, then center the
+    # block on the window beside it.
+    y = (CANVAS[1] - _text_block_height(painter, shot, font_family,
+                                         text_width)) / 2
+    _draw_wordmark(painter, left - 12, y)
+    y += WORDMARK_HEIGHT + 14
+
+    headline = QFont(font_family, 1)
+    headline.setPixelSize(HEADLINE_PX)
+    headline.setWeight(QFont.Weight.Bold)
+    painter.setFont(headline)
+    painter.setPen(QColor("#f4f5fb"))
+    rect = QRectF(left, y, text_width, 260)
+    bounds = painter.boundingRect(rect, Qt.TextFlag.TextWordWrap, shot.headline)
+    painter.drawText(rect, Qt.TextFlag.TextWordWrap, shot.headline)
+    y += bounds.height() + 28
+
+    sub = QFont(font_family, 1)
+    sub.setPixelSize(25)
+    painter.setFont(sub)
+    painter.setPen(QColor(colors["text"]))
+    rect = QRectF(left, y, text_width - 20, 200)
+    bounds = painter.boundingRect(rect, Qt.TextFlag.TextWordWrap, shot.subline)
+    painter.drawText(rect, Qt.TextFlag.TextWordWrap, shot.subline)
+    y += bounds.height() + 36
+
+    chip = QFont(font_family, 1)
+    chip.setPixelSize(20)
+    painter.setFont(chip)
+    x = float(left)
+    for label in shot.chips:
+        width = painter.fontMetrics().horizontalAdvance(label) + 36
+        if x + width > left + text_width:
+            x = float(left)
+            y += 52
+        box = QRectF(x, y, width, 40)
+        painter.setPen(accent)
+        painter.setBrush(QColor(accent.red(), accent.green(), accent.blue(), 28))
+        painter.drawRoundedRect(box, 20, 20)
+        painter.setPen(QColor("#e6e9f5"))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, label)
+        x += width + 12
+
+    scaled = window_image.scaledToWidth(
+        1130, Qt.TransformationMode.SmoothTransformation,
+    )
+    wx = CANVAS[0] - scaled.width() - 70
+    wy = (CANVAS[1] - scaled.height()) // 2
+    _shadow(painter, wx, wy, scaled.width(), scaled.height())
+    clip = QPainterPath()
+    clip.addRoundedRect(QRectF(wx, wy, scaled.width(), scaled.height()), 10, 10)
+    painter.setClipPath(clip)
+    painter.drawImage(wx, wy, scaled)
+    painter.setClipping(False)
+    painter.setPen(QColor(255, 255, 255, 28))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(
+        QRectF(wx + 0.5, wy + 0.5, scaled.width() - 1, scaled.height() - 1),
+        10, 10,
+    )
+    painter.end()
+    return canvas
+
+
+def generate(out_dir, song_dir=None, title="", artist=""):
+    """Render every shot in SHOTS into *out_dir*; return the written paths."""
+    app = start_app(_DATA_DIR)
+
+    # Deferred: src.ui is imported only after start_app() has pointed
+    # LOCALAPPDATA at the private data directory.
+    from src.data_paths import platform_user_data_dir
+    from src.ui.styles import get_colors
+
+    font_family = app.font().family()
+    stemma_dir = platform_user_data_dir()
+    if song_dir:
+        library, song_id = import_song_dir(
+            stemma_dir, song_dir, title or "Song", artist or "Artist",
+        )
+    else:
+        print("  note: no --song-dir; using the generated fixture "
+              "(layout checks only, not Store art)")
+        library, song_id = prepare_library(stemma_dir, 6)
+
+    os.makedirs(out_dir, exist_ok=True)
+    clear_previous_set(out_dir)
+
+    written = []
+    for shot in SHOTS:
+        if shot.state == "takes":
+            write_takes(library.get_song(song_id).stems_path)
+        size = COMPOSED_WINDOW if shot.composed else CANVAS
+        settings = os.path.join(_DATA_DIR, "settings", f"{shot.name}.ini")
+        window = open_window(
+            app, library, stemma_dir, settings, shot.theme, size,
+        )
+        if shot.state == "import":
+            load_song(app, window, song_id, 90.0)
+            image = grab_import_over(app, window, library, stemma_dir)
+        else:
+            stage(app, window, shot, song_id)
+            image = window.grab().toImage()
+        if shot.composed:
+            image = compose(image, shot, get_colors(shot.theme), font_family)
+        path = os.path.join(out_dir, f"{shot.name}.png")
+        image.save(path)
+        written.append(path)
+        # Not relpath: --out may be on another drive than the repository.
+        print("wrote", path)
+        close_window(app, window)
+
+    with open(os.path.join(out_dir, "captions.txt"), "w",
+              encoding="utf-8") as handle:
+        for shot in SHOTS:
+            handle.write(f"{shot.name}.png: {shot.caption}\n")
+    return written
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--song-dir", help="separated song folder to show")
+    parser.add_argument("--title", default="")
+    parser.add_argument("--artist", default="")
+    parser.add_argument("--out", default=DEFAULT_OUT)
+    args = parser.parse_args(argv)
+    generate(os.path.abspath(args.out), args.song_dir, args.title,
+             args.artist)
 
 
 if __name__ == "__main__":
