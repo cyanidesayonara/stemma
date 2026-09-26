@@ -176,6 +176,24 @@ def test_validate_listing_rejects_overlong_whats_new(tmp_path: Path) -> None:
     )
 
 
+def test_validate_listing_counts_whats_new_line_breaks_as_crlf(
+    tmp_path: Path,
+) -> None:
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    # At the limit with LF line breaks, one over it with CRLF.
+    notes = "x" * (MAX_WHATS_NEW_LENGTH - 2) + "\nx"
+    with pytest.raises(ValidationError) as exc:
+        validate_listing(
+            _data(whats_new={"2.6.0": notes}),
+            version="2.6.0",
+            screenshots_dir=shots,
+        )
+    assert any(
+        f"exceeds {MAX_WHATS_NEW_LENGTH}" in err for err in exc.value.errors
+    )
+
+
 def test_validate_listing_accepts_whats_new_at_the_limit(
     tmp_path: Path,
 ) -> None:

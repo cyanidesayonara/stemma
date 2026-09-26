@@ -144,11 +144,16 @@ def validate_listing(
     notes = data.whats_new.get(version, "").strip()
     if not notes:
         errors.append(f"whats_new missing entry for version {version}")
-    elif len(notes) > MAX_WHATS_NEW_LENGTH:
-        errors.append(
-            f"whats_new for {version} is {len(notes)} chars, "
-            f"exceeds {MAX_WHATS_NEW_LENGTH}"
-        )
+    else:
+        # Counted with CRLF line breaks, the form Partner Center hands the
+        # text back in (see _normalize_listing_text), in case it enforces
+        # the limit on that form.
+        length = len(notes.replace("\n", "\r\n"))
+        if length > MAX_WHATS_NEW_LENGTH:
+            errors.append(
+                f"whats_new for {version} is {length} chars, "
+                f"exceeds {MAX_WHATS_NEW_LENGTH}"
+            )
     if not (1 <= len(data.features) <= MAX_FEATURES):
         errors.append(
             f"features count {len(data.features)} not in 1..{MAX_FEATURES}"
