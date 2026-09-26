@@ -57,5 +57,13 @@ def test_untransposed_chord_is_unchanged(controls):
 
     controls._update_chord_label()
 
-    assert "C" in controls._chord_label.text()
-    assert "Bb" not in controls._chord_label.text()
+    assert controls._chord_label.text() == controls._badge_html("Chord:", "C")
+
+
+def test_theme_change_while_paused_keeps_the_placeholder(controls):
+    """Paused, the badge reads "--"; a theme change must not fill it in."""
+    controls._player.is_playing = False
+
+    controls.apply_theme("dark", DARK_COLORS)
+
+    assert controls._chord_label.text() == controls._badge_html("Chord:", "--")

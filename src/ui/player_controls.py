@@ -469,9 +469,11 @@ class PlayerControls(QWidget):
             self._player.current_seconds * self._player.sample_rate
         )
         pitch = int(self._player.pitch_semitones)
+        # Paused, the badge reads "--" (see _on_state_changed); only a
+        # playing session shows the chord at the playhead.
         chord = (
             transpose_chord(self._player.chord_at(frame), pitch)
-            if self._player.chord_sequence
+            if self._player.chord_sequence and self._player.is_playing
             else None
         )
         effective = None
