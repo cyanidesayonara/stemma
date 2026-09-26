@@ -58,6 +58,7 @@ from scripts.render_ui_review import (  # noqa: E402
     start_app,
     wait_for_detection,
 )
+from src.beat_detector import transpose_chord  # noqa: E402
 from src.library import SongLibrary  # noqa: E402
 from src.separation_state import (  # noqa: E402
     EXPECTED_STEMS,
@@ -108,17 +109,6 @@ class Shot:
 SYNC_METRONOME_STATES = frozenset(
     ("practice", "loop_trainer", "takes", "loaded"),
 )
-
-# Detector chord roots, longest first so "C#" matches before "C".
-_CHORD_ROOTS = ("C#", "F#", "Eb", "Ab", "Bb",
-                "C", "D", "E", "F", "G", "A", "B")
-_CHORD_ROOT_INDEX = {
-    "C": 0, "C#": 1, "D": 2, "Eb": 3, "E": 4, "F": 5,
-    "F#": 6, "G": 7, "Ab": 8, "A": 9, "Bb": 10, "B": 11,
-}
-_CHORD_ROOT_NAMES = ["C", "C#", "D", "Eb", "E", "F",
-                     "F#", "G", "Ab", "A", "Bb", "B"]
-
 
 SHOTS = (
     Shot(
@@ -225,24 +215,6 @@ def write_takes(song_dir: str) -> None:
     sf.write(os.path.join(song_dir, "recording_take1.wav"), shifted, sr)
 
 
-def transpose_chord_label(chord: str, n_steps: int) -> str:
-    """Shift a detector chord label (``C``, ``Am``) by *n_steps* semitones.
-
-    The live badge does not do this yet; Store art would otherwise show
-    "C major -> Bb major" beside "Chord: C". See issue #174.
-    """
-    if not chord or n_steps == 0:
-        return chord
-    for root in _CHORD_ROOTS:
-        if chord == root or chord.startswith(root) and chord[len(root):] in (
-            "", "m",
-        ):
-            idx = _CHORD_ROOT_INDEX[root]
-            suffix = chord[len(root):]
-            return f"{_CHORD_ROOT_NAMES[(idx + int(n_steps)) % 12]}{suffix}"
-    return chord
-
-
 def shot_shows_metronome_on(shot: Shot) -> bool:
     """Shot 2 advertises the metronome, so the power button should be on."""
     return "Metronome" in shot.chips
@@ -252,13 +224,13 @@ def show_current_chord(window) -> None:
     """Show the chord at the playhead, as the badge does during playback.
 
     Paused, the badge deliberately reads "--"; the shots are stills of a
-    playing session. Transpose to match the key badge until the app does.
+    playing session. Transposed as the live badge does.
     """
     controls = window._player_controls
     player = window._player
     chord = player.chord_at(int(player.current_seconds * player.sample_rate))
     if chord:
-        shown = transpose_chord_label(chord, player.pitch_semitones)
+        shown = transpose_chord(chord, int(player.pitch_semitones))
         controls._chord_label.setText(controls._badge_html("Chord:", shown))
 
 

@@ -25,7 +25,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.beat_detector import DetectionResult, DetectionWorker, transpose_key
+from src.beat_detector import (
+    DetectionResult,
+    DetectionWorker,
+    transpose_chord,
+    transpose_key,
+)
 from src.metronome import tap_tempo
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.qt_signal_utils import safe_disconnect
@@ -463,13 +468,13 @@ class PlayerControls(QWidget):
         frame = int(
             self._player.current_seconds * self._player.sample_rate
         )
+        pitch = int(self._player.pitch_semitones)
         chord = (
-            self._player.chord_at(frame)
+            transpose_chord(self._player.chord_at(frame), pitch)
             if self._player.chord_sequence
             else None
         )
         effective = None
-        pitch = int(self._player.pitch_semitones)
         if self._detected_key_raw and pitch:
             effective = transpose_key(self._detected_key_raw, pitch)
         self._song_info_bar.apply_theme(
@@ -688,7 +693,10 @@ class PlayerControls(QWidget):
         if not self._player.is_playing:
             return
         frame = int(self._player.current_seconds * self._player.sample_rate)
-        chord = self._player.chord_at(frame)
+        # Transposed like the key badge, so the two agree at any pitch.
+        chord = transpose_chord(
+            self._player.chord_at(frame), int(self._player.pitch_semitones)
+        )
         self._chord_label.setText(
             self._badge_html("Chord:", chord if chord else "--")
         )
