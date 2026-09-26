@@ -174,6 +174,35 @@ class TestTrainerRamp:
         assert seq[-1] == 1.0
         assert seq == sorted(seq)  # monotonic non-decreasing
 
+    def test_pitch_render_refreshes_trainer_status(self, controls, loaded):
+        """A pitch change supersedes a pending speed render, so the combined
+        render reports only pitch_changed. The readout must still show the
+        speed that render applied."""
+        self._make_loop(controls)
+        controls._trainer_enabled = True
+        controls._update_trainer_status()
+        assert controls._trainer_status.text() == "at 1.0x"
+
+        loaded._playback_speed = 0.75
+        loaded._pitch_semitones = -2
+        controls._on_pitch_applied(-2)
+
+        assert controls._trainer_status.text() == "now 0.75x"
+
+    def test_speed_render_refreshes_transposed_key(self, controls, loaded):
+        """The mirror case: a speed change cancels a pending pitch render,
+        and the replacement render reports only speed_changed. The key badge
+        must still show the transposed key."""
+        controls._detected_key_raw = "C major"
+        controls._refresh_key_label()
+        assert "D major" not in controls._key_label.text()
+
+        loaded._playback_speed = 0.75
+        loaded._pitch_semitones = 2
+        controls._on_speed_applied(0.75)
+
+        assert "C major \u2192 D major" in controls._key_label.text()
+
 
 # -----------------------------------------------------------------------
 # UI: reset on song load + session round-trip

@@ -1044,7 +1044,18 @@ class PlayerControls(QWidget):
         if idx >= 0:
             self._speed_combo.setCurrentIndex(idx)
         self._speed_combo.blockSignals(False)
+        self._refresh_after_render()
+
+    def _refresh_after_render(self) -> None:
+        """Refresh everything that depends on the applied speed or pitch.
+
+        A render that supersedes another emits only its own signal
+        (speed_changed or pitch_changed) even though it applies both
+        values, so both slots must refresh the same set of widgets.
+        """
+        # Buffers may have new lengths after a combined render.
         self._do_recompute_peaks()
+        self._refresh_key_label()
         self.update_record_button_state()
         self._update_trainer_status()
 
@@ -1091,11 +1102,7 @@ class PlayerControls(QWidget):
         self._pitch_spin.blockSignals(True)
         self._pitch_spin.setValue(int(semitones))
         self._pitch_spin.blockSignals(False)
-        # Refresh peaks (buffers may have new lengths after a combined render)
-        self._do_recompute_peaks()
-        # Refresh the detected-key label to show the transposed key.
-        self._refresh_key_label()
-        self.update_record_button_state()
+        self._refresh_after_render()
 
     def bump_pitch(self, direction: int) -> None:
         """Nudge the pitch spinbox by one semitone.
