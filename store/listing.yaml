@@ -126,11 +126,12 @@ whats_new:
     chord, and tempo sit together in one readout under the waveform. Play,
     stop, and record stay anchored at the bottom of the window.
 
-    Keyboard and feedback: press Tab to move between controls, and Space
-    or Enter to press the one you are on. Buttons now show hover, pressed,
-    and disabled states, and a muted or soloed stem is clearly marked.
+    Keyboard and feedback: Space or Enter now presses the control you
+    tabbed to. Transport and toggle buttons now show hover, pressed, and
+    disabled states, and a muted or soloed stem is clearly marked.
 
-    The chord readout follows a pitch shift along with the key.
+    Pitch shift: the chord readout now follows the transposition, as the
+    key already did.
 
     Stability: changing loop points quickly no longer risks a crash, and
     many smaller layout and display issues are fixed.
