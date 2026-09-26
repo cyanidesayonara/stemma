@@ -63,7 +63,7 @@ features:
   - "Count-in before playback and before each loop repeat"
   - "Record your own take against the backing track"
   - "Manual timing offset for recorded takes"
-  - "Waveform with click-to-seek, playback cursor, and loop markers"
+  - "Stacked waveform with a colored lane per stem, click-to-seek, and loop shading"
   - "Export stems or a custom mix as WAV or MP3"
   - "Import from an audio file or a YouTube link"
   - "Session memory: song, position, mix, loop, speed, and pitch"
@@ -116,3 +116,22 @@ whats_new:
     stems load asynchronously so the UI stays responsive, and release
     diagnostics make packaged builds easier to verify before Store
     submission.
+  "3.0.0": |
+    What's new in version 3.0.0
+
+    A new practice cockpit: the waveform now shows every stem in its own
+    colored lane, so you can see where each part plays, and a muted stem
+    dims in place. The practice controls are grouped into three cards --
+    Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key,
+    chord, and tempo sit together in one readout under the waveform. Play,
+    stop, and record stay anchored at the bottom of the window.
+
+    Keyboard and feedback: Space or Enter now presses the control you
+    tabbed to. Transport and toggle buttons now show hover, pressed, and
+    disabled states, and a muted or soloed stem is clearly marked.
+
+    Pitch shift: the chord readout now follows the transposition, as the
+    key already did.
+
+    Stability: changing loop points quickly no longer risks a crash, and
+    many smaller layout and display issues are fixed.

@@ -105,7 +105,7 @@ Beat-synced metronome with tap tempo and nudge
 Count-in before playback and before each loop repeat
 Record your own take against the backing track
 Manual timing offset for recorded takes
-Waveform with click-to-seek, playback cursor, and loop markers
+Stacked waveform with a colored lane per stem, click-to-seek, and loop shading
 Export stems or a custom mix as WAV or MP3
 Import from an audio file or a YouTube link
 Session memory: song, position, mix, loop, speed, and pitch
