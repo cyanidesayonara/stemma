@@ -1,7 +1,7 @@
 {
   "packages": [
     {
-      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v2.6.0/stemma.msix",
+      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.0.0/stemma.msix",
       "languages": [
         "en-us"
       ],
@@ -45,7 +45,7 @@
       "slow down music",
       "music stem separator"
     ],
-    "whatsNew": "What's new in version 2.6.0\n\nFaster 2-stem separation: when a compatible GPU is available, 2-stem\nseparation runs with GPU acceleration and falls back to CPU\nautomatically when it is not.\n\nBackground imports: importing and separating songs no longer blocks\nthe rest of the app -- jobs run in a background queue so you can keep\nbrowsing your library while work finishes.\n\nStability and integrity: model downloads are checksum-verified,\nstems load asynchronously so the UI stays responsive, and release\ndiagnostics make packaged builds easier to verify before Store\nsubmission."
+    "whatsNew": "What's new in version 3.0.0\n\nA new practice cockpit: the waveform now shows every stem in its own\ncolored lane, so you can see where each part plays, and a muted stem\ndims in place. The practice controls are grouped into three cards --\nLoop and Trainer, Speed and Pitch, Metronome and Count-in -- and key,\nchord, and tempo sit together in one readout under the waveform. Play,\nstop, and record stay anchored at the bottom of the window.\n\nKeyboard and feedback: Space or Enter now presses the control you\ntabbed to. Transport and toggle buttons now show hover, pressed, and\ndisabled states, and a muted or soloed stem is clearly marked.\n\nPitch shift: the chord readout now follows the transposition, as the\nkey already did.\n\nStability: changing loop points quickly no longer risks a crash, and\nmany smaller layout and display issues are fixed."
   },
   "productId": "9P2W12L8F381",
   "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",

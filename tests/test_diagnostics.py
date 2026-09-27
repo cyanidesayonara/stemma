@@ -3,6 +3,8 @@
 import sys
 from types import SimpleNamespace
 
+from src.version import __version__
+
 
 _DIAGNOSTICS = {
     "stemma_version": "2.6.0",
@@ -35,7 +37,7 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
     diagnostics = collect_diagnostics()
 
     assert diagnostics == {
-        "stemma_version": "2.6.0",
+        "stemma_version": __version__,
         "onnxruntime_version": "1.24.4",
         "available_providers": [
             "DmlExecutionProvider",

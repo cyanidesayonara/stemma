@@ -7,6 +7,15 @@ param(
     [string]$Tag
 )
 
+$ErrorActionPreference = "Stop"
+
+# Set-Content -Encoding utf8NoBOM needs PowerShell 7; the documented local
+# run is often Windows PowerShell 5.1, where its -Encoding UTF8 adds a BOM.
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+    [System.IO.File]::WriteAllText($Path, $Text + "`n", $utf8NoBom)
+}
+
 $trimmed = $Tag.Trim()
 if ($trimmed.StartsWith("refs/tags/")) {
     $trimmed = $trimmed.Substring("refs/tags/".Length)
@@ -35,9 +44,9 @@ $versionContent = @"
 
 __version__ = "$semver"
 "@
-Set-Content -Path $versionFile -Value $versionContent -Encoding utf8NoBOM
+Write-Utf8NoBom $versionFile ($versionContent -replace "`r`n", "`n")
 
-$manifestRaw = Get-Content -Path $manifestFile -Raw
+$manifestRaw = Get-Content -Path $manifestFile -Raw -Encoding UTF8
 # Word boundary so MinVersion="..." is not matched (it contains the substring Version=").
 $pattern = '\bVersion="\d+\.\d+\.\d+\.\d+"'
 $replacement = "Version=`"$msixFourPart`""
@@ -45,6 +54,6 @@ if ($manifestRaw -notmatch $pattern) {
     throw "AppxManifest.xml: could not find Identity Version attribute to update"
 }
 $updatedManifest = $manifestRaw -replace $pattern, $replacement
-Set-Content -Path $manifestFile -Value $updatedManifest.TrimEnd() -Encoding utf8NoBOM
+Write-Utf8NoBom $manifestFile ($updatedManifest.TrimEnd() -replace "`r`n", "`n")
 
 Write-Output "Synced release version: app $semver, MSIX $msixFourPart (from tag $trimmed)"

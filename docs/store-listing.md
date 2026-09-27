@@ -4,7 +4,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 `python scripts/build_store_listing.py` to regenerate this file.
 Do not edit this markdown by hand.
 
-This copy reflects listing content for version **2.6.0**.
+This copy reflects listing content for version **3.0.0**.
 
 Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
 
@@ -74,20 +74,24 @@ keyboards). Dark and light themes.
 
 ## What's new in this version
 
-What's new in version 2.6.0
+What's new in version 3.0.0
 
-Faster 2-stem separation: when a compatible GPU is available, 2-stem
-separation runs with GPU acceleration and falls back to CPU
-automatically when it is not.
+A new practice cockpit: the waveform now shows every stem in its own
+colored lane, so you can see where each part plays, and a muted stem
+dims in place. The practice controls are grouped into three cards --
+Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key,
+chord, and tempo sit together in one readout under the waveform. Play,
+stop, and record stay anchored at the bottom of the window.
 
-Background imports: importing and separating songs no longer blocks
-the rest of the app -- jobs run in a background queue so you can keep
-browsing your library while work finishes.
+Keyboard and feedback: Space or Enter now presses the control you
+tabbed to. Transport and toggle buttons now show hover, pressed, and
+disabled states, and a muted or soloed stem is clearly marked.
 
-Stability and integrity: model downloads are checksum-verified,
-stems load asynchronously so the UI stays responsive, and release
-diagnostics make packaged builds easier to verify before Store
-submission.
+Pitch shift: the chord readout now follows the transposition, as the
+key already did.
+
+Stability: changing loop points quickly no longer risks a crash, and
+many smaller layout and display issues are fixed.
 
 ---
 
