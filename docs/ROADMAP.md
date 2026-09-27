@@ -45,8 +45,6 @@ scope or date. Each upcoming version has a GitHub milestone.
 - [#125: DirectML-compatible HTDemucs exports](https://github.com/cyanidesayonara/stemma/issues/125)
   investigates GPU inference for four/six-stem separation. Those paths are
   CPU-only today.
-- [#154: librosa 1.0](https://github.com/cyanidesayonara/stemma/issues/154)
-  checks the reworked phase vocoder by ear before lifting the `<1.0` cap.
 - [#28: experimental DSP extensions](https://github.com/cyanidesayonara/stemma/issues/28)
   evaluates separation and post-processing approaches without promising a
   quality tier.
