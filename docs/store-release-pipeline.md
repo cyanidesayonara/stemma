@@ -4,7 +4,7 @@
 
 Pushing a version tag matching `v*` triggers `.github/workflows/release.yml`:
 
-1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v2.6.0` becomes app `2.6.0` and MSIX `2.6.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
+1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v3.0.0` becomes app `3.0.0` and MSIX `3.0.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
 2. **Validate Store listing** -- after dependency install, `scripts/validate_store_release.py` and `scripts/build_store_listing.py --check` run against the synced `src/version.py` (semver from the tag; prerelease suffixes already stripped by sync). Each command's exit code is checked so a failed validation cannot be masked by a later success. The release fails if listing metadata, assets, or generated outputs are invalid or out of date.
 3. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
 4. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
@@ -53,7 +53,7 @@ payload and attempts a submission GET (warnings only if GET is stale). Submit
 for certification manually in Partner Center when you are ready to ship.
 
 ```powershell
-python scripts/build_partner_center_payloads.py --tag v2.6.0
+python scripts/build_partner_center_payloads.py --tag v3.0.0
 ```
 
 Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.json`
@@ -101,7 +101,7 @@ Public download URL pattern (public repo):
 
 `https://github.com/<owner>/<repo>/releases/download/<tag>/stemma.msix`
 
-Example: `https://github.com/cyanidesayonara/stemma/releases/download/v2.5.0/stemma.msix`
+Example: `https://github.com/cyanidesayonara/stemma/releases/download/v3.0.0/stemma.msix`
 
 ## Partner Center credentials (GitHub Actions)
 
@@ -113,7 +113,7 @@ Repository secrets for `partner-center-submit.yml`:
 - `PARTNER_CENTER_CLIENT_ID`
 - `PARTNER_CENTER_CLIENT_SECRET`
 
-Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v2.6.0`). Verify listing metadata via the workflow or **`get_draft`**, then click **Submit for certification** in Partner Center. Manual MSIX upload remains a fallback if automation fails.
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.0.0`). Verify listing metadata via the workflow or **`get_draft`**, then click **Submit for certification** in Partner Center. Manual MSIX upload remains a fallback if automation fails.
 
 **Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, and 32 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
 
@@ -126,9 +126,9 @@ Note: [microsoft/store-submission](https://github.com/microsoft/store-submission
 To align repo files with a would-be tag before committing:
 
 ```powershell
-.\scripts\sync_release_version.ps1 -Tag v2.6.0
+.\scripts\sync_release_version.ps1 -Tag v3.0.0
 ```
 
-This updates local build metadata only; it does not publish v2.6.0. Commit
+This updates local build metadata only; it does not publish v3.0.0. Commit
 `src/version.py` and `msix/AppxManifest.xml` when the branch build target
 changes.

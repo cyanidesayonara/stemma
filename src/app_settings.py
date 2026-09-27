@@ -83,9 +83,28 @@ def read_default_export_format(settings: QSettings) -> str:
     return "wav"
 
 
-def read_default_import_6_stem(settings: QSettings) -> bool:
-    """Return True if the import dialog should default to the 6-stem model."""
-    return bool(settings.value("import/default_6_stem", False, type=bool))
+# Separation models offered in Import and Preferences, in menu order.
+SEPARATION_MODELS: tuple[tuple[str, str], ...] = (
+    ("htdemucs", "4-stem (vocals, drums, bass, other)"),
+    ("htdemucs_6s", "6-stem (+ guitar, piano)"),
+    ("mdx_inst_hq3", "2-stem fast (vocals + backing, GPU when available)"),
+)
+SEPARATION_MODEL_TOOLTIP = (
+    "4 and 6 stems separate every instrument on the CPU, which is slower. "
+    "2 stems splits the vocals from the backing track and uses the GPU "
+    "when one is available."
+)
+
+
+def read_default_import_model(settings: QSettings) -> str:
+    """Return the model key the import dialog starts on."""
+    value = settings.value("import/default_model", "")
+    if value in dict(SEPARATION_MODELS):
+        return value
+    # Before 3.0 only a 4-vs-6-stem choice was stored.
+    if settings.value("import/default_6_stem", False, type=bool):
+        return "htdemucs_6s"
+    return "htdemucs"
 
 
 # -- Input device helpers ---------------------------------------------------

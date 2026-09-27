@@ -305,7 +305,7 @@ class PlayerControls(QWidget):
         self._footer_widget.setFixedHeight(44)
         footer_layout = QHBoxLayout(self._footer_widget)
         footer_layout.setContentsMargins(0, 5, 0, 2)
-        self._copyright_label = QLabel("© 2026 stemma")
+        self._copyright_label = QLabel("© 2026 Santtu Nykänen")
         self._copyright_label.setObjectName("copyright")
         self._copyright_label.setFixedHeight(36)
         self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)

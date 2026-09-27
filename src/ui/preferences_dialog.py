@@ -30,7 +30,9 @@ from src.app_settings import (
     parse_stored_input_device_index,
     parse_stored_output_device_index,
     read_default_export_format,
-    read_default_import_6_stem,
+    SEPARATION_MODEL_TOOLTIP,
+    SEPARATION_MODELS,
+    read_default_import_model,
     read_default_mp3_bitrate,
     read_latency_offset_ms,
     read_startup_play_sound,
@@ -106,8 +108,9 @@ class PreferencesDialog(QDialog):
         aform.addRow("Recording latency offset:", self._latency_spin)
 
         self._model_combo = QComboBox()
-        self._model_combo.addItem("4-stem (vocals, drums, bass, other)", False)
-        self._model_combo.addItem("6-stem (+ guitar, piano)", True)
+        for model_key, label in SEPARATION_MODELS:
+            self._model_combo.addItem(label, model_key)
+        self._model_combo.setToolTip(SEPARATION_MODEL_TOOLTIP)
 
         import_box = QGroupBox("Import")
         iform = QFormLayout(import_box)
@@ -237,9 +240,9 @@ class PreferencesDialog(QDialog):
             read_sync_recording_pitch(self._settings)
         )
 
-        self._model_combo.setCurrentIndex(
-            1 if read_default_import_6_stem(self._settings) else 0
-        )
+        self._model_combo.setCurrentIndex(max(0, self._model_combo.findData(
+            read_default_import_model(self._settings),
+        )))
 
         fmt = read_default_export_format(self._settings)
         self._export_combo.setCurrentIndex(1 if fmt == "mp3" else 0)
@@ -305,11 +308,12 @@ class PreferencesDialog(QDialog):
             self._latency_spin.value(),
         )
 
-        mdata = self._model_combo.currentData()
         self._settings.setValue(
-            "import/default_6_stem",
-            bool(mdata) if mdata is not None else False,
+            "import/default_model",
+            self._model_combo.currentData() or "htdemucs",
         )
+        # Superseded by import/default_model (the pre-3.0 4-vs-6 choice).
+        self._settings.remove("import/default_6_stem")
 
         fmt_data = self._export_combo.currentData()
         self._settings.setValue(

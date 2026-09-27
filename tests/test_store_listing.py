@@ -515,3 +515,20 @@ def test_committed_store_listing_is_valid_and_fresh() -> None:
         markdown_path=DEFAULT_MARKDOWN,
         skeleton_path=DEFAULT_SKELETON,
     )
+
+
+@pytest.mark.parametrize("overrides, message", [
+    ({"search_terms": ["x" * 31]}, "exceeds 30 chars"),
+    ({"search_terms": ["one two three four"] * 6}, "24 words"),
+    ({"description": "d" * 10001}, "description exceeds 10000"),
+])
+def test_validate_listing_enforces_partner_center_text_limits(
+    tmp_path: Path, overrides, message,
+) -> None:
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    with pytest.raises(ValidationError) as exc:
+        validate_listing(
+            _data(**overrides), version="2.6.0", screenshots_dir=shots,
+        )
+    assert any(message in err for err in exc.value.errors)

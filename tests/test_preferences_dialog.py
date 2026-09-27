@@ -55,7 +55,7 @@ def test_preferences_loads_persisted_typed_values(
     settings_ini.setValue("audio/output_device", 1)
     settings_ini.setValue("audio/input_device", 1)
     settings_ini.setValue("audio/latency_offset_ms", 42.5)
-    settings_ini.setValue("import/default_6_stem", True)
+    settings_ini.setValue("import/default_model", "mdx_inst_hq3")
     settings_ini.setValue("export/default_format", "mp3")
     settings_ini.setValue("export/mp3_bitrate", 256)
     settings_ini.setValue("startup/play_sound", False)
@@ -66,7 +66,7 @@ def test_preferences_loads_persisted_typed_values(
     assert dialog._device_combo.currentData() == 1
     assert dialog._input_device_combo.currentData() == 1
     assert dialog._latency_spin.value() == 42.5
-    assert dialog._model_combo.currentData() is True
+    assert dialog._model_combo.currentData() == "mdx_inst_hq3"
     assert dialog._export_combo.currentData() == "mp3"
     assert dialog._bitrate_combo.currentData() == 256
     assert not dialog._startup_sound_cb.isChecked()
@@ -81,7 +81,7 @@ def test_preferences_defaults_are_safe_and_typed(
     assert dialog._device_combo.currentData() == -1
     assert dialog._input_device_combo.currentData() == -1
     assert dialog._latency_spin.value() == 0.0
-    assert dialog._model_combo.currentData() is False
+    assert dialog._model_combo.currentData() == "htdemucs"
     assert dialog._export_combo.currentData() == "wav"
     assert dialog._bitrate_combo.currentData() == 320
     assert dialog._startup_sound_cb.isChecked()
@@ -99,7 +99,7 @@ def test_preferences_accept_persists_exposed_settings(
         dialog._input_device_combo.findData(1)
     )
     dialog._latency_spin.setValue(-17.5)
-    dialog._model_combo.setCurrentIndex(dialog._model_combo.findData(True))
+    dialog._model_combo.setCurrentIndex(dialog._model_combo.findData("htdemucs_6s"))
     dialog._export_combo.setCurrentIndex(dialog._export_combo.findData("mp3"))
     dialog._bitrate_combo.setCurrentIndex(
         dialog._bitrate_combo.findData(192)
@@ -112,7 +112,8 @@ def test_preferences_accept_persists_exposed_settings(
     assert int(settings_ini.value("audio/output_device")) == 0
     assert int(settings_ini.value("audio/input_device")) == 1
     assert float(settings_ini.value("audio/latency_offset_ms")) == -17.5
-    assert settings_ini.value("import/default_6_stem", type=bool) is True
+    assert settings_ini.value("import/default_model") == "htdemucs_6s"
+    assert settings_ini.value("import/default_6_stem") is None
     assert settings_ini.value("export/default_format") == "mp3"
     assert int(settings_ini.value("export/mp3_bitrate")) == 192
     assert settings_ini.value("startup/play_sound", type=bool) is False
