@@ -5,7 +5,7 @@ import os
 import struct
 
 import pytest
-from PySide6.QtGui import QGuiApplication, QImageReader
+from PySide6.QtGui import QGuiApplication, QImage, QImageReader
 
 _SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -101,9 +101,36 @@ def test_resampled_drawing_is_what_the_palette_check_catches():
     assert len(_interior_colors(image)) > 10
 
 
+def _frames(path, content):
+    """Decoded images in a PNG, or in each frame of an ICO."""
+    if not path.endswith(".ico"):
+        return [QImage.fromData(content)]
+    count = struct.unpack_from("<H", content, 4)[0]
+    frames = []
+    for i in range(count):
+        size, offset = struct.unpack_from("<II", content, 6 + 16 * i + 8)
+        frames.append(QImage.fromData(content[offset:offset + size]))
+    return frames
+
+
+def _max_channel_difference(a, b):
+    assert (a.width(), a.height()) == (b.width(), b.height())
+    worst = 0
+    for y in range(a.height()):
+        for x in range(a.width()):
+            pa, pb = a.pixelColor(x, y), b.pixelColor(x, y)
+            worst = max(worst, abs(pa.red() - pb.red()),
+                        abs(pa.green() - pb.green()),
+                        abs(pa.blue() - pb.blue()),
+                        abs(pa.alpha() - pb.alpha()))
+    return worst
+
+
 def test_committed_icons_are_up_to_date():
     """build_msix.ps1 and the app ship these files as committed. After an
-    SVG change, regenerate: a stale or missing file fails here."""
+    SVG change, regenerate: a stale or missing file fails here. Pixels are
+    compared with a small tolerance, because antialiasing differs by a few
+    levels between Qt builds; a changed drawing moves pixels far more."""
     expected = icons.generated_files()
     committed_msix = {
         os.path.join(icons.MSIX_DIR, name)
@@ -114,4 +141,9 @@ def test_committed_icons_are_up_to_date():
     }
     for path, content in expected.items():
         with open(path, "rb") as handle:
-            assert handle.read() == content, os.path.relpath(path)
+            committed = handle.read()
+        pairs = zip(_frames(path, committed), _frames(path, content),
+                    strict=True)
+        for old, new in pairs:
+            assert _max_channel_difference(old, new) <= 8, (
+                os.path.relpath(path))
