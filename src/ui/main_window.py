@@ -7,6 +7,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 
 import glob
 import json
+import math
 import os
 import random
 
@@ -715,6 +716,7 @@ class MainWindow(QMainWindow):
             name: float(value)
             for name, value in self._session_json(key, dict, {}).items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value)
         }
 
     def _save_session(self) -> None:

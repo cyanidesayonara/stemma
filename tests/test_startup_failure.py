@@ -7,7 +7,6 @@ running".
 """
 
 import json
-import logging
 import sys
 import threading
 from unittest.mock import MagicMock, patch
@@ -161,6 +160,8 @@ class TestDamagedSettings:
         (json.dumps(["drums", 3, ["x"]]), {"drums"}, {}),
         (json.dumps({"drums": 0.5, "bass": "loud", "x": True}),
          set(), {"drums": 0.5}),
+        ('{"drums": NaN, "bass": Infinity, "other": 1}', set(),
+         {"other": 1.0}),
         ("not json", set(), {}),
         (None, set(), {}),
     ])
@@ -173,3 +174,23 @@ class TestDamagedSettings:
 
         assert MainWindow._session_names(stub, "session/muted_stems") == names
         assert MainWindow._session_numbers(stub, "session/volumes") == numbers
+
+
+class TestEarlyStartupFailure:
+    def test_failure_before_the_splash_still_explains_itself(
+        self, qapp, fresh_log, monkeypatch,
+    ):
+        """get_stylesheet, the splash, or settings failing inside main()
+        used to escape with no message at all."""
+        monkeypatch.setattr(
+            stemma_main, "QApplication", MagicMock(return_value=qapp),
+        )
+        monkeypatch.setattr(stemma_main, "QSharedMemory", MagicMock())
+        monkeypatch.setattr(
+            stemma_main, "get_stylesheet",
+            MagicMock(side_effect=RuntimeError("bad theme")),
+        )
+        with patch.object(stemma_main, "QMessageBox") as box:
+            assert stemma_main.main() == 1
+
+        assert box.critical.call_args.args[1] == "stemma could not start"

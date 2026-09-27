@@ -84,8 +84,18 @@ def real_log_path() -> str | None:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        # A private WinDLL, so these signatures stay local to this module.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.CreateFileW.argtypes = (
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        )
+        kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+        kernel32.GetFinalPathNameByHandleW.argtypes = (
+            wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+        )
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         handle = kernel32.CreateFileW(
             path, 0, 0x7, None, 3, 0x02000000, None,
         )  # any access, share all, OPEN_EXISTING, BACKUP_SEMANTICS
@@ -101,6 +111,8 @@ def real_log_path() -> str | None:
         if not 0 < length < len(buffer):
             return path
         resolved = buffer.value
+        if resolved.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + resolved[8:]
         return resolved[4:] if resolved.startswith("\\\\?\\") else resolved
     except Exception:  # noqa: BLE001 - a nicer path is optional
         return path
@@ -120,3 +132,5 @@ def _log_thread_exception(args: threading.ExceptHookArgs) -> None:
         getattr(args.thread, "name", "?"),
         exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
     )
+    if sys.stderr is not None:  # source runs keep their console traceback
+        threading.__excepthook__(args)

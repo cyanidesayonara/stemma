@@ -7,6 +7,7 @@ the heavy application modules (onnxruntime, librosa, sounddevice, etc.).
 import ctypes
 import os
 import sys
+import traceback
 from functools import partial
 
 from PySide6.QtCore import QSettings, QSharedMemory, QTimer
@@ -47,12 +48,24 @@ def _finish_startup(
     except Exception as exc:  # noqa: BLE001 - reported to the user below
         # Without this the splash stayed up forever with no message, and the
         # single-instance lock turned every relaunch into "already running".
-        crash_log.logger.exception("Startup failed")
-        splash.abort()
-        QMessageBox.critical(
-            None, "stemma could not start", startup_failure_text(exc),
-        )
+        report_startup_failure(exc, splash)
         qapp.exit(1)
+
+
+def report_startup_failure(
+    exc: BaseException, splash: SplashScreen | None = None,
+) -> None:
+    """Log a startup failure, close the splash, and tell the user."""
+    crash_log.logger.error(
+        "Startup failed", exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    if sys.stderr is not None:  # source runs keep their console traceback
+        traceback.print_exception(exc)
+    if splash is not None:
+        splash.abort()
+    QMessageBox.critical(
+        None, "stemma could not start", startup_failure_text(exc),
+    )
 
 
 def startup_failure_text(exc: BaseException) -> str:
@@ -95,21 +108,26 @@ def main() -> int:
         )
         return 1
 
-    settings = open_settings()
-    theme = settings.value("theme", "dark")
-    if theme not in ("dark", "light"):
-        theme = "dark"
-    qapp.setStyleSheet(get_stylesheet(theme))
-    apply_tooltip_palette(theme)
+    splash = None
+    try:
+        settings = open_settings()
+        theme = settings.value("theme", "dark")
+        if theme not in ("dark", "light"):
+            theme = "dark"
+        qapp.setStyleSheet(get_stylesheet(theme))
+        apply_tooltip_palette(theme)
 
-    if os.path.exists(_ICON_PATH):
-        qapp.setWindowIcon(QIcon(_ICON_PATH))
+        if os.path.exists(_ICON_PATH):
+            qapp.setWindowIcon(QIcon(_ICON_PATH))
 
-    play_sound = settings.value("startup/play_sound", True, type=bool)
-    splash = SplashScreen(
-        theme=theme, play_sound=play_sound, audio_path=_AUDIO_PATH
-    )
-    splash.start()
+        play_sound = settings.value("startup/play_sound", True, type=bool)
+        splash = SplashScreen(
+            theme=theme, play_sound=play_sound, audio_path=_AUDIO_PATH
+        )
+        splash.start()
+    except Exception as exc:  # noqa: BLE001 - reported to the user
+        report_startup_failure(exc, splash)
+        return 1
 
     QTimer.singleShot(
         0, partial(_finish_startup, qapp, settings, theme, splash)
