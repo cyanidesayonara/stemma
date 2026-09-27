@@ -74,6 +74,9 @@ def test_sync_writes_both_files(shell: str, repo: Path) -> None:
     )
     manifest = (repo / "msix" / "AppxManifest.xml").read_bytes()
     assert not manifest.startswith(b"\xef\xbb\xbf")
+    # The fixture writes CRLF (text mode on Windows), like a checkout
+    # with core.autocrlf; both files come out LF-only.
+    assert b"\r\n" not in manifest
     text = manifest.decode("utf-8")
     assert 'Version="3.0.0.0"' in text
     assert "Santtu Nykänen" in text
@@ -87,3 +90,16 @@ def test_sync_rejects_a_bad_tag(shell: str, repo: Path) -> None:
     assert result.returncode != 0
     assert "Synced" not in result.stdout
     assert b'"2.6.0"' in (repo / "src" / "version.py").read_bytes()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_sync_fails_loudly_when_a_write_fails(shell: str, repo: Path) -> None:
+    version = repo / "src" / "version.py"
+    version.chmod(0o444)
+    try:
+        result = _run(shell, repo, "v3.0.0")
+    finally:
+        version.chmod(0o644)
+
+    assert result.returncode != 0
+    assert "Synced" not in result.stdout

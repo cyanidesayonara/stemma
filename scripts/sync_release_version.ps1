@@ -54,6 +54,6 @@ if ($manifestRaw -notmatch $pattern) {
     throw "AppxManifest.xml: could not find Identity Version attribute to update"
 }
 $updatedManifest = $manifestRaw -replace $pattern, $replacement
-Write-Utf8NoBom $manifestFile $updatedManifest.TrimEnd()
+Write-Utf8NoBom $manifestFile ($updatedManifest.TrimEnd() -replace "`r`n", "`n")
 
 Write-Output "Synced release version: app $semver, MSIX $msixFourPart (from tag $trimmed)"
