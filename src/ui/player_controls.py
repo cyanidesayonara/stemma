@@ -9,7 +9,7 @@ v3.0 slices; this module preserves the shipped layout and public
 integration points.
 """
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import time
 
 import numpy as np
@@ -73,6 +73,12 @@ def _compute_peaks_bg(stems, stem_bins=2000):
 
 
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
+
+# How long _cleanup_peak_thread waits for an in-flight peak computation
+# before moving on to the detection drain. It does not cap how long closing
+# takes: shutdown_peak_pool joins the pool thread afterwards, and the
+# computation always finishes on its own. The result is discarded.
+_PEAK_DRAIN_TIMEOUT_S = 2.0
 
 
 def _get_peak_pool() -> ThreadPoolExecutor:
@@ -162,8 +168,10 @@ class PlayerControls(QWidget):
         self._peak_refresh_pending = False
         self._peaks_timer.stop()
         self._peak_poll_timer.stop()
-        if self._peak_future is not None and not self._peak_future.done():
-            self._peak_future.result(timeout=2)
+        if self._peak_future is not None:
+            # wait(), not result(): a slow or failed computation must not
+            # raise out of closeEvent and skip the detection drain below.
+            wait([self._peak_future], timeout=_PEAK_DRAIN_TIMEOUT_S)
         self._peak_future = None
         self._peak_future_generation = None
         if self._detection_worker is not None:

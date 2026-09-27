@@ -693,6 +693,30 @@ class TestMainWindowAsyncLoading:
         gui_read.assert_not_called()
         recompute_peaks.assert_not_called()
 
+    def test_close_drains_workers_even_when_stop_raises(self, window):
+        """A vanished audio device (PortAudioError) or a full disk while
+        saving a recording made player.stop() raise out of closeEvent,
+        skipping every drain after it."""
+        with patch.object(
+            window._player, "stop", side_effect=OSError("device gone"),
+        ), patch.object(
+            window._separation_queue, "shutdown",
+        ), patch.object(
+            window, "_shutdown_stem_loads",
+        ), patch.object(
+            window._player, "shutdown",
+        ) as player_shutdown, patch.object(
+            window._player_controls, "shutdown",
+        ) as controls_shutdown, patch.object(
+            main_window_module, "shutdown_peak_pool",
+        ) as pool_shutdown:
+            window.closeEvent(QCloseEvent())
+
+        player_shutdown.assert_called_once_with()
+        controls_shutdown.assert_called_once_with()
+        pool_shutdown.assert_called_once_with()
+        assert window._suppress_recording_reload is False
+
     @pytest.mark.parametrize("action", ["error", "close"])
     def test_failed_or_closed_song_can_be_selected_again(
         self, window, action,
@@ -800,6 +824,36 @@ class TestPeakGeneration:
         worker.finished.disconnect.assert_called_once_with()
         worker.wait.assert_called_once_with()
         assert controls._detection_worker is None
+
+    def test_cleanup_survives_a_peak_computation_still_running(
+        self, window,
+    ):
+        """Closing while peaks are still computing must not raise: the
+        TimeoutError skipped the detection-worker drain and the rest of
+        closeEvent."""
+        controls = window._player_controls
+        worker = MagicMock()
+        controls._detection_worker = worker
+        controls._peak_future = Future()  # Never finishes.
+
+        with patch.object(
+            player_controls_module, "_PEAK_DRAIN_TIMEOUT_S", 0.01,
+        ):
+            controls._cleanup_peak_thread()
+
+        worker.wait.assert_called_once_with()
+        assert controls._detection_worker is None
+        assert controls._peak_future is None
+
+    def test_cleanup_survives_a_failed_peak_computation(self, window):
+        controls = window._player_controls
+        failed = Future()
+        failed.set_exception(MemoryError("peaks"))
+        controls._peak_future = failed
+
+        controls._cleanup_peak_thread()
+
+        assert controls._peak_future is None
 
     def test_shutdown_drains_orphaned_detection_workers(self, window):
         controls = window._player_controls
