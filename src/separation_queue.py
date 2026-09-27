@@ -108,8 +108,9 @@ class SeparationQueue(QObject):
     def shutdown(self, wait_ms: int = 5000) -> None:
         """Cancel the active job and drop queued ones (app close).
 
-        Interrupted songs are left without stems on disk; the startup
-        prune removes their library rows on the next launch.
+        Interrupted songs keep the pending marker their import wrote and
+        get no completion marker, so the startup prune removes them on the
+        next launch.
         """
         self._pending.clear()
         worker = self._active_worker

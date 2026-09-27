@@ -5,6 +5,10 @@ import os
 
 
 COMPLETION_MARKER = ".separation-complete.json"
+# Written when an import creates the song folder, removed by the completion
+# marker. Its presence without a valid completion marker is the only proof
+# that a song is this app's own interrupted work, and so safe to remove.
+PENDING_MARKER = ".separation-pending"
 COMPLETION_STATE_VERSION = 1
 
 EXPECTED_STEMS: dict[str, tuple[str, ...]] = {
@@ -28,6 +32,43 @@ def expected_stems(model_key: str) -> tuple[str, ...] | None:
 
 def _marker_path(song_dir: str) -> str:
     return os.path.join(song_dir, COMPLETION_MARKER)
+
+
+def mark_separation_pending(song_dir: str) -> None:
+    """Record that a separation into *song_dir* has been started."""
+    with open(os.path.join(song_dir, PENDING_MARKER), "w", encoding="utf-8"):
+        pass
+
+
+def _has_recordings(song_dir: str) -> bool:
+    try:
+        names = os.listdir(song_dir)
+    except OSError:
+        return False
+    # "recording_take" is player.RECORDING_STEM_PREFIX; importing the player
+    # here would load the audio stack into every library read.
+    return any(
+        name.startswith("recording_take") and name.endswith(".wav")
+        for name in names
+    )
+
+
+def is_interrupted_import(song_dir: str) -> bool:
+    """Return whether *song_dir* is an import that never finished.
+
+    True only when the import's pending marker is present, no completion
+    marker exists at all, and the folder holds no recorded takes. The
+    completion marker is written atomically after every stem, so one that
+    exists means the job finished, even if it is unreadable now (an
+    antivirus lock, disk damage) and a stale pending marker survived.
+    Anything else is not provably unfinished work, and removing a song
+    deletes its folder.
+    """
+    if not os.path.exists(os.path.join(song_dir, PENDING_MARKER)):
+        return False
+    if os.path.exists(_marker_path(song_dir)):
+        return False
+    return not _has_recordings(song_dir)
 
 
 def clear_completion_marker(song_dir: str) -> None:
@@ -70,6 +111,12 @@ def write_completion_marker(song_dir: str, model_key: str) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, marker)
+        try:
+            os.remove(os.path.join(song_dir, PENDING_MARKER))
+        except OSError:
+            # Missing, or locked by an indexer or antivirus: harmless now,
+            # since an existing completion marker overrides it.
+            pass
     except Exception:
         try:
             os.remove(tmp_path)
@@ -78,29 +125,66 @@ def write_completion_marker(song_dir: str, model_key: str) -> None:
         raise
 
 
-def separation_is_complete(song_dir: str, model_used: str) -> bool:
-    """Validate marker-based state, or a complete legacy persisted model."""
-    marker = _marker_path(song_dir)
-    if os.path.exists(marker):
-        try:
-            with open(marker, encoding="utf-8") as f:
-                state = json.load(f)
-            model_key = state["model"]
-            stems = expected_stems(model_key)
-            if (
-                state.get("version") != COMPLETION_STATE_VERSION
-                or stems is None
-                or tuple(state.get("stems", ())) != stems
-            ):
-                return False
-        except (OSError, TypeError, KeyError, ValueError, json.JSONDecodeError):
-            return False
-    else:
-        stems = expected_stems(model_used)
-        if stems is None:
-            return False
-
+def _has_stems(song_dir: str, stems: tuple[str, ...]) -> bool:
     return all(
         os.path.isfile(os.path.join(song_dir, f"{stem}.wav"))
         for stem in stems
     )
+
+
+def infer_model_from_stems(song_dir: str) -> str:
+    """Return the model whose full stem set is on disk, or ``""``.
+
+    Larger sets win, so a six-stem folder is not mistaken for the four- or
+    two-stem sets it contains.
+    """
+    for model_key, stems in sorted(
+        EXPECTED_STEMS.items(), key=lambda item: -len(item[1]),
+    ):
+        if _has_stems(song_dir, stems):
+            return model_key
+    return ""
+
+
+def _read_marker_model(song_dir: str) -> str | None:
+    """Return the model a valid marker records; None if it can't be judged.
+
+    Raises FileNotFoundError when there is no marker at all.
+    """
+    try:
+        with open(_marker_path(song_dir), encoding="utf-8") as f:
+            state = json.load(f)
+        model_key = state["model"]
+        stems = expected_stems(model_key)
+        if (
+            state.get("version") != COMPLETION_STATE_VERSION
+            or stems is None
+            or tuple(state.get("stems", ())) != stems
+        ):
+            return None
+    except FileNotFoundError:
+        raise
+    except (OSError, TypeError, KeyError, ValueError, AttributeError):
+        # Unreadable (locked, garbled) or from another build.
+        return None
+    return model_key
+
+
+def recorded_or_inferred_model(song_dir: str) -> str:
+    """Model from a valid marker, else inferred from the stems on disk."""
+    try:
+        model_key = _read_marker_model(song_dir)
+    except FileNotFoundError:
+        model_key = None
+    return model_key or infer_model_from_stems(song_dir)
+
+
+def separation_is_complete(song_dir: str, model_used: str) -> bool:
+    """Whether a valid marker's stem set (or, without a marker, the
+    persisted model's) is fully on disk."""
+    try:
+        model_key = _read_marker_model(song_dir)
+    except FileNotFoundError:
+        model_key = model_used
+    stems = expected_stems(model_key) if model_key else None
+    return stems is not None and _has_stems(song_dir, stems)

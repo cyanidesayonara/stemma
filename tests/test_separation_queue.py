@@ -351,108 +351,191 @@ class TestMainWindowGlue:
         stub._library.remove_song.assert_called_once_with("s1")
         mb.warning.assert_not_called()
 
-    def test_prune_removes_partial_and_invalid_marked_songs(
-        self, app, tmp_path,
-    ):
+    # -- startup prune: only provably interrupted imports are removed --
+
+    @staticmethod
+    def _song(tmp_path, name, stems=(), marker=None, pending=False,
+              takes=0, model_used="htdemucs"):
+        song = MagicMock()
+        song.id = name
+        song.model_used = model_used
+        song.stems_path = str(tmp_path / name)
+        os.makedirs(song.stems_path)
+        for stem in stems:
+            open(os.path.join(song.stems_path, f"{stem}.wav"), "wb").close()
+        for take in range(1, takes + 1):
+            open(os.path.join(
+                song.stems_path, f"recording_take{take}.wav"), "wb").close()
+        if marker is not None:
+            with open(os.path.join(
+                song.stems_path, ".separation-complete.json",
+            ), "w", encoding="utf-8") as f:
+                f.write(marker if isinstance(marker, str)
+                        else json.dumps(marker))
+        if pending:
+            open(os.path.join(
+                song.stems_path, ".separation-pending"), "wb").close()
+        return song
+
+    def _prune(self, songs):
         from src.ui.main_window import MainWindow
 
-        partial = MagicMock()
-        partial.id = "partial"
-        partial.model_used = "htdemucs"
-        partial.stems_path = str(tmp_path / "partial")
-        os.makedirs(partial.stems_path)
-        open(os.path.join(partial.stems_path, "vocals.wav"), "wb").close()
-
-        invalid = MagicMock()
-        invalid.id = "invalid"
-        invalid.model_used = "htdemucs"
-        invalid.stems_path = str(tmp_path / "invalid")
-        os.makedirs(invalid.stems_path)
-        for stem in ("drums", "bass", "other", "vocals"):
-            open(os.path.join(invalid.stems_path, f"{stem}.wav"), "wb").close()
-        with open(
-            os.path.join(invalid.stems_path, ".separation-complete.json"),
-            "w",
-            encoding="utf-8",
-        ) as f:
-            f.write("{invalid")
-
-        marked_partial = MagicMock()
-        marked_partial.id = "marked-partial"
-        marked_partial.model_used = ""
-        marked_partial.stems_path = str(tmp_path / "marked-partial")
-        os.makedirs(marked_partial.stems_path)
-        open(
-            os.path.join(marked_partial.stems_path, "vocals.wav"),
-            "wb",
-        ).close()
-        with open(
-            os.path.join(
-                marked_partial.stems_path,
-                ".separation-complete.json",
-            ),
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump({
-                "version": 1,
-                "model": "mdx_inst_hq3",
-                "stems": ["vocals", "other"],
-            }, f)
-
         stub = MagicMock()
-        stub._library.songs = [partial, invalid, marked_partial]
+        stub._library.songs = songs
         MainWindow._prune_incomplete_songs(stub)
+        return [c.args[0] for c in stub._library.remove_song.call_args_list]
 
-        assert stub._library.remove_song.call_args_list == [
-            (("partial",), {}),
-            (("invalid",), {}),
-            (("marked-partial",), {}),
+    def test_prune_removes_imports_interrupted_mid_job(self, app, tmp_path):
+        """Closed or crashed mid-separation: the pending marker is there and
+        no completion marker, however many stems were written."""
+        songs = [
+            self._song(tmp_path, "queued", pending=True, model_used=""),
+            self._song(tmp_path, "four-of-six", pending=True,
+                       stems=("drums", "bass", "other", "vocals"),
+                       model_used=""),
         ]
 
-    def test_prune_preserves_complete_legacy_song(self, app, tmp_path):
+        assert self._prune(songs) == ["queued", "four-of-six"]
+
+    def test_prune_keeps_finished_songs(self, app, tmp_path):
+        complete = {"version": 1, "model": "mdx_inst_hq3",
+                    "stems": ["vocals", "other"]}
+        songs = [
+            self._song(tmp_path, "marked", stems=("vocals", "other"),
+                       marker=complete),
+            # A pending marker the completion write failed to delete.
+            self._song(tmp_path, "marked-and-pending",
+                       stems=("vocals", "other"), marker=complete,
+                       pending=True),
+            self._song(tmp_path, "legacy",
+                       stems=("drums", "bass", "other", "vocals")),
+        ]
+
+        assert self._prune(songs) == []
+
+    @pytest.mark.parametrize("case", [
+        "legacy-partial", "garbled-marker", "marker-missing-a-stem",
+        "future-marker", "unknown-model", "takes-on-a-pending-song",
+        "unreadable-marker-with-stale-pending",
+    ])
+    def test_prune_keeps_what_it_cannot_prove_is_unfinished(
+        self, app, tmp_path, case,
+    ):
+        """Removal deletes the folder; without the import's pending marker,
+        or with the user's own takes inside, it never happens (#181)."""
+        song = {
+            "legacy-partial": dict(stems=("vocals",)),
+            "garbled-marker": dict(
+                stems=("drums", "bass", "other", "vocals"),
+                marker="{garbled"),
+            "marker-missing-a-stem": dict(
+                stems=("vocals",),
+                marker={"version": 1, "model": "mdx_inst_hq3",
+                        "stems": ["vocals", "other"]}),
+            "future-marker": dict(
+                stems=("vocals",),
+                marker={"version": 99, "model": "htdemucs",
+                        "stems": ["drums", "bass", "other", "vocals"]}),
+            "unknown-model": dict(model_used=""),
+            "takes-on-a-pending-song": dict(pending=True, takes=1),
+            # Finished (the marker is written atomically, last), but the
+            # pending removal failed and the marker is unreadable now.
+            "unreadable-marker-with-stale-pending": dict(
+                stems=("vocals", "other"), marker="{garbled", pending=True),
+        }[case]
+
+        assert self._prune([self._song(tmp_path, case, **song)]) == []
+
+    def test_import_then_close_then_relaunch(self, app, tmp_path):
+        """End to end: a fresh import with no separation yet is removed
+        on the next launch; a finished one is kept, its marker cleared."""
+        from src.library import SongLibrary
+        from src.separation_state import write_completion_marker
         from src.ui.main_window import MainWindow
 
-        legacy = MagicMock()
-        legacy.id = "legacy"
-        legacy.model_used = "htdemucs"
-        legacy.stems_path = str(tmp_path / "legacy")
-        os.makedirs(legacy.stems_path)
-        for stem in ("drums", "bass", "other", "vocals"):
-            open(os.path.join(legacy.stems_path, f"{stem}.wav"), "wb").close()
-
-        stub = MagicMock()
-        stub._library.songs = [legacy]
-        MainWindow._prune_incomplete_songs(stub)
-
-        stub._library.remove_song.assert_not_called()
-
-    def test_prune_preserves_valid_marked_song(self, app, tmp_path):
-        from src.ui.main_window import MainWindow
-
-        completed = MagicMock()
-        completed.id = "completed"
-        completed.model_used = ""
-        completed.stems_path = str(tmp_path / "completed")
-        os.makedirs(completed.stems_path)
+        source = tmp_path / "song.wav"
+        source.write_bytes(b"audio")
+        library = SongLibrary(str(tmp_path / "data"))
+        interrupted = library.add_song("Cut short", "Band", str(source))
+        finished = library.add_song("Done", "Band", str(source))
         for stem in ("vocals", "other"):
-            open(
-                os.path.join(completed.stems_path, f"{stem}.wav"),
-                "wb",
-            ).close()
-        with open(
-            os.path.join(completed.stems_path, ".separation-complete.json"),
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump({
-                "version": 1,
-                "model": "mdx_inst_hq3",
-                "stems": ["vocals", "other"],
-            }, f)
+            open(os.path.join(
+                finished.stems_path, f"{stem}.wav"), "wb").close()
+        write_completion_marker(finished.stems_path, "mdx_inst_hq3")
 
+        relaunched = SongLibrary(str(tmp_path / "data"))
         stub = MagicMock()
-        stub._library.songs = [completed]
+        stub._library = relaunched
         MainWindow._prune_incomplete_songs(stub)
 
-        stub._library.remove_song.assert_not_called()
+        assert [s.id for s in relaunched.songs] == [finished.id]
+        assert not os.path.exists(interrupted.stems_path)
+        assert not os.path.exists(os.path.join(
+            finished.stems_path, ".separation-pending"))
+
+
+class TestDamagedIndexKeepsAudio:
+    """The reproduced #181 data loss, end to end: a damaged library.json
+    plus the startup prune deleted every song imported before v2.6."""
+
+    @pytest.mark.parametrize("damage", ["truncated", "unknown_key"])
+    def test_legacy_song_survives_a_damaged_index(
+        self, app, tmp_path, damage,
+    ):
+        from src.library import SongLibrary
+        from src.ui.main_window import MainWindow
+
+        data_dir = str(tmp_path / "data")
+        song_dir = os.path.join(data_dir, "songs", "0123456789ab")
+        os.makedirs(song_dir)
+        for name in ("original.mp3", "drums.wav", "bass.wav",
+                     "other.wav", "vocals.wav"):
+            open(os.path.join(song_dir, name), "wb").close()
+        entry = {
+            "id": "0123456789ab", "title": "Old Song", "artist": "Band",
+            "original_path": os.path.join(song_dir, "original.mp3"),
+            "stems_path": song_dir, "model_used": "htdemucs",
+            "date_added": "2025-01-01",
+        }
+        index = json.dumps([entry])
+        if damage == "truncated":
+            index = index[: len(index) // 2]
+        else:
+            index = json.dumps([{**entry, "from_the_future": 1}])
+        with open(os.path.join(data_dir, "library.json"), "w") as f:
+            f.write(index)
+
+        library = SongLibrary(data_dir)
+        stub = MagicMock()
+        stub._library = library
+        MainWindow._prune_incomplete_songs(stub)
+
+        assert os.path.isfile(os.path.join(song_dir, "vocals.wav"))
+        assert [s.id for s in library.songs] == ["0123456789ab"]
+
+
+class TestCompletionMarkerWrite:
+    def test_locked_pending_marker_does_not_fail_a_finished_job(
+        self, tmp_path, monkeypatch,
+    ):
+        """An indexer or antivirus holding the pending file must not turn
+        a finished separation into "Import failed" (and a rollback)."""
+        from src import separation_state
+
+        song_dir = str(tmp_path)
+        separation_state.mark_separation_pending(song_dir)
+        for stem in ("vocals", "other"):
+            open(os.path.join(song_dir, f"{stem}.wav"), "wb").close()
+        real_remove = os.remove
+
+        def locked(path):
+            if path.endswith(separation_state.PENDING_MARKER):
+                raise PermissionError(13, "in use", path)
+            real_remove(path)
+
+        monkeypatch.setattr(separation_state.os, "remove", locked)
+
+        separation_state.write_completion_marker(song_dir, "mdx_inst_hq3")
+
+        assert separation_state.separation_is_complete(song_dir, "")
+        assert not separation_state.is_interrupted_import(song_dir)

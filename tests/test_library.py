@@ -175,6 +175,116 @@ class TestSongLibraryInit:
         assert ids == {"abc123"}
         assert lib.songs[0].original_path.endswith("original.mp3")
 
+    def test_unknown_key_keeps_the_entry_and_the_rest_of_the_index(
+        self, library_dir,
+    ):
+        """One entry with a key this version does not know (a downgrade, a
+        hand edit) used to discard the whole index: every title became a
+        hex id and the model was lost (#181)."""
+        songs_dir = os.path.join(library_dir, "songs")
+        entries = []
+        for song_id, title in (("aaa", "First"), ("bbb", "Second")):
+            os.makedirs(os.path.join(songs_dir, song_id))
+            entries.append({
+                "id": song_id, "title": title, "artist": "Band",
+                "original_path": os.path.join(songs_dir, song_id, "original.mp3"),
+                "stems_path": os.path.join(songs_dir, song_id),
+                "model_used": "htdemucs", "date_added": "2026-01-01",
+            })
+        entries[1]["added_in_a_newer_version"] = True
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump(entries, f)
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        assert [(s.id, s.title, s.model_used) for s in lib.songs] == [
+            ("aaa", "First", "htdemucs"),
+            ("bbb", "Second", "htdemucs"),
+        ]
+
+    def test_missing_optional_keys_default_instead_of_dropping(
+        self, library_dir,
+    ):
+        songs_dir = os.path.join(library_dir, "songs")
+        os.makedirs(os.path.join(songs_dir, "aaa"))
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([{
+                "id": "aaa", "title": "Kept",
+                "stems_path": os.path.join(songs_dir, "aaa"),
+            }], f)
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        (song,) = lib.songs
+        assert (song.title, song.artist, song.model_used) == ("Kept", "", "")
+
+    def test_null_fields_keep_the_entry(self, library_dir):
+        songs_dir = os.path.join(library_dir, "songs")
+        os.makedirs(os.path.join(songs_dir, "aaa"))
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([{
+                "id": "aaa", "title": "Kept", "artist": None,
+                "stems_path": os.path.join(songs_dir, "aaa"),
+            }], f)
+
+        (song,) = SongLibrary(data_dir=library_dir).songs
+
+        assert (song.title, song.artist) == ("Kept", "")
+
+    def test_rebuild_ignores_staged_removals(self, library_dir):
+        """A removal whose rmtree failed leaves songs/.remove-<id>-<hex>;
+        a rebuild must not bring the deleted song back as a row."""
+        songs_dir = os.path.join(library_dir, "songs")
+        for name in ("abc123", ".remove-bbbbbbbbbbbb-0000"):
+            os.makedirs(os.path.join(songs_dir, name))
+            open(os.path.join(songs_dir, name, "original.mp3"), "wb").close()
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            f.write("garbage")
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        assert [s.id for s in lib.songs] == ["abc123"]
+
+    def test_bad_entry_does_not_drop_its_neighbours(self, library_dir):
+        songs_dir = os.path.join(library_dir, "songs")
+        os.makedirs(os.path.join(songs_dir, "aaa"))
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([
+                "not a song",
+                {"id": "aaa", "title": "Kept", "artist": "",
+                 "original_path": "", "model_used": "htdemucs",
+                 "stems_path": os.path.join(songs_dir, "aaa"),
+                 "date_added": ""},
+            ], f)
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        assert [s.title for s in lib.songs] == ["Kept"]
+        assert os.path.isfile(
+            os.path.join(library_dir, "library.json.bak")
+        )
+
+    @pytest.mark.parametrize("stems, model", [
+        (("drums", "bass", "other", "vocals"), "htdemucs"),
+        (("drums", "bass", "other", "vocals", "guitar", "piano"),
+         "htdemucs_6s"),
+        (("vocals", "other"), "mdx_inst_hq3"),
+        (("vocals",), ""),
+    ])
+    def test_rebuild_infers_the_model_from_stems_on_disk(
+        self, library_dir, stems, model,
+    ):
+        song_dir = os.path.join(library_dir, "songs", "abc123")
+        os.makedirs(song_dir)
+        for name in ("original.mp3", *(f"{s}.wav" for s in stems)):
+            open(os.path.join(song_dir, name), "wb").close()
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            f.write("garbage")
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        assert lib.songs[0].model_used == model
+
     def test_recovers_from_non_utf8_index(self, library_dir):
         """A non-UTF-8 index (disk corruption) must not crash startup."""
         os.makedirs(library_dir, exist_ok=True)

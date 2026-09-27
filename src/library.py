@@ -10,8 +10,13 @@ import os
 import re
 import shutil
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from datetime import datetime, timezone
+
+from src.separation_state import (
+    mark_separation_pending,
+    recorded_or_inferred_model,
+)
 
 
 _EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
@@ -36,8 +41,26 @@ class Song:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Song":
-        """Deserialize from a plain dictionary."""
-        return cls(**data)
+        """Deserialize from a plain dictionary.
+
+        Unknown keys (an index written by a newer version, or edited by
+        hand) are ignored and missing text fields default to ``""``, so one
+        odd entry cannot discard the whole library. ``id`` and
+        ``stems_path`` are required: without them there is no song.
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"song entry must be an object, got {type(data)}")
+        values = {}
+        for field in fields(cls):
+            value = data.get(field.name)
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                raise TypeError(f"song field {field.name!r} must be text")
+            values[field.name] = value
+        if not values["id"] or not values["stems_path"]:
+            raise KeyError("song entry needs an id and a stems_path")
+        return cls(**values)
 
 
 class SongLibrary:
@@ -187,6 +210,10 @@ class SongLibrary:
         song_dir = os.path.join(self._songs_dir, song_id)
         try:
             os.makedirs(song_dir, exist_ok=True)
+            # Until a separation writes its completion marker, this song is
+            # unfinished work that the startup prune may remove. Written
+            # before the copy, so a kill mid-copy is covered too.
+            mark_separation_pending(song_dir)
 
             # Copy the source audio into the song directory so the library is
             # self-contained and does not break if the original file moves.
@@ -307,12 +334,35 @@ class SongLibrary:
         try:
             with open(self._json_path, encoding="utf-8") as f:
                 data = json.load(f)
-            loaded = [Song.from_dict(entry) for entry in data]
+            if not isinstance(data, list):
+                raise ValueError("library index must be a list")
+            loaded = []
+            dropped = False
+            for entry in data:
+                try:
+                    loaded.append(Song.from_dict(entry))
+                except (TypeError, KeyError):
+                    dropped = True
             self._songs = [
                 song for song in loaded
                 if self._is_safe_song_dir(song.stems_path)
                 and self._recover_staged_removal(song)
             ]
+            if dropped:
+                # Keep the original index, and recover the folders of the
+                # entries that could not be read.
+                try:
+                    shutil.copyfile(
+                        self._json_path, self._json_path + ".bak",
+                    )
+                except OSError:
+                    pass  # The rows that parsed are kept either way.
+                known = {song.id for song in self._songs}
+                self._songs.extend(
+                    song for song in self._rebuild_from_disk()
+                    if song.id not in known
+                )
+                self._save()
         except (
             json.JSONDecodeError, TypeError, KeyError,
             OSError, UnicodeDecodeError, ValueError,
@@ -331,8 +381,9 @@ class SongLibrary:
 
         Used when the JSON index is lost or corrupt. Each ``songs/<id>/``
         that contains an ``original.*`` file becomes a minimally-populated
-        Song; titles fall back to the id and metadata that only lived in
-        the index (artist, model) is left blank.
+        Song; titles fall back to the id, the artist is left blank, and
+        the model is read from the completion marker or inferred from the
+        stems on disk.
         """
         recovered: list[Song] = []
         try:
@@ -340,6 +391,10 @@ class SongLibrary:
         except OSError:
             return recovered
         for song_id in entries:
+            if song_id.startswith("."):
+                # Staged removals (.remove-<id>-...) and other internals,
+                # not songs.
+                continue
             song_dir = os.path.join(self._songs_dir, song_id)
             if (
                 not self._is_safe_song_dir(song_dir)
@@ -359,7 +414,9 @@ class SongLibrary:
                 artist="",
                 original_path=original,
                 stems_path=song_dir,
-                model_used="",
+                # Without it, startup pruning cannot tell a finished song
+                # from an interrupted one (#181).
+                model_used=recorded_or_inferred_model(song_dir),
                 date_added=datetime.now(timezone.utc).isoformat(),
             ))
         return recovered
