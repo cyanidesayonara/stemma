@@ -1,5 +1,5 @@
 # Informational only. Release authority is the git tag / synced version.py.
-listing_version: "2.6.0"
+listing_version: "3.0.0"
 
 # Live Microsoft Store product identity (apps.microsoft.com).
 # Snapshot of published copy before the 2.6.0 submission:
