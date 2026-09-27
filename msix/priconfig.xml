@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<!--
+  makepri configuration for the MSIX layout. scripts/build_msix.ps1 runs it
+  over a staging folder that holds only the manifest and Images\ (indexing
+  the whole PyInstaller layout would list thousands of files), then copies
+  resources.pri into the layout. That lets Windows pick the
+  Square44x44Logo.targetsize-*
+  and *.scale-* variants that scripts/generate_app_icons.py draws for each
+  size. Without resources.pri, only files named exactly as in the manifest
+  are used, and the taskbar shrinks one 44 px image.
+-->
+<resources targetOsVersion="10.0.0" majorVersion="1">
+  <index root="\" startIndexAt="\">
+    <default>
+      <qualifier name="Language" value="en-US"/>
+      <qualifier name="Contrast" value="standard"/>
+      <qualifier name="Scale" value="100"/>
+      <qualifier name="HomeRegion" value="001"/>
+      <qualifier name="TargetSize" value="256"/>
+      <qualifier name="LayoutDirection" value="LTR"/>
+      <qualifier name="Theme" value="dark"/>
+      <qualifier name="AlternateForm" value=""/>
+      <qualifier name="DXFeatureLevel" value="DX9"/>
+      <qualifier name="Configuration" value=""/>
+      <qualifier name="DeviceFamily" value="Universal"/>
+      <qualifier name="Custom" value=""/>
+    </default>
+    <indexer-config type="folder" foldernameAsQualifier="true" filenameAsQualifier="true" qualifierDelimiter="."/>
+  </index>
+</resources>
