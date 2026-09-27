@@ -13,6 +13,7 @@ from PySide6.QtCore import QSettings, QSharedMemory, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from src import crash_log
 from src.diagnostics import (
     diagnostics_requested,
     main as diagnostics_main,
@@ -38,10 +39,38 @@ def _finish_startup(
     # librosa, and the full UI tree.  Importing here (instead of at the top
     # of the file) keeps the splash visible and animating while those heavy
     # modules load.
-    from src.app import build_and_show  # noqa: PLC0415
+    try:
+        from src.app import build_and_show  # noqa: PLC0415
 
-    qapp.processEvents()
-    build_and_show(qapp, settings, theme, splash)
+        qapp.processEvents()
+        build_and_show(qapp, settings, theme, splash)
+    except Exception as exc:  # noqa: BLE001 - reported to the user below
+        # Without this the splash stayed up forever with no message, and the
+        # single-instance lock turned every relaunch into "already running".
+        crash_log.logger.exception("Startup failed")
+        splash.abort()
+        QMessageBox.critical(
+            None, "stemma could not start", startup_failure_text(exc),
+        )
+        qapp.exit(1)
+
+
+def startup_failure_text(exc: BaseException) -> str:
+    """Plain-language message for an exception raised during startup."""
+    if isinstance(exc, OSError) and exc.filename:
+        text = (
+            "stemma could not use its data folder:\n\n"
+            f"{exc.filename}\n\n"
+            "Check that the folder exists and that you can write to it. "
+            "Windows Security's Controlled folder access can also block "
+            "apps from writing to protected folders."
+        )
+    else:
+        text = "stemma ran into a problem while starting and has to close."
+    log = crash_log.real_log_path()
+    if log:
+        text += f"\n\nDetails were saved to:\n{log}"
+    return text
 
 
 def main() -> int:
@@ -49,6 +78,9 @@ def main() -> int:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
             "stemma.app"
         )
+
+    crash_log.install()
+    crash_log.logger.info("stemma %s starting", __version__)
 
     qapp = QApplication(sys.argv)
     qapp.setApplicationName("stemma")

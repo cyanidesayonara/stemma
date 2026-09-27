@@ -11,7 +11,7 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QByteArray, QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -687,12 +687,35 @@ class MainWindow(QMainWindow):
 
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
+        # A value of the wrong type (a hand-edited or damaged setting) made
+        # restoreGeometry raise and hung startup on the splash (#182).
         geometry = self._settings.value("window/geometry")
-        if geometry is not None:
-            self.restoreGeometry(geometry)
+        if isinstance(geometry, (QByteArray, bytes, bytearray)):
+            self.restoreGeometry(QByteArray(geometry))
         state = self._settings.value("window/state")
-        if state is not None:
-            self.restoreState(state)
+        if isinstance(state, (QByteArray, bytes, bytearray)):
+            self.restoreState(QByteArray(state))
+
+    def _session_json(self, key: str, expected: type, default):
+        """Read a JSON session value, or *default* if it is not *expected*."""
+        try:
+            value = json.loads(self._settings.value(key, json.dumps(default)))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return default
+        return value if isinstance(value, expected) else default
+
+    def _session_names(self, key: str) -> set[str]:
+        return {
+            name for name in self._session_json(key, list, [])
+            if isinstance(name, str)
+        }
+
+    def _session_numbers(self, key: str) -> dict[str, float]:
+        return {
+            name: float(value)
+            for name, value in self._session_json(key, dict, {}).items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
 
     def _save_session(self) -> None:
         """Persist current player state so it can be restored on next launch."""
@@ -846,18 +869,9 @@ class MainWindow(QMainWindow):
             return
 
         # Stem mute/solo/volume
-        try:
-            muted = set(json.loads(self._settings.value("session/muted_stems", "[]")))
-        except (json.JSONDecodeError, TypeError):
-            muted = set()
-        try:
-            soloed = set(json.loads(self._settings.value("session/soloed_stems", "[]")))
-        except (json.JSONDecodeError, TypeError):
-            soloed = set()
-        try:
-            volumes = json.loads(self._settings.value("session/volumes", "{}"))
-        except (json.JSONDecodeError, TypeError):
-            volumes = {}
+        muted = self._session_names("session/muted_stems")
+        soloed = self._session_names("session/soloed_stems")
+        volumes = self._session_numbers("session/volumes")
 
         self._player_controls.restore_stem_state(muted, soloed, volumes)
 
@@ -1473,21 +1487,10 @@ class MainWindow(QMainWindow):
         self._update_record_button_for_take_limit()
 
         # Restore saved state for recording stems.
-        try:
-            muted = set(json.loads(
-                self._settings.value("session/muted_stems", "[]")
-            ))
-            soloed = set(json.loads(
-                self._settings.value("session/soloed_stems", "[]")
-            ))
-            volumes = json.loads(
-                self._settings.value("session/volumes", "{}")
-            )
-            nudges = json.loads(
-                self._settings.value("session/nudge_offsets", "{}")
-            )
-        except (json.JSONDecodeError, TypeError):
-            return
+        muted = self._session_names("session/muted_stems")
+        soloed = self._session_names("session/soloed_stems")
+        volumes = self._session_numbers("session/volumes")
+        nudges = self._session_numbers("session/nudge_offsets")
         for row in self._player_controls._recording_rows.values():
             name = row._stem_name
             row.set_muted(name in muted)

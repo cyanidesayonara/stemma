@@ -199,6 +199,12 @@ class SplashScreen(QWidget):
         else:
             self._begin_fade_out()
 
+    def abort(self) -> None:
+        """Close at once, without the fade: startup failed."""
+        self._finishing = True
+        self._timer.stop()
+        self.close()
+
     def _begin_fade_out(self) -> None:
         if self._fade_anim is not None:
             return
