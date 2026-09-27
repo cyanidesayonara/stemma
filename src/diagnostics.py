@@ -45,6 +45,25 @@ def collect_model_providers() -> list[tuple[str, str]]:
     return results
 
 
+def collect_librosa_version() -> str:
+    """Import the librosa modules stemma uses and return librosa's version.
+
+    librosa loads its submodules lazily, so a frozen build that is missing
+    one still starts and only fails on the first Speed, Pitch, or detection
+    call. Importing them here lets the release smoke check catch that.
+    """
+    try:
+        # Deferred imports: an explicit smoke path; normal startup must not
+        # pay for librosa (numba) before the first render.
+        import librosa
+        import librosa.beat  # noqa: F401
+        import librosa.effects  # noqa: F401
+        import librosa.feature  # noqa: F401
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        return f"unavailable ({type(exc).__name__}: {exc})"
+    return librosa.__version__
+
+
 def collect_diagnostics() -> dict[str, str | list[str]]:
     """Return app and ONNX Runtime version/provider diagnostics."""
     # Deferred import: diagnostics is an explicit smoke path, while normal
@@ -54,6 +73,7 @@ def collect_diagnostics() -> dict[str, str | list[str]]:
     return {
         "stemma_version": __version__,
         "onnxruntime_version": ort.__version__,
+        "librosa_version": collect_librosa_version(),
         "available_providers": list(ort.get_available_providers()),
         "model_providers": [
             f"{name}: {provider}"
@@ -70,6 +90,7 @@ def format_diagnostics(
     lines = [
         f"stemma version: {diagnostics['stemma_version']}",
         f"ONNX Runtime version: {diagnostics['onnxruntime_version']}",
+        f"librosa version: {diagnostics.get('librosa_version', 'unknown')}",
         f"Available ONNX providers: {providers}",
     ]
     model_providers = diagnostics.get("model_providers") or []

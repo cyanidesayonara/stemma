@@ -9,6 +9,7 @@ from src.version import __version__
 _DIAGNOSTICS = {
     "stemma_version": "2.6.0",
     "onnxruntime_version": "1.24.4",
+    "librosa_version": "1.0.0",
     "available_providers": [
         "DmlExecutionProvider",
         "CPUExecutionProvider",
@@ -33,12 +34,16 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
     monkeypatch.setattr(
         "src.diagnostics.collect_model_providers", lambda: [],
     )
+    monkeypatch.setattr(
+        "src.diagnostics.collect_librosa_version", lambda: "1.0.0",
+    )
 
     diagnostics = collect_diagnostics()
 
     assert diagnostics == {
         "stemma_version": __version__,
         "onnxruntime_version": "1.24.4",
+        "librosa_version": "1.0.0",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -53,6 +58,7 @@ def test_format_diagnostics_is_human_readable():
     output = format_diagnostics({
         "stemma_version": "2.6.0",
         "onnxruntime_version": "1.24.4",
+        "librosa_version": "1.0.0",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -62,6 +68,7 @@ def test_format_diagnostics_is_human_readable():
     assert output.splitlines() == [
         "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
+        "librosa version: 1.0.0",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -102,6 +109,7 @@ def test_diagnostics_file_is_atomic_utf8_and_returns_success(
     assert output.read_text(encoding="utf-8").splitlines() == [
         "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
+        "librosa version: 1.0.0",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -166,6 +174,7 @@ def test_format_diagnostics_lists_provider_per_model():
     output = format_diagnostics({
         "stemma_version": "2.6.0",
         "onnxruntime_version": "1.24.4",
+        "librosa_version": "1.0.0",
         "available_providers": ["DmlExecutionProvider"],
         "model_providers": [
             "htdemucs.onnx: CPUExecutionProvider",
@@ -241,3 +250,24 @@ def test_collect_model_providers_reports_session_failure(
     assert diagnostics_module.collect_model_providers() == [
         ("broken.onnx", "unavailable (RuntimeError)"),
     ]
+
+
+def test_collect_librosa_version_imports_the_modules_stemma_uses():
+    """The frozen smoke check must fail on a bundle missing librosa's
+    lazily loaded submodules, not the first Speed or Pitch render."""
+    import librosa
+
+    from src.diagnostics import collect_librosa_version
+
+    assert collect_librosa_version() == librosa.__version__
+
+
+def test_collect_librosa_version_reports_a_broken_bundle(monkeypatch):
+    from src.diagnostics import collect_librosa_version
+
+    # None in sys.modules makes the import raise, as a missing module would.
+    monkeypatch.setitem(sys.modules, "librosa.effects", None)
+
+    reported = collect_librosa_version()
+
+    assert reported.startswith("unavailable (")
