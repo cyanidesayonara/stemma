@@ -5,6 +5,10 @@ import os
 
 
 COMPLETION_MARKER = ".separation-complete.json"
+# Written when an import creates the song folder, removed by the completion
+# marker. Its presence without a valid completion marker is the only proof
+# that a song is this app's own interrupted work, and so safe to remove.
+PENDING_MARKER = ".separation-pending"
 COMPLETION_STATE_VERSION = 1
 
 EXPECTED_STEMS: dict[str, tuple[str, ...]] = {
@@ -28,6 +32,42 @@ def expected_stems(model_key: str) -> tuple[str, ...] | None:
 
 def _marker_path(song_dir: str) -> str:
     return os.path.join(song_dir, COMPLETION_MARKER)
+
+
+def mark_separation_pending(song_dir: str) -> None:
+    """Record that a separation into *song_dir* has been started."""
+    with open(os.path.join(song_dir, PENDING_MARKER), "w", encoding="utf-8"):
+        pass
+
+
+def _has_recordings(song_dir: str) -> bool:
+    try:
+        names = os.listdir(song_dir)
+    except OSError:
+        return False
+    return any(
+        name.startswith("recording_take") and name.endswith(".wav")
+        for name in names
+    )
+
+
+def is_interrupted_import(song_dir: str) -> bool:
+    """Return whether *song_dir* is an import that never finished.
+
+    True only when the import's pending marker is present, no valid
+    completion marker is, and the folder holds no recorded takes. Anything
+    else (a damaged or missing marker, a folder from an older version, a
+    stem deleted by hand) is not provably unfinished work, and removing a
+    song deletes its folder.
+    """
+    if not os.path.exists(os.path.join(song_dir, PENDING_MARKER)):
+        return False
+    try:
+        if _read_marker_model(song_dir) is not None:
+            return False
+    except FileNotFoundError:
+        pass
+    return not _has_recordings(song_dir)
 
 
 def clear_completion_marker(song_dir: str) -> None:
@@ -70,6 +110,10 @@ def write_completion_marker(song_dir: str, model_key: str) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, marker)
+        try:
+            os.remove(os.path.join(song_dir, PENDING_MARKER))
+        except FileNotFoundError:
+            pass
     except Exception:
         try:
             os.remove(tmp_path)

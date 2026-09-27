@@ -218,6 +218,33 @@ class TestSongLibraryInit:
         (song,) = lib.songs
         assert (song.title, song.artist, song.model_used) == ("Kept", "", "")
 
+    def test_null_fields_keep_the_entry(self, library_dir):
+        songs_dir = os.path.join(library_dir, "songs")
+        os.makedirs(os.path.join(songs_dir, "aaa"))
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            json.dump([{
+                "id": "aaa", "title": "Kept", "artist": None,
+                "stems_path": os.path.join(songs_dir, "aaa"),
+            }], f)
+
+        (song,) = SongLibrary(data_dir=library_dir).songs
+
+        assert (song.title, song.artist) == ("Kept", "")
+
+    def test_rebuild_ignores_staged_removals(self, library_dir):
+        """A removal whose rmtree failed leaves songs/.remove-<id>-<hex>;
+        a rebuild must not bring the deleted song back as a row."""
+        songs_dir = os.path.join(library_dir, "songs")
+        for name in ("abc123", ".remove-bbbbbbbbbbbb-0000"):
+            os.makedirs(os.path.join(songs_dir, name))
+            open(os.path.join(songs_dir, name, "original.mp3"), "wb").close()
+        with open(os.path.join(library_dir, "library.json"), "w") as f:
+            f.write("garbage")
+
+        lib = SongLibrary(data_dir=library_dir)
+
+        assert [s.id for s in lib.songs] == ["abc123"]
+
     def test_bad_entry_does_not_drop_its_neighbours(self, library_dir):
         songs_dir = os.path.join(library_dir, "songs")
         os.makedirs(os.path.join(songs_dir, "aaa"))

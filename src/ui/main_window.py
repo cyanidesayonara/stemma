@@ -64,7 +64,7 @@ from src.player import (
     StemLoadWorker,
 )
 from src.qt_signal_utils import safe_disconnect
-from src.separation_state import INCOMPLETE, separation_status
+from src.separation_state import is_interrupted_import
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -1731,19 +1731,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _prune_incomplete_songs(self) -> None:
-        """Remove songs whose separation is known to be incomplete.
+        """Remove imports that were interrupted before they finished.
 
-        That is an interrupted job: a valid marker, or a persisted model,
-        whose stem set is missing files. Songs whose state cannot be judged
-        (an unreadable marker, a marker from another build, no model on
-        record) are kept, because removal deletes the song folder and user
-        audio is never deleted on a guess (#181).
+        Closing the app mid-separation (or a crash) leaves a library row
+        with no stems. Only rows whose folder carries the import's pending
+        marker and no completion marker are removed: removal deletes the
+        folder, and user audio is never deleted on a guess (#181).
         """
         for song in list(self._library.songs):
-            if separation_status(
-                song.stems_path,
-                song.model_used,
-            ) == INCOMPLETE:
+            if is_interrupted_import(song.stems_path):
                 try:
                     self._library.remove_song(song.id)
                 except KeyError:

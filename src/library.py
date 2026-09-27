@@ -13,7 +13,10 @@ import uuid
 from dataclasses import dataclass, asdict, fields
 from datetime import datetime, timezone
 
-from src.separation_state import recorded_or_inferred_model
+from src.separation_state import (
+    mark_separation_pending,
+    recorded_or_inferred_model,
+)
 
 
 _EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
@@ -49,7 +52,9 @@ class Song:
             raise TypeError(f"song entry must be an object, got {type(data)}")
         values = {}
         for field in fields(cls):
-            value = data.get(field.name, "")
+            value = data.get(field.name)
+            if value is None:
+                value = ""
             if not isinstance(value, str):
                 raise TypeError(f"song field {field.name!r} must be text")
             values[field.name] = value
@@ -211,6 +216,9 @@ class SongLibrary:
             ext = os.path.splitext(original_path)[1]
             internal_path = os.path.join(song_dir, f"original{ext}")
             shutil.copy2(original_path, internal_path)
+            # Until a separation writes its completion marker, this song is
+            # unfinished work that the startup prune may remove.
+            mark_separation_pending(song_dir)
         except OSError:
             if self._is_safe_song_dir(song_dir) and os.path.isdir(song_dir):
                 shutil.rmtree(song_dir, ignore_errors=True)
@@ -342,7 +350,12 @@ class SongLibrary:
             if dropped:
                 # Keep the original index, and recover the folders of the
                 # entries that could not be read.
-                shutil.copyfile(self._json_path, self._json_path + ".bak")
+                try:
+                    shutil.copyfile(
+                        self._json_path, self._json_path + ".bak",
+                    )
+                except OSError:
+                    pass  # The rows that parsed are kept either way.
                 known = {song.id for song in self._songs}
                 self._songs.extend(
                     song for song in self._rebuild_from_disk()
@@ -377,6 +390,10 @@ class SongLibrary:
         except OSError:
             return recovered
         for song_id in entries:
+            if song_id.startswith("."):
+                # Staged removals (.remove-<id>-...) and other internals,
+                # not songs.
+                continue
             song_dir = os.path.join(self._songs_dir, song_id)
             if (
                 not self._is_safe_song_dir(song_dir)
