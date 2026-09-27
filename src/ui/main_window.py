@@ -53,7 +53,7 @@ from src.app_settings import (
     read_sync_recording_pitch,
 )
 from src.data_paths import consume_data_dir_reset_notice
-from src.exporter import ExportWorker, StemExporter
+from src.exporter import ExportWorker, StemExporter, audible_stems
 from src.library import SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
@@ -1850,7 +1850,36 @@ class MainWindow(QMainWindow):
             take_name = os.path.basename(take_file).replace(".wav", "")
             stem_paths[take_name] = take_file
 
+        # Export only what playback has loaded: a take file on disk that
+        # the player skipped is not part of what the user hears.
+        loaded = self._player.stems
+        stem_paths = {n: p for n, p in stem_paths.items() if n in loaded}
+
         if not stem_paths:
+            return
+
+        # Snapshot the mix the user hears. Say so now if it is silent,
+        # rather than after the save dialog with an export error.
+        muted = self._player.muted_stems
+        soloed = self._player.soloed_stems
+        volumes = {
+            name: self._player.get_volume(name)
+            for name in stem_paths
+        }
+        master_volume = self._player.master_volume
+        nudge_offsets = {
+            name: ms for name, ms in self._player.nudge_offsets.items()
+            if name in stem_paths
+        }
+        if not audible_stems(
+            list(stem_paths), muted, soloed, volumes, master_volume
+        ):
+            QMessageBox.information(
+                self, "Export",
+                "Nothing to export: every stem is muted, silenced by "
+                "solo, or turned all the way down. Unmute or turn up "
+                "a stem first.",
+            )
             return
 
         loop_a = self._player.loop_a
@@ -1895,16 +1924,15 @@ class MainWindow(QMainWindow):
         )
         if path:
             exporter = StemExporter(stem_paths)
-            volumes = {
-                name: self._player.get_volume(name)
-                for name in stem_paths
-            }
             bitrate = read_default_mp3_bitrate(self._settings)
             self._export_worker = ExportWorker(
                 exporter=exporter,
                 output_path=path,
-                muted_stems=self._player.muted_stems,
+                muted_stems=muted,
+                soloed_stems=soloed,
                 volumes=volumes,
+                master_volume=master_volume,
+                nudge_offsets=nudge_offsets,
                 mp3_bitrate=bitrate,
                 start_frame=start_frame,
                 end_frame=end_frame,

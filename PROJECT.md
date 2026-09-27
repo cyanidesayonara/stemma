@@ -155,7 +155,7 @@ stemma/
   compatible
 
 ### `exporter.py` — Stem Export
-- Export individual stems or custom mix (with current mute/solo state) as WAV or MP3
+- Export individual stems or custom mix (what playback plays: current mute/solo, stem and master volume, and take nudge) as WAV or MP3
 - MP3 encoding via `lameenc` (320kbps CBR, no ffmpeg needed)
 - Peak normalization instead of hard clipping
 - Background export via `ExportWorker` QThread

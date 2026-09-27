@@ -1,5 +1,6 @@
 """Tests for library playback controls: repeat, shuffle, next/prev, now-playing."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -498,3 +499,87 @@ class TestExportDoubleStartGuard:
         # The "already in progress" message must not have fired.
         for call in info.call_args_list:
             assert "already in progress" not in str(call)
+
+
+class TestExportUsesAudibleMix:
+    """Export Mix exports what the user hears (#183)."""
+
+    @staticmethod
+    def _stub(tmp_path, soloed=(), muted=(), volumes=None, master=1.0):
+        for name in ("vocals", "drums", "recording_take1", "recording_take2"):
+            (tmp_path / f"{name}.wav").write_bytes(b"")
+        volumes = volumes or {}
+        stub = MagicMock()
+        stub._export_worker = None
+        stub._current_song_id = "s1"
+        stub._library.get_song.return_value = SimpleNamespace(
+            stems_path=str(tmp_path)
+        )
+        player = stub._player
+        player.has_stems = True
+        # recording_take2 exists on disk but is not loaded in the player.
+        player.stems = {"vocals": 0, "drums": 0, "recording_take1": 0}
+        player.soloed_stems = set(soloed)
+        player.muted_stems = set(muted)
+        player.get_volume.side_effect = lambda n: volumes.get(n, 1.0)
+        player.master_volume = master
+        player.nudge_offsets = {"recording_take1": 30.0}
+        player.loop_a = None
+        player.loop_b = None
+        player.count_in_enabled = False
+        return stub
+
+    @staticmethod
+    def _run(stub, save_path="out.wav"):
+        from src.ui.main_window import MainWindow
+
+        with patch(
+            "src.ui.main_window.QMessageBox.information"
+        ) as info, patch(
+            "src.ui.main_window.QFileDialog.getSaveFileName",
+            return_value=(save_path, ""),
+        ) as save, patch(
+            "src.ui.main_window.ExportWorker"
+        ) as worker_cls, patch(
+            "src.ui.main_window.read_default_export_format",
+            return_value="wav",
+        ), patch(
+            "src.ui.main_window.read_default_mp3_bitrate",
+            return_value=320,
+        ):
+            MainWindow._on_export(stub)
+        return info, save, worker_cls
+
+    def test_solo_and_mix_state_reach_worker(self, app, tmp_path):
+        stub = self._stub(tmp_path, soloed={"drums"}, master=0.7)
+        _, save, worker_cls = self._run(stub)
+        save.assert_called_once()
+        kwargs = worker_cls.call_args.kwargs
+        assert kwargs["soloed_stems"] == {"drums"}
+        assert kwargs["master_volume"] == 0.7
+        assert kwargs["nudge_offsets"] == {"recording_take1": 30.0}
+
+    def test_only_loaded_takes_are_exported(self, app, tmp_path):
+        stub = self._stub(tmp_path)
+        _, _, worker_cls = self._run(stub)
+        exporter = worker_cls.call_args.kwargs["exporter"]
+        assert set(exporter.stem_paths) == {
+            "vocals", "drums", "recording_take1"
+        }
+
+    def test_nothing_audible_warns_before_save_dialog(self, app, tmp_path):
+        stub = self._stub(
+            tmp_path, muted={"vocals", "drums", "recording_take1"}
+        )
+        info, save, worker_cls = self._run(stub)
+        info.assert_called_once()
+        save.assert_not_called()
+        worker_cls.assert_not_called()
+
+    def test_zero_master_volume_warns_before_save_dialog(
+        self, app, tmp_path
+    ):
+        stub = self._stub(tmp_path, master=0.0)
+        info, save, _ = self._run(stub)
+        info.assert_called_once()
+        save.assert_not_called()

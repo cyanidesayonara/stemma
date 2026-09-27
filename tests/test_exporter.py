@@ -1,12 +1,18 @@
 """Tests for the stem exporter."""
 
 import os
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from src.exporter import StemExporter, _write_audio
+from src.exporter import (
+    ExportWorker,
+    StemExporter,
+    _write_audio,
+    audible_stems,
+)
 from src.separator import SAMPLE_RATE
 from src.click_utils import generate_click, generate_count_in
 
@@ -149,6 +155,139 @@ class TestExportMix:
         full_energy = np.sum(full ** 2)
         half_energy = np.sum(half ** 2)
         assert half_energy < full_energy * 0.5
+
+
+def _impulse_dir(tmp_path, lengths):
+    """Write stereo WAVs holding a constant 0.1 signal of given lengths."""
+    d = tmp_path / "impulse"
+    d.mkdir()
+    paths = {}
+    for name, n in lengths.items():
+        data = np.full((n, 2), 0.1, dtype=np.float32)
+        path = str(d / f"{name}.wav")
+        sf.write(path, data, SAMPLE_RATE, subtype="FLOAT")
+        paths[name] = path
+    return paths
+
+
+class TestAudibleStems:
+    """audible_stems() mirrors the player's active-stem rule."""
+
+    def test_no_mute_no_solo_all_audible(self):
+        assert audible_stems(["a", "b"], set(), set()) == ["a", "b"]
+
+    def test_muted_excluded(self):
+        assert audible_stems(["a", "b"], {"a"}, set()) == ["b"]
+
+    def test_solo_keeps_only_soloed(self):
+        assert audible_stems(["a", "b", "c"], set(), {"b"}) == ["b"]
+
+    def test_solo_overrides_mute_like_playback(self):
+        # The player's callback uses the solo set alone when any stem is
+        # soloed, so a soloed-and-muted stem is heard.
+        assert audible_stems(["a", "b"], {"b"}, {"b"}) == ["b"]
+
+    def test_zero_volume_is_not_audible(self):
+        assert audible_stems(
+            ["a", "b"], set(), set(), volumes={"a": 0.0}
+        ) == ["b"]
+
+    def test_zero_master_volume_silences_everything(self):
+        assert audible_stems(["a"], set(), set(), master_volume=0.0) == []
+
+    def test_all_muted_is_empty(self):
+        assert audible_stems(["a", "b"], {"a", "b"}, set()) == []
+
+
+class TestExportMixMatchesPlayback:
+    """Export applies solo, volumes, master volume and nudge (#183)."""
+
+    def test_solo_exports_only_soloed_stem(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"a": 1000, "b": 1000, "c": 1000})
+        out = str(tmp_path / "solo.wav")
+        StemExporter(paths).export_mix(out, soloed_stems={"b"})
+        audio, _ = sf.read(out, dtype="float32")
+        assert np.allclose(audio, 0.1, atol=1e-4)
+
+    def test_all_muted_raises(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"a": 1000})
+        with pytest.raises(ValueError):
+            StemExporter(paths).export_mix(
+                str(tmp_path / "x.wav"), muted_stems={"a"}
+            )
+
+    def test_master_volume_scales_mix(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"a": 1000, "b": 1000})
+        out = str(tmp_path / "master.wav")
+        StemExporter(paths).export_mix(
+            out, volumes={"a": 1.0, "b": 0.5}, master_volume=0.5
+        )
+        audio, _ = sf.read(out, dtype="float32")
+        # (0.1 * 1.0 + 0.1 * 0.5) * 0.5
+        assert np.allclose(audio, 0.075, atol=1e-4)
+
+    def test_nudge_shifts_take_later(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"take": SAMPLE_RATE})
+        out = str(tmp_path / "nudged.wav")
+        StemExporter(paths).export_mix(out, nudge_offsets={"take": 100.0})
+        audio, _ = sf.read(out, dtype="float32")
+        shift = int(0.1 * SAMPLE_RATE)
+        assert audio.shape[0] == SAMPLE_RATE
+        assert np.allclose(audio[:shift], 0.0)
+        assert np.allclose(audio[shift:], 0.1, atol=1e-4)
+
+    def test_negative_nudge_shifts_take_earlier(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"take": SAMPLE_RATE})
+        out = str(tmp_path / "nudged.wav")
+        StemExporter(paths).export_mix(out, nudge_offsets={"take": -100.0})
+        audio, _ = sf.read(out, dtype="float32")
+        shift = int(0.1 * SAMPLE_RATE)
+        assert np.allclose(audio[:-shift], 0.1, atol=1e-4)
+        assert np.allclose(audio[-shift:], 0.0)
+
+    def test_nudge_applies_before_loop_region(self, tmp_path):
+        paths = _impulse_dir(tmp_path, {"take": SAMPLE_RATE})
+        out = str(tmp_path / "region.wav")
+        shift = int(0.1 * SAMPLE_RATE)
+        StemExporter(paths).export_mix(
+            out, nudge_offsets={"take": 100.0},
+            start_frame=0, end_frame=2 * shift,
+        )
+        audio, _ = sf.read(out, dtype="float32")
+        assert np.allclose(audio[:shift], 0.0)
+        assert np.allclose(audio[shift:], 0.1, atol=1e-4)
+
+    def test_mix_length_is_longest_stem(self, tmp_path):
+        # Playback runs to the longest stem; a shorter first stem must
+        # not truncate the rest of the mix.
+        paths = _impulse_dir(tmp_path, {"a": 500, "b": 1000})
+        out = str(tmp_path / "len.wav")
+        StemExporter(paths).export_mix(out)
+        audio, _ = sf.read(out, dtype="float32")
+        assert audio.shape[0] == 1000
+        assert np.allclose(audio[:500], 0.2, atol=1e-4)
+        assert np.allclose(audio[500:], 0.1, atol=1e-4)
+
+
+class TestExportWorkerForwardsState:
+
+    def test_worker_passes_solo_master_and_nudge(self):
+        exporter = MagicMock()
+        worker = ExportWorker(
+            exporter=exporter,
+            output_path="out.wav",
+            muted_stems={"a"},
+            volumes={"b": 0.5},
+            soloed_stems={"b"},
+            master_volume=0.8,
+            nudge_offsets={"recording_take1": 20.0},
+        )
+        worker.run()
+        kwargs = exporter.export_mix.call_args.kwargs
+        assert kwargs["soloed_stems"] == {"b"}
+        assert kwargs["muted_stems"] == {"a"}
+        assert kwargs["master_volume"] == 0.8
+        assert kwargs["nudge_offsets"] == {"recording_take1": 20.0}
 
 
 class TestMP3Export:

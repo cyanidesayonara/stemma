@@ -82,6 +82,58 @@ def _write_mp3(
         f.write(mp3_data)
 
 
+def audible_stems(
+    stem_names: list[str],
+    muted_stems: set[str] | None = None,
+    soloed_stems: set[str] | None = None,
+    volumes: dict[str, float] | None = None,
+    master_volume: float = 1.0,
+) -> list[str]:
+    """Return the stems the user actually hears, in *stem_names* order.
+
+    Mirrors the player's audio callback: when any stem is soloed, only
+    soloed stems play (mute is ignored for them); otherwise every
+    unmuted stem plays. A stem whose effective gain (stem volume times
+    master volume) is zero is silent and left out.
+
+    Args:
+        stem_names: Candidate stem names.
+        muted_stems: Muted stem names.
+        soloed_stems: Soloed stem names.
+        volumes: Per-stem gain levels. Missing stems default to 1.0.
+        master_volume: Master gain applied to every stem.
+    """
+    muted = muted_stems or set()
+    soloed = soloed_stems or set()
+    volumes = volumes or {}
+    if soloed:
+        active = [s for s in stem_names if s in soloed]
+    else:
+        active = [s for s in stem_names if s not in muted]
+    return [
+        s for s in active if volumes.get(s, 1.0) * master_volume > 0.0
+    ]
+
+
+def _shift_frames(audio: np.ndarray, offset_frames: int) -> np.ndarray:
+    """Shift *audio* in time, keeping its length, padding with silence.
+
+    Positive offsets move the audio later; negative ones earlier. Matches
+    ``AudioPlayer.nudge_stem``.
+    """
+    if offset_frames == 0:
+        return audio
+    shifted = np.zeros_like(audio)
+    n = audio.shape[0]
+    if abs(offset_frames) >= n:
+        return shifted
+    if offset_frames > 0:
+        shifted[offset_frames:] = audio[:n - offset_frames]
+    else:
+        shifted[:offset_frames] = audio[-offset_frames:]
+    return shifted
+
+
 class StemExporter:
     """Exports stems or custom mixes from separated audio.
 
@@ -127,14 +179,21 @@ class StemExporter:
         count_in_beats: int = 0,
         count_in_bpm: float = 120.0,
         count_in_volume: float = 0.5,
+        soloed_stems: set[str] | None = None,
+        master_volume: float = 1.0,
+        nudge_offsets: dict[str, float] | None = None,
     ) -> None:
         """Export a mix of selected stems to a WAV or MP3 file.
+
+        The mix follows playback: mute/solo decide which stems are heard
+        (see :func:`audible_stems`), each stem is scaled by its volume
+        and the master volume, nudged stems are shifted in time, and the
+        mix runs to the end of the longest stem.
 
         Args:
             output_path: Destination file path (.wav or .mp3).
             stem_names: Stems to include. Defaults to all available stems.
-            muted_stems: Stems to exclude from the mix. Applied after
-                *stem_names* filtering.
+            muted_stems: Muted stems. Ignored while any stem is soloed.
             volumes: Per-stem gain levels (0.0--2.0). Missing stems
                 default to 1.0.
             mp3_bitrate: Bitrate for MP3 output (default 320 kbps).
@@ -145,36 +204,51 @@ class StemExporter:
             count_in_beats: Number of metronome beats to prepend (0 = none).
             count_in_bpm: Tempo for the prepended count-in (default 120).
             count_in_volume: Volume for count-in clicks (0.0--2.0).
+            soloed_stems: Soloed stems. When non-empty, only these play.
+            master_volume: Master gain applied to every stem.
+            nudge_offsets: Per-stem time offsets in milliseconds
+                (positive = later), as set by ``AudioPlayer.nudge_stem``.
 
         Raises:
-            ValueError: If the resulting stem list is empty.
+            ValueError: If no stem would be audible.
         """
         if stem_names is None:
             stem_names = self.available_stems
 
-        if muted_stems:
-            stem_names = [s for s in stem_names if s not in muted_stems]
+        if volumes is None:
+            volumes = {}
+        if nudge_offsets is None:
+            nudge_offsets = {}
 
+        stem_names = audible_stems(
+            stem_names, muted_stems, soloed_stems, volumes, master_volume
+        )
         if not stem_names:
             raise ValueError("No stems selected for export")
 
-        if volumes is None:
-            volumes = {}
-
-        mixed = None
+        tracks = []
         for name in stem_names:
             audio, sr = sf.read(self.stem_paths[name], dtype="float32")
+            offset_ms = nudge_offsets.get(name, 0.0)
+            if offset_ms:
+                audio = _shift_frames(audio, int(offset_ms / 1000.0 * sr))
             if start_frame is not None or end_frame is not None:
                 sf_start = start_frame if start_frame is not None else 0
                 sf_end = end_frame if end_frame is not None else audio.shape[0]
                 audio = audio[sf_start:sf_end]
-            gain = volumes.get(name, 1.0)
-            audio = audio * gain
-            if mixed is None:
-                mixed = audio.copy()
-            else:
-                min_len = min(mixed.shape[0], audio.shape[0])
-                mixed[:min_len] += audio[:min_len]
+            tracks.append(audio * (volumes.get(name, 1.0) * master_volume))
+
+        # Playback runs to the end of the longest stem, so shorter stems
+        # simply fall silent rather than truncating the mix.
+        # Mono tracks are broadcast across the channels of a stereo mix.
+        length = max(t.shape[0] for t in tracks)
+        channels = max((t.shape[1] for t in tracks if t.ndim == 2), default=0)
+        shape = (length, channels) if channels else (length,)
+        mixed = np.zeros(shape, dtype=np.float32)
+        for audio in tracks:
+            if audio.ndim == 1 and channels:
+                audio = audio[:, np.newaxis]
+            mixed[:audio.shape[0]] += audio
 
         peak = np.max(np.abs(mixed))
         if peak > 1.0:
@@ -220,11 +294,17 @@ class ExportWorker(QThread):
         count_in_beats: int = 0,
         count_in_bpm: float = 120.0,
         count_in_volume: float = 0.5,
+        soloed_stems: set[str] | None = None,
+        master_volume: float = 1.0,
+        nudge_offsets: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
         self.exporter = exporter
         self.output_path = output_path
         self.muted_stems = muted_stems
+        self.soloed_stems = soloed_stems or set()
+        self.master_volume = master_volume
+        self.nudge_offsets = nudge_offsets or {}
         self.volumes = volumes
         self.mp3_bitrate = mp3_bitrate
         self.start_frame = start_frame
@@ -238,7 +318,10 @@ class ExportWorker(QThread):
             self.exporter.export_mix(
                 self.output_path,
                 muted_stems=self.muted_stems,
+                soloed_stems=self.soloed_stems,
                 volumes=self.volumes,
+                master_volume=self.master_volume,
+                nudge_offsets=self.nudge_offsets,
                 mp3_bitrate=self.mp3_bitrate,
                 start_frame=self.start_frame,
                 end_frame=self.end_frame,
