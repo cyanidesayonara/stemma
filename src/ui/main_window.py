@@ -1110,6 +1110,10 @@ class MainWindow(QMainWindow):
         self._suppress_recording_reload = True
         try:
             self._player.stop()
+        except Exception:
+            # A vanished audio device or a failed recording write must not
+            # skip the worker drains below (exit crash on live QThreads).
+            pass
         finally:
             self._suppress_recording_reload = False
         # Cancel and drain stretch/peak workers *before* Qt tears down,

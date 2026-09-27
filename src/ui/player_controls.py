@@ -74,8 +74,10 @@ def _compute_peaks_bg(stems, stem_bins=2000):
 
 _peak_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="peak")
 
-# How long closing waits for an in-flight peak computation. Its result is
-# discarded either way; shutdown_peak_pool joins the thread afterwards.
+# How long _cleanup_peak_thread waits for an in-flight peak computation
+# before moving on to the detection drain. It does not cap how long closing
+# takes: shutdown_peak_pool joins the pool thread afterwards, and the
+# computation always finishes on its own. The result is discarded.
 _PEAK_DRAIN_TIMEOUT_S = 2.0
 
 

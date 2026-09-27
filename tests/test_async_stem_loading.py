@@ -693,6 +693,30 @@ class TestMainWindowAsyncLoading:
         gui_read.assert_not_called()
         recompute_peaks.assert_not_called()
 
+    def test_close_drains_workers_even_when_stop_raises(self, window):
+        """A vanished audio device (PortAudioError) or a full disk while
+        saving a recording made player.stop() raise out of closeEvent,
+        skipping every drain after it."""
+        with patch.object(
+            window._player, "stop", side_effect=OSError("device gone"),
+        ), patch.object(
+            window._separation_queue, "shutdown",
+        ), patch.object(
+            window, "_shutdown_stem_loads",
+        ), patch.object(
+            window._player, "shutdown",
+        ) as player_shutdown, patch.object(
+            window._player_controls, "shutdown",
+        ) as controls_shutdown, patch.object(
+            main_window_module, "shutdown_peak_pool",
+        ) as pool_shutdown:
+            window.closeEvent(QCloseEvent())
+
+        player_shutdown.assert_called_once_with()
+        controls_shutdown.assert_called_once_with()
+        pool_shutdown.assert_called_once_with()
+        assert window._suppress_recording_reload is False
+
     @pytest.mark.parametrize("action", ["error", "close"])
     def test_failed_or_closed_song_can_be_selected_again(
         self, window, action,
