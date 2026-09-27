@@ -45,6 +45,8 @@ def _has_recordings(song_dir: str) -> bool:
         names = os.listdir(song_dir)
     except OSError:
         return False
+    # "recording_take" is player.RECORDING_STEM_PREFIX; importing the player
+    # here would load the audio stack into every library read.
     return any(
         name.startswith("recording_take") and name.endswith(".wav")
         for name in names
@@ -54,19 +56,18 @@ def _has_recordings(song_dir: str) -> bool:
 def is_interrupted_import(song_dir: str) -> bool:
     """Return whether *song_dir* is an import that never finished.
 
-    True only when the import's pending marker is present, no valid
-    completion marker is, and the folder holds no recorded takes. Anything
-    else (a damaged or missing marker, a folder from an older version, a
-    stem deleted by hand) is not provably unfinished work, and removing a
-    song deletes its folder.
+    True only when the import's pending marker is present, no completion
+    marker exists at all, and the folder holds no recorded takes. The
+    completion marker is written atomically after every stem, so one that
+    exists means the job finished, even if it is unreadable now (an
+    antivirus lock, disk damage) and a stale pending marker survived.
+    Anything else is not provably unfinished work, and removing a song
+    deletes its folder.
     """
     if not os.path.exists(os.path.join(song_dir, PENDING_MARKER)):
         return False
-    try:
-        if _read_marker_model(song_dir) is not None:
-            return False
-    except FileNotFoundError:
-        pass
+    if os.path.exists(_marker_path(song_dir)):
+        return False
     return not _has_recordings(song_dir)
 
 
@@ -112,7 +113,9 @@ def write_completion_marker(song_dir: str, model_key: str) -> None:
         os.replace(tmp_path, marker)
         try:
             os.remove(os.path.join(song_dir, PENDING_MARKER))
-        except FileNotFoundError:
+        except OSError:
+            # Missing, or locked by an indexer or antivirus: harmless now,
+            # since an existing completion marker overrides it.
             pass
     except Exception:
         try:
@@ -120,14 +123,6 @@ def write_completion_marker(song_dir: str, model_key: str) -> None:
         except FileNotFoundError:
             pass
         raise
-
-
-# separation_status results. Only INCOMPLETE justifies removing a song:
-# UNKNOWN means the state cannot be judged, and user audio is never deleted
-# on a guess.
-COMPLETE = "complete"
-INCOMPLETE = "incomplete"
-UNKNOWN = "unknown"
 
 
 def _has_stems(song_dir: str, stems: tuple[str, ...]) -> bool:
@@ -184,29 +179,12 @@ def recorded_or_inferred_model(song_dir: str) -> str:
     return model_key or infer_model_from_stems(song_dir)
 
 
-def separation_status(song_dir: str, model_used: str) -> str:
-    """Return COMPLETE, INCOMPLETE, or UNKNOWN for a song's stem folder.
-
-    A valid marker, or a markerless song whose persisted model is known,
-    is judged by its canonical stem set. A marker that cannot be read or
-    comes from another build, and a markerless song without a known model
-    (a library rebuilt from disk), are UNKNOWN unless a full stem set is
-    present.
-    """
+def separation_is_complete(song_dir: str, model_used: str) -> bool:
+    """Whether a valid marker's stem set (or, without a marker, the
+    persisted model's) is fully on disk."""
     try:
         model_key = _read_marker_model(song_dir)
     except FileNotFoundError:
-        model_key = model_used if expected_stems(model_used) else None
-        if model_key is None:
-            return COMPLETE if infer_model_from_stems(song_dir) else UNKNOWN
-    if model_key is None:
-        return COMPLETE if infer_model_from_stems(song_dir) else UNKNOWN
-    return (
-        COMPLETE if _has_stems(song_dir, expected_stems(model_key))
-        else INCOMPLETE
-    )
-
-
-def separation_is_complete(song_dir: str, model_used: str) -> bool:
-    """Validate marker-based state, or a complete legacy persisted model."""
-    return separation_status(song_dir, model_used) == COMPLETE
+        model_key = model_used
+    stems = expected_stems(model_key) if model_key else None
+    return stems is not None and _has_stems(song_dir, stems)

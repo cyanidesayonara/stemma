@@ -416,6 +416,7 @@ class TestMainWindowGlue:
     @pytest.mark.parametrize("case", [
         "legacy-partial", "garbled-marker", "marker-missing-a-stem",
         "future-marker", "unknown-model", "takes-on-a-pending-song",
+        "unreadable-marker-with-stale-pending",
     ])
     def test_prune_keeps_what_it_cannot_prove_is_unfinished(
         self, app, tmp_path, case,
@@ -437,6 +438,10 @@ class TestMainWindowGlue:
                         "stems": ["drums", "bass", "other", "vocals"]}),
             "unknown-model": dict(model_used=""),
             "takes-on-a-pending-song": dict(pending=True, takes=1),
+            # Finished (the marker is written atomically, last), but the
+            # pending removal failed and the marker is unreadable now.
+            "unreadable-marker-with-stale-pending": dict(
+                stems=("vocals", "other"), marker="{garbled", pending=True),
         }[case]
 
         assert self._prune([self._song(tmp_path, case, **song)]) == []
@@ -507,3 +512,30 @@ class TestDamagedIndexKeepsAudio:
 
         assert os.path.isfile(os.path.join(song_dir, "vocals.wav"))
         assert [s.id for s in library.songs] == ["0123456789ab"]
+
+
+class TestCompletionMarkerWrite:
+    def test_locked_pending_marker_does_not_fail_a_finished_job(
+        self, tmp_path, monkeypatch,
+    ):
+        """An indexer or antivirus holding the pending file must not turn
+        a finished separation into "Import failed" (and a rollback)."""
+        from src import separation_state
+
+        song_dir = str(tmp_path)
+        separation_state.mark_separation_pending(song_dir)
+        for stem in ("vocals", "other"):
+            open(os.path.join(song_dir, f"{stem}.wav"), "wb").close()
+        real_remove = os.remove
+
+        def locked(path):
+            if path.endswith(separation_state.PENDING_MARKER):
+                raise PermissionError(13, "in use", path)
+            real_remove(path)
+
+        monkeypatch.setattr(separation_state.os, "remove", locked)
+
+        separation_state.write_completion_marker(song_dir, "mdx_inst_hq3")
+
+        assert separation_state.separation_is_complete(song_dir, "")
+        assert not separation_state.is_interrupted_import(song_dir)

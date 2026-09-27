@@ -210,15 +210,16 @@ class SongLibrary:
         song_dir = os.path.join(self._songs_dir, song_id)
         try:
             os.makedirs(song_dir, exist_ok=True)
+            # Until a separation writes its completion marker, this song is
+            # unfinished work that the startup prune may remove. Written
+            # before the copy, so a kill mid-copy is covered too.
+            mark_separation_pending(song_dir)
 
             # Copy the source audio into the song directory so the library is
             # self-contained and does not break if the original file moves.
             ext = os.path.splitext(original_path)[1]
             internal_path = os.path.join(song_dir, f"original{ext}")
             shutil.copy2(original_path, internal_path)
-            # Until a separation writes its completion marker, this song is
-            # unfinished work that the startup prune may remove.
-            mark_separation_pending(song_dir)
         except OSError:
             if self._is_safe_song_dir(song_dir) and os.path.isdir(song_dir):
                 shutil.rmtree(song_dir, ignore_errors=True)
