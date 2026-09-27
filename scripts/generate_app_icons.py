@@ -1,14 +1,15 @@
-"""Generate every app icon from the three SVG drawings in assets/icons/.
+"""Generate every app icon from the SVG drawings in assets/icons/.
 
     python scripts/generate_app_icons.py
 
 One drawing cannot serve every size: the full mark (four notes on a stem,
-each flowing out as a wave) turns into a striped smudge below about 48 px.
-So each size is rendered from the drawing made for it:
+each flowing out as a wave) turns into a striped smudge when scaled down,
+and a small drawing scaled to another size blurs every edge. So:
 
-- ``icon_large.svg`` (256 grid): 48 px and up
-- ``icon_medium.svg`` (32 grid): 24-47 px, separated notes and short waves
-- ``icon_small.svg`` (16 grid): up to 23 px, pixel-placed notes
+- ``icon_{16,20,24,32}px.svg`` are pixel-placed drawings, each rendered at
+  exactly its own size (24 px is the Windows taskbar at 100% scaling).
+  Sizes between them (30 px, for example) use the next larger one.
+- ``icon_large.svg`` (256 grid) is used from 33 px up.
 
 Writes:
 
@@ -38,6 +39,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICONS_DIR = os.path.join(_ROOT, "assets", "icons")
 MSIX_DIR = os.path.join(_ROOT, "assets", "msix")
 
+PIXEL_SIZES = (16, 20, 24, 32)
 APP_PNG_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 # Windows' own list for Square44x44Logo target sizes.
@@ -53,13 +55,10 @@ WIDE = ("Wide310x150Logo", 310, 150)
 
 def drawing_for(size: int) -> str:
     """Return the SVG path of the drawing meant for *size* pixels."""
-    if size >= 48:
-        name = "icon_large.svg"
-    elif size >= 24:
-        name = "icon_medium.svg"
-    else:
-        name = "icon_small.svg"
-    return os.path.join(ICONS_DIR, name)
+    for grid in PIXEL_SIZES:
+        if size <= grid:
+            return os.path.join(ICONS_DIR, f"icon_{grid}px.svg")
+    return os.path.join(ICONS_DIR, "icon_large.svg")
 
 
 def render(size: int) -> QImage:
@@ -77,6 +76,7 @@ def render(size: int) -> QImage:
 
 
 def png_bytes(image: QImage) -> bytes:
+    """Encode *image* as PNG (deterministic for the same pixels)."""
     data = QByteArray()
     buffer = QBuffer(data)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -85,8 +85,8 @@ def png_bytes(image: QImage) -> bytes:
     return bytes(data)
 
 
-def write_ico(path: str, sizes=ICO_SIZES) -> None:
-    """Write an .ico whose frames are PNGs rendered per size."""
+def ico_bytes(sizes=ICO_SIZES) -> bytes:
+    """Return an .ico whose frames are PNGs rendered per size."""
     frames = [(size, png_bytes(render(size))) for size in sizes]
     header = struct.pack("<HHH", 0, 1, len(frames))
     offset = len(header) + 16 * len(frames)
@@ -98,8 +98,7 @@ def write_ico(path: str, sizes=ICO_SIZES) -> None:
         )
         blobs += blob
         offset += len(blob)
-    with open(path, "wb") as handle:
-        handle.write(header + entries + blobs)
+    return header + entries + blobs
 
 
 def msix_assets() -> dict[str, QImage]:
@@ -135,21 +134,30 @@ def _wide(width: int, height: int) -> QImage:
     return image
 
 
+def generated_files() -> dict[str, bytes]:
+    """Return {absolute path: content} for every file this script writes."""
+    files = {
+        os.path.join(ICONS_DIR, f"icon_{size}.png"): png_bytes(render(size))
+        for size in APP_PNG_SIZES
+    }
+    files[os.path.join(ICONS_DIR, "stemma.ico")] = ico_bytes()
+    for name, image in msix_assets().items():
+        files[os.path.join(MSIX_DIR, name)] = png_bytes(image)
+    return files
+
+
 def main() -> int:
-    app = QGuiApplication.instance() or QGuiApplication(sys.argv)
-    _ = app
-    for size in APP_PNG_SIZES:
-        render(size).save(os.path.join(ICONS_DIR, f"icon_{size}.png"))
-    write_ico(os.path.join(ICONS_DIR, "stemma.ico"))
+    # Qt needs an application object for QImage/QSvgRenderer painting.
+    app = QGuiApplication.instance() or QGuiApplication(sys.argv)  # noqa: F841
+    files = generated_files()
     os.makedirs(MSIX_DIR, exist_ok=True)
     for name in os.listdir(MSIX_DIR):
         if name.endswith(".png"):
             os.remove(os.path.join(MSIX_DIR, name))
-    assets = msix_assets()
-    for name, image in assets.items():
-        image.save(os.path.join(MSIX_DIR, name))
-    print(f"wrote {len(APP_PNG_SIZES)} app PNGs, stemma.ico "
-          f"({len(ICO_SIZES)} frames), {len(assets)} MSIX images")
+    for path, content in files.items():
+        with open(path, "wb") as handle:
+            handle.write(content)
+    print(f"wrote {len(files)} files")
     return 0
 
 

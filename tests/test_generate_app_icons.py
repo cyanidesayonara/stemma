@@ -22,9 +22,9 @@ def qapp():
 
 
 @pytest.mark.parametrize("size, drawing", [
-    (16, "icon_small.svg"), (20, "icon_small.svg"),
-    (24, "icon_medium.svg"), (40, "icon_medium.svg"),
-    (48, "icon_large.svg"), (256, "icon_large.svg"),
+    (16, "icon_16px.svg"), (20, "icon_20px.svg"), (24, "icon_24px.svg"),
+    (30, "icon_32px.svg"), (32, "icon_32px.svg"),
+    (36, "icon_large.svg"), (48, "icon_large.svg"), (256, "icon_large.svg"),
 ])
 def test_each_size_uses_its_own_drawing(size, drawing):
     assert os.path.basename(icons.drawing_for(size)) == drawing
@@ -36,10 +36,10 @@ def test_each_size_uses_its_own_drawing(size, drawing):
 
 def test_ico_holds_one_png_frame_per_size(tmp_path):
     path = str(tmp_path / "test.ico")
+    data = icons.ico_bytes(sizes=(16, 32, 256))
+    with open(path, "wb") as handle:
+        handle.write(data)
 
-    icons.write_ico(path, sizes=(16, 32, 256))
-
-    data = open(path, "rb").read()
     reserved, kind, count = struct.unpack_from("<HHH", data)
     assert (reserved, kind, count) == (0, 1, 3)
     widths = [data[6 + 16 * i] for i in range(count)]
@@ -60,10 +60,58 @@ def test_msix_set_covers_every_taskbar_target_size():
     assert (wide.width(), wide.height()) == (310, 150)
 
 
-def test_committed_msix_images_are_up_to_date():
-    """build_msix.ps1 copies assets/msix as-is; regenerate after changing
-    the SVGs so the package does not ship stale or missing sizes."""
-    committed = {
-        name for name in os.listdir(icons.MSIX_DIR) if name.endswith(".png")
+def _interior_colors(image):
+    """Colours inside the rim, leaving out the tile's rounded corners
+    (antialiased by design)."""
+    size = image.width()
+    corner = size // 4
+
+    def in_corner(x, y):
+        return ((x < corner or x >= size - corner)
+                and (y < corner or y >= size - corner))
+
+    return {
+        image.pixel(x, y)
+        for y in range(2, size - 2) for x in range(2, size - 2)
+        if not in_corner(x, y)
     }
-    assert committed == set(icons.msix_assets())
+
+
+@pytest.mark.parametrize("size", icons.PIXEL_SIZES)
+def test_pixel_drawings_render_without_resampling(size):
+    """At its own size a pixel drawing uses only its palette: the tile,
+    the stem, four note colours and their dimmed corners. Resampling (the
+    old 24 px icon was the 32 px drawing scaled) blends dozens more."""
+    assert len(_interior_colors(icons.render(size))) <= 10
+
+
+def test_resampled_drawing_is_what_the_palette_check_catches():
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtSvg import QSvgRenderer
+
+    image = QImage(24, 24, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(os.path.join(icons.ICONS_DIR, "icon_large.svg")).render(
+        painter, QRectF(0, 0, 24, 24),
+    )
+    painter.end()
+
+    assert len(_interior_colors(image)) > 10
+
+
+def test_committed_icons_are_up_to_date():
+    """build_msix.ps1 and the app ship these files as committed. After an
+    SVG change, regenerate: a stale or missing file fails here."""
+    expected = icons.generated_files()
+    committed_msix = {
+        os.path.join(icons.MSIX_DIR, name)
+        for name in os.listdir(icons.MSIX_DIR) if name.endswith(".png")
+    }
+    assert committed_msix == {
+        path for path in expected if path.startswith(icons.MSIX_DIR)
+    }
+    for path, content in expected.items():
+        with open(path, "rb") as handle:
+            assert handle.read() == content, os.path.relpath(path)
