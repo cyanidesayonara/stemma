@@ -801,6 +801,36 @@ class TestPeakGeneration:
         worker.wait.assert_called_once_with()
         assert controls._detection_worker is None
 
+    def test_cleanup_survives_a_peak_computation_still_running(
+        self, window,
+    ):
+        """Closing while peaks are still computing must not raise: the
+        TimeoutError skipped the detection-worker drain and the rest of
+        closeEvent."""
+        controls = window._player_controls
+        worker = MagicMock()
+        controls._detection_worker = worker
+        controls._peak_future = Future()  # Never finishes.
+
+        with patch.object(
+            player_controls_module, "_PEAK_DRAIN_TIMEOUT_S", 0.01,
+        ):
+            controls._cleanup_peak_thread()
+
+        worker.wait.assert_called_once_with()
+        assert controls._detection_worker is None
+        assert controls._peak_future is None
+
+    def test_cleanup_survives_a_failed_peak_computation(self, window):
+        controls = window._player_controls
+        failed = Future()
+        failed.set_exception(MemoryError("peaks"))
+        controls._peak_future = failed
+
+        controls._cleanup_peak_thread()
+
+        assert controls._peak_future is None
+
     def test_shutdown_drains_orphaned_detection_workers(self, window):
         controls = window._player_controls
         worker = MagicMock()
