@@ -85,6 +85,7 @@ jobs:
           $required = @(
             'stemma version: \d+\.\d+\.\d+',
             'ONNX Runtime version: \S+',
+            'librosa version: \d+\.\d+',
             'DmlExecutionProvider'
           )
           foreach ($pattern in $required) {

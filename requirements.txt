@@ -6,10 +6,12 @@ sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26.0
 lameenc>=1.7.0
-# librosa 1.0 reworked the phase vocoder behind time_stretch/pitch_shift
-# (Speed, Pitch, Loop Trainer). It was checked against 0.11 before the
-# release lock moved to it (issue #154); keep CI and the lock on the same
-# major version.
-librosa>=1.0,<2.0
+# librosa drives Speed, Pitch, and the Loop Trainer (time_stretch,
+# pitch_shift). 1.0 reworked the phase vocoder; it was measured against 0.11
+# before the release lock moved to it (issue #154), and the listening check
+# is part of the release acceptance pass (#159). Cap at the locked minor
+# version so CI never tests a different audio path than users get; lift it
+# together with the release lock.
+librosa>=1.0,<1.1
 yt-dlp>=2024.1.0
 imageio-ffmpeg>=0.4.9
