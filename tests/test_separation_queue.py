@@ -404,11 +404,71 @@ class TestMainWindowGlue:
         stub._library.songs = [partial, invalid, marked_partial]
         MainWindow._prune_incomplete_songs(stub)
 
+        # "invalid" has every stem its model needs next to a garbled
+        # marker: the audio is intact, so it is kept (#181).
         assert stub._library.remove_song.call_args_list == [
             (("partial",), {}),
-            (("invalid",), {}),
             (("marked-partial",), {}),
         ]
+
+    @pytest.mark.parametrize("marker", [
+        "{garbled",
+        json.dumps({"version": 99, "model": "htdemucs",
+                    "stems": ["drums", "bass", "other", "vocals"]}),
+        json.dumps({"version": 1, "model": "some_future_model",
+                    "stems": ["vocals"]}),
+    ])
+    def test_prune_keeps_songs_whose_marker_it_cannot_judge(
+        self, app, tmp_path, marker,
+    ):
+        """An unreadable marker, or one from a newer build, says nothing
+        about whether the stems are complete; deleting on it destroyed
+        user audio (#181)."""
+        from src.ui.main_window import MainWindow
+
+        song = MagicMock()
+        song.id = "kept"
+        song.model_used = ""
+        song.stems_path = str(tmp_path / "kept")
+        os.makedirs(song.stems_path)
+        open(os.path.join(song.stems_path, "vocals.wav"), "wb").close()
+        with open(
+            os.path.join(song.stems_path, ".separation-complete.json"),
+            "w", encoding="utf-8",
+        ) as f:
+            f.write(marker)
+
+        stub = MagicMock()
+        stub._library.songs = [song]
+        MainWindow._prune_incomplete_songs(stub)
+
+        stub._library.remove_song.assert_not_called()
+
+    @pytest.mark.parametrize("stems", [
+        ("drums", "bass", "other", "vocals"),
+        ("vocals",),
+        (),
+    ])
+    def test_prune_keeps_markerless_songs_with_an_unknown_model(
+        self, app, tmp_path, stems,
+    ):
+        """A library rebuilt from disk has no model on record. Pre-v2.6
+        songs have no marker either, so every one of them was deleted."""
+        from src.ui.main_window import MainWindow
+
+        song = MagicMock()
+        song.id = "legacy"
+        song.model_used = ""
+        song.stems_path = str(tmp_path / "legacy")
+        os.makedirs(song.stems_path)
+        for stem in stems:
+            open(os.path.join(song.stems_path, f"{stem}.wav"), "wb").close()
+
+        stub = MagicMock()
+        stub._library.songs = [song]
+        MainWindow._prune_incomplete_songs(stub)
+
+        stub._library.remove_song.assert_not_called()
 
     def test_prune_preserves_complete_legacy_song(self, app, tmp_path):
         from src.ui.main_window import MainWindow
@@ -456,3 +516,43 @@ class TestMainWindowGlue:
         MainWindow._prune_incomplete_songs(stub)
 
         stub._library.remove_song.assert_not_called()
+
+
+class TestDamagedIndexKeepsAudio:
+    """The reproduced #181 data loss, end to end: a damaged library.json
+    plus the startup prune deleted every song imported before v2.6."""
+
+    @pytest.mark.parametrize("damage", ["truncated", "unknown_key"])
+    def test_legacy_song_survives_a_damaged_index(
+        self, app, tmp_path, damage,
+    ):
+        from src.library import SongLibrary
+        from src.ui.main_window import MainWindow
+
+        data_dir = str(tmp_path / "data")
+        song_dir = os.path.join(data_dir, "songs", "0123456789ab")
+        os.makedirs(song_dir)
+        for name in ("original.mp3", "drums.wav", "bass.wav",
+                     "other.wav", "vocals.wav"):
+            open(os.path.join(song_dir, name), "wb").close()
+        entry = {
+            "id": "0123456789ab", "title": "Old Song", "artist": "Band",
+            "original_path": os.path.join(song_dir, "original.mp3"),
+            "stems_path": song_dir, "model_used": "htdemucs",
+            "date_added": "2025-01-01",
+        }
+        index = json.dumps([entry])
+        if damage == "truncated":
+            index = index[: len(index) // 2]
+        else:
+            index = json.dumps([{**entry, "from_the_future": 1}])
+        with open(os.path.join(data_dir, "library.json"), "w") as f:
+            f.write(index)
+
+        library = SongLibrary(data_dir)
+        stub = MagicMock()
+        stub._library = library
+        MainWindow._prune_incomplete_songs(stub)
+
+        assert os.path.isfile(os.path.join(song_dir, "vocals.wav"))
+        assert [s.id for s in library.songs] == ["0123456789ab"]

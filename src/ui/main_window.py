@@ -63,7 +63,7 @@ from src.player import (
     StemLoadWorker,
 )
 from src.qt_signal_utils import safe_disconnect
-from src.separation_state import separation_is_complete
+from src.separation_state import INCOMPLETE, separation_status
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -1726,17 +1726,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _prune_incomplete_songs(self) -> None:
-        """Remove library rows whose expected separation is incomplete.
+        """Remove songs whose separation is known to be incomplete.
 
-        New jobs require valid atomic completion state. Markerless songs
-        from older versions remain compatible when every stem expected by
-        their persisted model is present.
+        That is an interrupted job: a valid marker, or a persisted model,
+        whose stem set is missing files. Songs whose state cannot be judged
+        (an unreadable marker, a marker from another build, no model on
+        record) are kept, because removal deletes the song folder and user
+        audio is never deleted on a guess (#181).
         """
         for song in list(self._library.songs):
-            if not separation_is_complete(
+            if separation_status(
                 song.stems_path,
                 song.model_used,
-            ):
+            ) == INCOMPLETE:
                 try:
                     self._library.remove_song(song.id)
                 except KeyError:
