@@ -81,13 +81,44 @@ class TestToStereo:
 
     @pytest.mark.parametrize("worker_cls", [SeparatorWorker, MdxSeparatorWorker])
     def test_workers_load_six_channels_as_stereo(self, tmp_path, worker_cls):
-        path = _wav(tmp_path / "surround.wav", channels=6)
+        # Signal only in the centre channel: keeping the first two channels
+        # would load silence.
+        data = np.zeros((4410, 6), dtype=np.float32)
+        data[:, 2] = 0.5
+        path = str(tmp_path / "surround.wav")
+        sf.write(path, data, 44100)
         worker = worker_cls(
             input_path=path, output_dir=str(tmp_path / "out"),
             model_path="unused.onnx",
         )
         audio, _sr = worker._load_audio()
         assert audio.shape[0] == 2
+        assert np.abs(audio[0]).max() > 0.05
+        assert np.abs(audio[1]).max() > 0.05
+
+
+class TestStatusLabelFits:
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_long_status_is_not_clipped(self, qapp, tmp_path, theme):
+        from src.ui.styles import get_stylesheet
+        from tests.widget_visual import deterministic_render_state
+
+        with deterministic_render_state():
+            qapp.setStyleSheet(get_stylesheet(theme))
+            dlg, _library, _manager = _dialog(tmp_path)
+            dlg.show()
+            qapp.processEvents()
+            dlg._on_error(
+                "The separation model on this PC was damaged, so stemma "
+                "removed it. Import the song again to download a fresh "
+                "copy. " + MSG_UNREADABLE_AUDIO
+            )
+            qapp.processEvents()
+            qapp.processEvents()
+            label = dlg._status_label
+            assert label.height() >= label.heightForWidth(label.width())
+            dlg.close()
+            dlg.deleteLater()
 
 
 class TestValidateBeforeImport:
@@ -243,6 +274,7 @@ class TestDamagedModel:
 
         stub = MagicMock()
         stub._library.get_song.return_value = None
+        stub._damaged_prompt_open = False
         with patch("src.ui.main_window.QMessageBox") as mb:
             mb.StandardButton = QMessageBox.StandardButton
             mb.question.return_value = QMessageBox.StandardButton.Yes
@@ -250,3 +282,42 @@ class TestDamagedModel:
         mb.question.assert_called_once()
         mb.warning.assert_not_called()
         stub._on_import.assert_called_once()
+        assert stub._damaged_prompt_open is False
+
+    def test_queued_failures_prompt_once(self, qapp):
+        """The model is deleted by the first failure, so every queued job
+        fails the same way; only the first one asks."""
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._library.get_song.return_value = None
+        stub._damaged_prompt_open = False
+
+        def import_now():
+            # A second queued job fails while the first prompt's import
+            # dialog is still open.
+            MainWindow._on_separation_failed(stub, "s2", MSG_MODEL_DAMAGED)
+
+        stub._on_import.side_effect = import_now
+        with patch("src.ui.main_window.QMessageBox") as mb:
+            mb.StandardButton = QMessageBox.StandardButton
+            mb.question.return_value = QMessageBox.StandardButton.Yes
+            MainWindow._on_separation_failed(stub, "s1", MSG_MODEL_DAMAGED)
+        mb.question.assert_called_once()
+        mb.warning.assert_not_called()
+
+    def test_damaged_beat_model_is_deleted_for_redownload(self, tmp_path):
+        from src import beat_detector
+
+        model = tmp_path / "beat_this.onnx"
+        model.write_bytes(b"not a model")
+        sr = 22050
+        audio = np.random.default_rng(0).standard_normal((sr * 12, 2)) * 0.1
+        with patch.object(
+            beat_detector, "create_onnx_session",
+            side_effect=ModelDamagedError(str(model)),
+        ):
+            beat_detector.detect_bpm_and_key(
+                {"mix": audio.astype(np.float32)}, sr, model_path=str(model),
+            )
+        assert not model.exists()

@@ -9,7 +9,7 @@ import shutil
 import tempfile
 
 import soundfile as sf
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -278,10 +278,36 @@ class ImportDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
         ).setEnabled(not busy)
 
+    def _set_status(self, text: str) -> None:
+        """Show *text* in the status line, growing the dialog to fit it."""
+        self._status_label.setVisible(True)
+        self._status_label.setText(text)
+        # After the caller has finished showing and hiding the other rows,
+        # so the label's width is final.
+        QTimer.singleShot(0, self._fit_status)
+
+    def _fit_status(self) -> None:
+        """Reserve the wrapped status text's full height.
+
+        The label wraps, but this layout has no height-for-width, so the
+        dialog never grew taller and a second line was cut off under the
+        buttons. A minimum height makes the dialog grow to fit.
+        """
+        label = self._status_label
+        if label.isVisible() and label.text():
+            label.setMinimumHeight(label.heightForWidth(label.width()))
+        else:
+            label.setMinimumHeight(0)
+
+    def resizeEvent(self, event) -> None:
+        """Refit the status text when the width changes its wrapping."""
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self._fit_status()
+
     def _show_problem(self, message: str) -> None:
         """Show *message* in the status line and allow another try."""
-        self._status_label.setVisible(True)
-        self._status_label.setText(message)
+        self._set_status(message)
         self._progress_bar.setVisible(False)
         self._set_busy(False)
 
@@ -308,8 +334,7 @@ class ImportDialog(QDialog):
                 self._metadata_worker.wait(5000)
 
         self._fetch_btn.setEnabled(False)
-        self._status_label.setVisible(True)
-        self._status_label.setText("Fetching metadata...")
+        self._set_status("Fetching metadata...")
 
         self._metadata_worker = _MetadataWorker(url, parent=self)
         self._metadata_worker.completed.connect(self._on_metadata_fetched)
@@ -322,11 +347,11 @@ class ImportDialog(QDialog):
             self._title_edit.setText(title)
         if not self._artist_edit.text():
             self._artist_edit.setText(artist)
-        self._status_label.setText("Metadata fetched.")
+        self._set_status("Metadata fetched.")
         self._fetch_btn.setEnabled(True)
 
     def _on_metadata_error(self, message: str) -> None:
-        self._status_label.setText(
+        self._set_status(
             f"Metadata error: {format_import_error(message)}"
         )
         self._fetch_btn.setEnabled(True)
@@ -395,8 +420,7 @@ class ImportDialog(QDialog):
 
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
-        self._status_label.setVisible(True)
-        self._status_label.setText("Downloading audio...")
+        self._set_status("Downloading audio...")
         self._set_busy(True)
 
         # Download to a temp file, then import like a local file.
@@ -518,8 +542,7 @@ class ImportDialog(QDialog):
         self._pending_model_key = model_key
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
-        self._status_label.setVisible(True)
-        self._status_label.setText(f"Downloading the {model_label(model_key)}...")
+        self._set_status(f"Downloading the {model_label(model_key)}...")
         self._set_busy(True)
 
         if model_key.startswith("mdx_"):
@@ -689,7 +712,7 @@ class ImportDialog(QDialog):
 
     def _on_progress(self, percent: int, message: str) -> None:
         self._progress_bar.setValue(percent)
-        self._status_label.setText(message)
+        self._set_status(message)
 
     def _on_finished(self, song_id: str, model_key: str) -> None:
         self._import_song_id = None
@@ -700,8 +723,7 @@ class ImportDialog(QDialog):
 
     def _on_error(self, message: str) -> None:
         self._discard_failed_import_song()
-        self._status_label.setVisible(True)
-        self._status_label.setText(f"Error: {format_import_error(message)}")
+        self._set_status(f"Error: {format_import_error(message)}")
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._set_busy(False)

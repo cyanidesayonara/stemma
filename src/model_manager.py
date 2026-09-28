@@ -323,7 +323,9 @@ def discard_model_files(model_path: str) -> None:
     for path in (model_path, model_path + ".data"):
         try:
             os.remove(path)
-        except FileNotFoundError:
+        except OSError:
+            # Missing already, or held open elsewhere: the next load finds
+            # it damaged again and retries the delete.
             pass
 
 
@@ -350,6 +352,7 @@ class ModelManager(QObject):
             return _MODEL_FILES[model_key]
         if model_key == "beat_this":
             return (_BEAT_THIS_FILE,)
+        # Deferred: mdx_separator imports this module (discard_model_files).
         from src.mdx_separator import MDX_MODELS
 
         return (MDX_MODELS[model_key]["file"],)
@@ -412,6 +415,7 @@ class ModelManager(QObject):
         The downloader verifies the file against the reviewed SHA-256
         before atomically publishing it.
         """
+        # Deferred: mdx_separator imports this module (discard_model_files).
         from src.mdx_separator import MDX_MODELS
 
         info = MDX_MODELS[model_key]
