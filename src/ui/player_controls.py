@@ -298,6 +298,9 @@ class PlayerControls(QWidget):
         self._controls_scroll.setWidget(self._controls_widget)
         self._controls_scroll.setWidgetResizable(True)
         self._controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # It still scrolls to the focused child; as a Tab stop of its own it
+        # was an invisible, unnamed stop (#186).
+        self._controls_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._controls_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )

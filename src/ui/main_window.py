@@ -278,10 +278,10 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
 
-        import_action = file_menu.addAction("&Import Song...")
+        import_action = file_menu.addAction("&Import Song…")
         import_action.triggered.connect(self._on_import)
 
-        export_action = file_menu.addAction("&Export Mix...")
+        export_action = file_menu.addAction("&Export Mix…")
         export_action.triggered.connect(self._on_export)
 
         close_song_action = file_menu.addAction("&Close Song")
@@ -293,8 +293,14 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
 
         edit_menu = menu_bar.addMenu("&Edit")
-        prefs_action = edit_menu.addAction("&Preferences...")
+        prefs_action = edit_menu.addAction("&Preferences…")
         prefs_action.triggered.connect(self._on_preferences)
+
+        # The corner theme button takes no focus, so the keyboard reaches
+        # the theme here (#186).
+        view_menu = menu_bar.addMenu("&View")
+        theme_action = view_menu.addAction("Switch &Theme")
+        theme_action.triggered.connect(self._toggle_theme)
 
         help_menu = menu_bar.addMenu("&Help")
 
@@ -754,12 +760,16 @@ class MainWindow(QMainWindow):
         right = QVBoxLayout()
         right.setSpacing(6)
 
+        # The link was the default blue (1.9:1 on dark) and wrapped mid
+        # path; accent-coloured, short text reads in both themes (#186).
+        accent = get_colors(self._theme)["accent"]
         info = QLabel(
             f"<h2 style='margin:0'>stemma</h2>"
             f"<p>Version {__version__}</p>"
             f"<p>A practice player with AI stem separation.</p>"
-            f'<p><a href="https://github.com/cyanidesayonara/stemma">'
-            f"github.com/cyanidesayonara/stemma</a></p>"
+            f'<p><a style="color:{accent};" '
+            f'href="https://github.com/cyanidesayonara/stemma">'
+            f"Source code on GitHub</a></p>"
             f"<p>MIT License</p>"
         )
         info.setOpenExternalLinks(True)

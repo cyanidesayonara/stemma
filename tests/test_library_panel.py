@@ -117,3 +117,23 @@ class TestSearchFilter:
         # Filter to only Queen — Led Zeppelin is hidden.
         panel._search_edit.setText("queen")
         assert not panel._remove_btn.isEnabled()
+
+
+def test_search_with_no_match_says_so(app):
+    """A search that hides every song used to leave a blank list."""
+    panel = LibraryPanel(_make_library(_make_songs()))
+    assert panel._no_match_label.isHidden()
+
+    panel._search_edit.setText("no such song")
+    assert not panel._no_match_label.isHidden()
+
+    panel._search_edit.setText("bohemian")
+    assert panel._no_match_label.isHidden()
+    panel._search_edit.setText("")
+    assert panel._no_match_label.isHidden()
+
+
+def test_search_box_has_an_accessible_name(app):
+    """A placeholder is not a name for screen readers."""
+    panel = LibraryPanel(_make_library([]))
+    assert panel._search_edit.accessibleName() == "Search songs"
