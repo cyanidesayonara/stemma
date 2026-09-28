@@ -23,8 +23,18 @@ from src.ui.control_primitives import (
     draw_record,
     draw_stop,
     make_icon,
+    make_toggle_icon,
 )
-from src.ui.styles import RECORDING_COLOR
+from src.ui.styles import DARK_COLORS
+
+
+def _record_icon(colors: dict[str, str]):
+    """Record glyph: rose, and on-accent while armed (the checked fill
+    is the accent, where rose was about 1:1)."""
+    return make_toggle_icon(
+        draw_record, QColor(colors["recording"]),
+        checked_color=QColor(colors["on_accent"]),
+    )
 
 
 class TransportBar(QWidget):
@@ -70,10 +80,7 @@ class TransportBar(QWidget):
         self._stop_button.clicked.connect(self.stop_requested.emit)
         transport.addWidget(self._stop_button)
 
-        self._record_icon = make_icon(
-            draw_record,
-            QColor(RECORDING_COLOR),
-        )
+        self._record_icon = _record_icon(DARK_COLORS)
         self._record_button = QPushButton()
         self._record_button.setObjectName("icon-btn")
         self._record_button.setIcon(self._record_icon)
@@ -176,7 +183,7 @@ class TransportBar(QWidget):
     def apply_theme(self, colors: dict[str, str], playing: bool) -> None:
         """Rebuild theme-dependent transport icons."""
         icon_color = QColor(colors["text"])
-        self._record_icon = make_icon(draw_record, QColor(colors["recording"]))
+        self._record_icon = _record_icon(colors)
         self._record_button.setIcon(self._record_icon)
         self._play_icon = make_icon(draw_play, icon_color)
         self._pause_icon = make_icon(draw_pause, icon_color)

@@ -201,14 +201,6 @@ class RecordingStemRow(StemRow):
 
     delete_requested = Signal(str)
 
-    def apply_stem_theme(self, theme: str) -> None:
-        """Takes are not in the stem palette: label them in recording rose
-        (the base lookup by name turned them grey on a theme switch)."""
-        super().apply_stem_theme(theme)
-        self._label.setStyleSheet(
-            f"color: {recording_color(theme)}; font-weight: bold;"
-        )
-
     def __init__(
         self,
         stem_name: str,
@@ -254,6 +246,14 @@ class RecordingStemRow(StemRow):
         )
         self._append_control(self._delete_btn)
 
+
+    def apply_stem_theme(self, theme: str) -> None:
+        """Takes are not in the stem palette: label them in recording rose
+        (the base lookup by name turned them grey on a theme switch)."""
+        super().apply_stem_theme(theme)
+        self._label.setStyleSheet(
+            f"color: {recording_color(theme)}; font-weight: bold;"
+        )
     def _on_nudge_changed(self, value: int) -> None:
         self._player.nudge_stem(self._stem_name, float(value))
         self.mix_changed.emit()

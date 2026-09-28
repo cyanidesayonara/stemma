@@ -1,5 +1,6 @@
 """Tests for theme switching functionality."""
 
+import colorsys
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -46,8 +47,6 @@ class TestThemeColors:
     def test_accent_is_the_brand_teal_per_theme(self):
         """Dark uses the brand teal; light a deeper teal of the same hue,
         since #4fb8b8 is only about 2:1 on the light background."""
-        import colorsys
-
         assert DARK_COLORS["accent"] == "#4fb8b8"
 
         def hue(hex_color):

@@ -75,22 +75,26 @@ LIGHT_COLORS = {
 }
 
 
-
 def badge_html(theme: str, label: str, value: str,
                confidence: str = "") -> str:
     """Rich text for a key/chord/tempo readout: label and value in the
-    text colour, with a "?" after a low-confidence value.
+    text colour, with a "?" after a low-confidence value. For a
+    transposed key ("C major → D major") the mark goes on the detected key,
+    which is what the confidence is about.
 
     Confidence used to colour the value green, amber, or red, and red read
     as an error; the light-theme amber and green were also under 3:1.
     """
     colors = LIGHT_COLORS if theme == "light" else DARK_COLORS
     text = colors["text"]
-    mark = "?" if confidence == "low" and value not in ("", "--") else ""
-    value_html = f'<span style="color:{text};">{value}{mark}</span>'
+    if confidence == "low" and value not in ("", "--"):
+        detected, arrow, rest = value.partition(" → ")
+        value = f"{detected}?{arrow}{rest}"
+    value_html = f'<span style="color:{text};">{value}</span>'
     if label:
         return f'<span style="color:{text};">{label} </span>' + value_html
     return value_html
+
 
 def _generate_stylesheet(c: dict[str, str]) -> str:
     """Generate a QSS stylesheet from a color token dict."""
