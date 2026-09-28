@@ -26,7 +26,7 @@ Latest stable release: **v2.6.0**. The current `main` line targets
 - HTDemucs v4 four-stem (vocals, drums, bass, other) and six-stem (adds
   guitar and piano) separation. CPU-only for now; GPU support is research in
   [issue #125](https://github.com/cyanidesayonara/stemma/issues/125).
-- MDX-Net two-stem separation (vocals + backing) on the GPU via
+- MDX-Net two-stem separation (vocals + other) on the GPU via
   DirectML, with automatic CPU fallback and a clear report of which ran.
 - Imports run in the background, one after another, with progress in the
   library. Import from a file, by drag and drop, or from a YouTube URL.
