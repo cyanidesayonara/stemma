@@ -15,13 +15,17 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpacerItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.app_settings import (
@@ -125,6 +129,25 @@ class _DownloadWorker(QThread):
             self.error.emit(describe_error(exc, "YouTube download failed"))
 
 
+
+def _or_divider() -> QWidget:
+    """A rule with "or" in the middle, between the two ways to import."""
+    row = QWidget()
+    box = QHBoxLayout(row)
+    box.setContentsMargins(0, 2, 0, 2)
+    for part in ("line", "label", "line"):
+        if part == "label":
+            label = QLabel("or")
+            label.setObjectName("subtle-label")
+            box.addWidget(label)
+            continue
+        line = QFrame()
+        line.setObjectName("divider-line")
+        line.setFixedHeight(1)
+        box.addWidget(line, 1)
+    return row
+
+
 class ImportDialog(QDialog):
     """Dialog for importing and separating a song.
 
@@ -181,10 +204,20 @@ class ImportDialog(QDialog):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
+        # One label column for every field: separate rows started each
+        # field at a different x, after labels of different widths.
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        form.setVerticalSpacing(8)
+        layout.addLayout(form)
 
         # -- YouTube URL row --
         url_row = QHBoxLayout()
-        url_row.addWidget(QLabel("URL:"))
         self._url_edit = QLineEdit()
         self._url_edit.setPlaceholderText("Paste a YouTube URL...")
         self._url_edit.textChanged.connect(self._on_url_changed)
@@ -196,14 +229,9 @@ class ImportDialog(QDialog):
         self._fetch_btn.clicked.connect(self._on_fetch_metadata)
         self._fetch_btn.setEnabled(False)
         url_row.addWidget(self._fetch_btn)
-        layout.addLayout(url_row)
+        form.addRow("YouTube URL:", url_row)
 
-        # -- Separator label --
-        or_label = QLabel("-- or --")
-        or_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        or_label.setObjectName("subtle-label")
-        or_label.setStyleSheet("padding: 4px;")
-        layout.addWidget(or_label)
+        form.addRow(_or_divider())
 
         # -- File selection row --
         file_row = QHBoxLayout()
@@ -215,30 +243,23 @@ class ImportDialog(QDialog):
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self._on_browse)
         file_row.addWidget(browse_btn)
-        layout.addLayout(file_row)
+        form.addRow("Audio file:", file_row)
+
+        # A little air between the source and the song's details.
+        form.addItem(QSpacerItem(0, 1))
 
         # -- Metadata fields --
-        title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("Title:"))
         self._title_edit = QLineEdit()
-        title_row.addWidget(self._title_edit)
-        layout.addLayout(title_row)
-
-        artist_row = QHBoxLayout()
-        artist_row.addWidget(QLabel("Artist:"))
+        form.addRow("Title:", self._title_edit)
         self._artist_edit = QLineEdit()
-        artist_row.addWidget(self._artist_edit)
-        layout.addLayout(artist_row)
+        form.addRow("Artist:", self._artist_edit)
 
         # -- Model selection --
-        model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Model:"))
         self._model_combo = QComboBox()
         for model_key, label in SEPARATION_MODELS:
             self._model_combo.addItem(label, model_key)
         self._model_combo.setToolTip(SEPARATION_MODEL_TOOLTIP)
-        model_row.addWidget(self._model_combo)
-        layout.addLayout(model_row)
+        form.addRow("Model:", self._model_combo)
 
         # -- Progress --
         self._progress_bar = QProgressBar()

@@ -528,6 +528,11 @@ QGroupBox QLabel, QGroupBox QCheckBox {{
     background-color: transparent;
 }}
 
+QFrame#divider-line {{
+    background-color: {c["surface1"]};
+    border: none;
+}}
+
 /* Dialog combos drew about 20 px tall, which clipped descenders
    ("Svstem"). Scoped to dialogs so the cockpit keeps its rows. */
 QDialog QComboBox {{

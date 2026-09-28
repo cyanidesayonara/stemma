@@ -298,3 +298,26 @@ class TestDefaultModel:
         finally:
             dlg.close()
             settings.remove("import/default_model")
+
+
+def test_import_fields_share_one_label_column(qapp, tmp_path):
+    """Separate rows started each field after its own label's width."""
+    from unittest.mock import MagicMock
+
+    from src.library import SongLibrary
+    from src.model_manager import ModelManager
+    from src.ui.import_dialog import ImportDialog
+
+    data = str(tmp_path / "data")
+    dlg = ImportDialog(
+        SongLibrary(data), ModelManager(data_dir=data),
+        separation_queue=MagicMock(),
+    )
+    dlg.show()
+    qapp.processEvents()
+    fields = (dlg._url_edit, dlg._path_edit, dlg._title_edit,
+              dlg._artist_edit, dlg._model_combo)
+    xs = {field.mapTo(dlg, field.rect().topLeft()).x() for field in fields}
+    assert len(xs) == 1
+    dlg.close()
+    dlg.deleteLater()
