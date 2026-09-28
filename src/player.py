@@ -403,6 +403,9 @@ class MultiTrackPlayer(QObject):
     # disarmed and playback continues without it.
     recording_unavailable = Signal(str)
     recording_saved = Signal(str)  # emitted with the saved WAV path
+    # A take could not be written (disk full, folder not writable). The
+    # take stays in memory so the next Stop can try again.
+    recording_save_failed = Signal(str)
     loop_wrapped = Signal()  # A-B loop repeated (wrapped back to A)
 
     def __init__(self) -> None:
@@ -864,7 +867,20 @@ class MultiTrackPlayer(QObject):
         take_num = next_take_number(song_dir)
         filename = f"recording_take{take_num}.wav"
         path = os.path.join(song_dir, filename)
-        sf.write(path, buf, self._sample_rate)
+        try:
+            sf.write(path, buf, self._sample_rate)
+        except (OSError, sf.SoundFileError) as exc:
+            try:
+                os.remove(path)  # a partial file would count as a take
+            except OSError:
+                pass
+            self.recording_save_failed.emit(
+                "The take could not be saved. "
+                + describe_error(exc, "Saving a recording")
+                + " The take is kept in memory: press Stop again to save "
+                "it."
+            )
+            return None
         self._recording_buffer = None
         return path
 
@@ -1089,6 +1105,45 @@ class MultiTrackPlayer(QObject):
         self._recording = True
         return stream
 
+    def _open_output_stream(self):
+        """Open the playback-only stream on the chosen output device."""
+        kwargs: dict[str, Any] = {
+            "samplerate": self._sample_rate,
+            "channels": 2,
+            "callback": self._audio_callback,
+        }
+        if self._output_device is not None:
+            kwargs["device"] = self._output_device
+        return sd.OutputStream(**kwargs)
+
+    def _disarm_recording_without_input(self) -> str:
+        """Turn recording off for want of an input; return the message.
+
+        Playback goes on, and the next Play does not fail the same way
+        again. A take paused earlier keeps what it captured, and the next
+        Stop saves it.
+        """
+        self._recording_armed = False
+        self._recording = False
+        message = (
+            "No microphone or other input device could be opened, so "
+            "recording was turned off. Connect one or choose it in "
+            "Edit > Preferences, then arm recording again."
+        )
+        if (self._recording_buffer is not None
+                and self._recording_frames_captured > 0):
+            return message + (
+                " What you recorded before is kept and saved when you "
+                "press Stop."
+            )
+        self._recording_buffer = None
+        return message
+
+    def _discard_empty_recording(self) -> None:
+        """Drop a recording buffer that captured nothing yet."""
+        if self._recording_frames_captured == 0:
+            self._recording_buffer = None
+
     def play(self) -> None:
         """Start or resume playback."""
         if not self._stems or self._is_playing:
@@ -1097,36 +1152,34 @@ class MultiTrackPlayer(QObject):
         if self._current_frame >= self._total_frames:
             self._current_frame = 0
 
+        # Emitted once playback runs: its slot opens a modal dialog, and a
+        # nested event loop must not run while the player is half set up.
+        unavailable = None
         try:
             if self._stream is None and self._recording_armed:
                 self._stream = self._open_recording_stream()
                 if self._stream is None:
-                    # No usable input: recording is off, playback goes on,
-                    # and the next Play does not fail the same way again.
-                    self._recording_armed = False
-                    self._recording_buffer = None
-                    self.recording_unavailable.emit(
-                        "No microphone or other input device could be "
-                        "opened, so recording was turned off. Connect one "
-                        "or choose it in Edit > Preferences, then arm "
-                        "recording again."
-                    )
+                    unavailable = self._disarm_recording_without_input()
             if self._stream is None:
-                kwargs: dict[str, Any] = {
-                    "samplerate": self._sample_rate,
-                    "channels": 2,
-                    "callback": self._audio_callback,
-                }
-                if self._output_device is not None:
-                    kwargs["device"] = self._output_device
-                self._stream = sd.OutputStream(**kwargs)
-            self._stream.start()
+                self._stream = self._open_output_stream()
+            try:
+                self._stream.start()
+            except (sd.PortAudioError, OSError):
+                if not self._recording:
+                    raise
+                # The duplex stream opened but would not start: blame the
+                # input and play on without it.
+                self._stream.close()
+                self._stream = None
+                unavailable = self._disarm_recording_without_input()
+                self._stream = self._open_output_stream()
+                self._stream.start()
         except (sd.PortAudioError, OSError):
             if self._stream is not None:
                 self._stream.close()
                 self._stream = None
             self._recording = False
-            self._recording_buffer = None
+            self._discard_empty_recording()
             self.playback_failed.emit(
                 "No audio device is available, or playback failed to "
                 "start. Connect speakers or headphones, or choose another "
@@ -1142,6 +1195,8 @@ class MultiTrackPlayer(QObject):
         self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
+        if unavailable:
+            self.recording_unavailable.emit(unavailable)
 
     def pause(self) -> None:
         """Pause playback.

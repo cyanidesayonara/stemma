@@ -98,16 +98,24 @@ class TestWorkerCancelChecks:
         def infer(audio, _session):
             return np.zeros((4, 2, audio.shape[1]), dtype=np.float32)
 
-        def post(stems):
-            worker.cancel()  # user cancels while post-processing runs
-            return stems
+        written = []
+        real_write = sf.write
+
+        def write(path, *args, **kwargs):
+            written.append(path)
+            real_write(path, *args, **kwargs)
+            worker.cancel()  # user cancels once the first stem is on disk
 
         with patch.object(worker, "_create_session"), patch.object(
             worker, "_run_segmented_inference", side_effect=infer,
-        ), patch.object(worker, "_post_process", side_effect=post):
+        ), patch.object(
+            worker, "_post_process", side_effect=lambda stems: stems,
+        ), patch("src.separator.sf.write", side_effect=write):
             worker.run()
         assert finished == []
         assert errors and "cancelled" in errors[0].lower()
+        assert len(written) == 1  # later stems were not written
+        assert not (tmp_path / "out" / COMPLETION_MARKER).exists()
 
 
 class _StubbornWorker(QThread):
@@ -139,11 +147,38 @@ class TestQueueShutdownKeepsWorker:
                 "s1", "in.wav", str(tmp_path), "m.onnx", "htdemucs",
             ))
         assert worker.isRunning()
-        queue.shutdown(wait_ms=50)
-        # The worker outlived the timeout; shutdown still must not return
-        # (and drop the last reference) while the thread is alive.
+        assert queue.shutdown(wait_ms=5000)
         assert worker.cancelled
         assert not worker.isRunning()
+
+    def test_stuck_worker_is_kept_and_reported(self, app, tmp_path):
+        """A stage that cannot be interrupted must not hang the close."""
+        queue = SeparationQueue()
+        worker = _StubbornWorker(0.5)
+        with patch.object(queue, "_make_worker", return_value=worker):
+            queue.enqueue(SeparationJob(
+                "s1", "in.wav", str(tmp_path), "m.onnx", "htdemucs",
+            ))
+        assert queue.shutdown(wait_ms=50) is False
+        # Still referenced, so the running QThread is not destroyed.
+        assert queue._stuck_worker is worker
+        worker.wait()
+
+    def test_close_ends_the_process_when_separation_is_stuck(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._confirm_quit.return_value = True
+        stub._export_worker = None
+        stub._separation_queue.shutdown.return_value = False
+        with patch(
+            "src.ui.main_window.os._exit", side_effect=SystemExit,
+        ) as exit_, patch("src.ui.main_window.logging.shutdown"):
+            with pytest.raises(SystemExit):
+                MainWindow.closeEvent(stub, MagicMock())
+        stub.hide.assert_called_once()
+        stub._settings.sync.assert_called_once()
+        exit_.assert_called_once_with(0)
 
 
 class TestConfirmQuit:
@@ -247,3 +282,85 @@ class TestRecordingWithoutInput:
             MainWindow._on_recording_unavailable(stub, "No input device.")
         stub._player_controls._record_btn.setChecked.assert_called_with(False)
         assert warn.call_args.args[2] == "No input device."
+
+
+class TestPausedTakeSurvives:
+    def test_paused_take_is_kept_when_the_input_goes(self, armed_player,
+                                                     tmp_path):
+        """Record, pause, unplug the mic, Play: the take is still saved."""
+        armed_player.set_recording_song_dir(str(tmp_path))
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_buffer[:1000] = 0.2
+        armed_player._recording_frames_captured = 1000
+        saved, unavailable = [], []
+        armed_player.recording_saved.connect(saved.append)
+        armed_player.recording_unavailable.connect(unavailable.append)
+        with patch("src.player.sd.OutputStream"), patch(
+            "src.player.sd.default",
+        ) as sd_default:
+            sd_default.device = (-1, 1)
+            armed_player.play()
+        armed_player.stop()
+        assert not armed_player.recording_armed
+        assert unavailable and "kept" in unavailable[0]
+        assert len(saved) == 1
+        assert sf.read(saved[0])[0][:1000].max() == pytest.approx(0.2, abs=1e-3)
+
+    def test_duplex_start_failure_plays_without_recording(self, armed_player):
+        unavailable, failed = [], []
+        armed_player.recording_unavailable.connect(unavailable.append)
+        armed_player.playback_failed.connect(failed.append)
+        with patch("src.player.sd.Stream") as duplex, patch(
+            "src.player.sd.OutputStream",
+        ) as output, patch("src.player.sd.default") as sd_default, patch(
+            "src.player.sd.query_devices",
+            return_value={"max_input_channels": 2},
+        ):
+            sd_default.device = (0, 1)
+            duplex.return_value.start.side_effect = sd.PortAudioError("busy")
+            armed_player.play()
+        armed_player.stop()
+        assert failed == []
+        assert unavailable
+        assert not armed_player.recording_armed
+        output.return_value.start.assert_called_once()
+
+    def test_unavailable_is_emitted_after_playback_starts(self, armed_player):
+        states = []
+        armed_player.recording_unavailable.connect(
+            lambda _msg: states.append(armed_player.is_playing)
+        )
+        with patch("src.player.sd.OutputStream"), patch(
+            "src.player.sd.default",
+        ) as sd_default:
+            sd_default.device = (-1, 1)
+            armed_player.play()
+        armed_player.stop()
+        assert states == [True]
+
+
+class TestRecordingSaveFailure:
+    def test_failed_write_keeps_the_take_and_explains(self, armed_player,
+                                                      tmp_path):
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_frames_captured = 100
+        failed = []
+        armed_player.recording_save_failed.connect(failed.append)
+        with patch(
+            "src.player.sf.write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            assert armed_player.save_recording(str(tmp_path)) is None
+        assert failed and "could not be saved" in failed[0]
+        assert "space" in failed[0].lower()
+        assert armed_player._recording_buffer is not None
+        assert not list(tmp_path.glob("recording_take*.wav"))
+        # Once the problem is fixed, the retry saves it.
+        assert armed_player.save_recording(str(tmp_path)) is not None
+
+    def test_main_window_shows_the_save_failure(self, app):
+        from src.ui.main_window import MainWindow
+
+        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+            MainWindow._on_recording_save_failed(MagicMock(), "Disk full.")
+        assert warn.call_args.args[2] == "Disk full."

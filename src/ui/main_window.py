@@ -7,6 +7,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 
 import glob
 import json
+import logging
 import math
 import os
 import random
@@ -77,6 +78,8 @@ from src.ui.player_controls import (
 )
 from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
 from src.version import __version__
+
+logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
@@ -248,6 +251,10 @@ class MainWindow(QMainWindow):
         record_btn.blockSignals(True)
         record_btn.setChecked(False)
         record_btn.blockSignals(False)
+        QMessageBox.warning(self, "Recording", message)
+
+    def _on_recording_save_failed(self, message: str) -> None:
+        """A take could not be written; the player kept it in memory."""
         QMessageBox.warning(self, "Recording", message)
 
     def _setup_ui(self) -> None:
@@ -1205,13 +1212,23 @@ class MainWindow(QMainWindow):
             pass  # Never prevent the window from closing.
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
+        # Close visibly now: the waits below can take a while when a
+        # separation stage is slow to notice the cancel.
+        self.hide()
 
         if self._export_worker is not None and self._export_worker.isRunning():
             self._export_worker.wait(5000)
 
         # Abort any background separation; interrupted songs are pruned
         # from the library on the next launch (no stems on disk).
-        self._separation_queue.shutdown(5000)
+        if not self._separation_queue.shutdown():
+            # A stage that cannot be interrupted (for example a stuck
+            # DirectML call) would otherwise leave a hidden process running
+            # forever. Settings and the session are already saved.
+            logger.warning("Separation did not stop on close; ending stemma.")
+            self._settings.sync()
+            logging.shutdown()
+            os._exit(0)
         self._shutdown_stem_loads()
 
         self._suppress_recording_reload = True
@@ -1276,6 +1293,9 @@ class MainWindow(QMainWindow):
             self._on_recording_unavailable
         )
         self._player.recording_saved.connect(self._on_recording_saved)
+        self._player.recording_save_failed.connect(
+            self._on_recording_save_failed
+        )
 
     # ------------------------------------------------------------------
     # Slots
