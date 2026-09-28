@@ -15,7 +15,7 @@ from src.app_settings import (
     open_settings,
     parse_stored_output_device_index,
     read_default_export_format,
-    read_default_import_6_stem,
+    read_default_import_model,
     read_default_mp3_bitrate,
     read_output_device_index,
 )
@@ -113,13 +113,22 @@ class TestReadDefaultExportFormat:
         assert read_default_export_format(settings_ini) == "mp3"
 
 
-class TestReadDefaultImport6Stem:
-    def test_default_false(self, settings_ini):
-        assert read_default_import_6_stem(settings_ini) is False
+class TestReadDefaultImportModel:
+    def test_default_is_four_stem(self, settings_ini):
+        assert read_default_import_model(settings_ini) == "htdemucs"
 
-    def test_true(self, settings_ini):
+    @pytest.mark.parametrize("key", ["htdemucs", "htdemucs_6s", "mdx_inst_hq3"])
+    def test_stored_model(self, settings_ini, key):
+        settings_ini.setValue("import/default_model", key)
+        assert read_default_import_model(settings_ini) == key
+
+    def test_pre_3_0_six_stem_choice_is_kept(self, settings_ini):
         settings_ini.setValue("import/default_6_stem", True)
-        assert read_default_import_6_stem(settings_ini) is True
+        assert read_default_import_model(settings_ini) == "htdemucs_6s"
+
+    def test_unknown_value_falls_back(self, settings_ini):
+        settings_ini.setValue("import/default_model", "nonsense")
+        assert read_default_import_model(settings_ini) == "htdemucs"
 
 
 class TestOpenSettings:

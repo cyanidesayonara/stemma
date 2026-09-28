@@ -515,3 +515,38 @@ def test_committed_store_listing_is_valid_and_fresh() -> None:
         markdown_path=DEFAULT_MARKDOWN,
         skeleton_path=DEFAULT_SKELETON,
     )
+
+
+@pytest.mark.parametrize("overrides, message", [
+    ({"search_terms": ["x" * 31]}, "exceeds 30 chars"),
+    ({"search_terms": ["one two three four"] * 6}, "24 words"),
+    ({"description": "d" * 10001}, "description exceeds 10000"),
+])
+def test_validate_listing_enforces_partner_center_text_limits(
+    tmp_path: Path, overrides, message,
+) -> None:
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    with pytest.raises(ValidationError) as exc:
+        validate_listing(
+            _data(**overrides), version="2.6.0", screenshots_dir=shots,
+        )
+    assert any(message in err for err in exc.value.errors)
+
+
+def test_unwrap_paragraphs_joins_wraps_and_keeps_breaks() -> None:
+    """Partner Center shows newlines as-is: wrapped source lines must not
+    reach it, blank-line paragraph breaks must."""
+    from src.store_listing import unwrap_paragraphs
+
+    text = "Heading\n\nOne two\n  three.\n\nFour\nfive.\n"
+
+    assert unwrap_paragraphs(text) == "Heading\n\nOne two three.\n\nFour five."
+
+
+def test_loaded_listing_has_no_wrapped_lines() -> None:
+    data = load_listing(DEFAULT_LISTING_YAML)
+    for text in (data.short_description, data.description,
+                 *data.whats_new.values()):
+        for paragraph in text.split("\n\n"):
+            assert "\n" not in paragraph

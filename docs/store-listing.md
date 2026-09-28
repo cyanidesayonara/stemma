@@ -28,8 +28,7 @@ Screenshots: `assets/store_listing/screenshots/` (regenerate with
 
 ## Short description
 
-Practice any song: split it into stems, mute the part you play, slow it
-down, and loop the hard bars.
+Practice any song with the band. stemma splits a track into vocals, drums, bass, guitar, piano, and other, so you can mute your part and play along. Slow it down without changing pitch, loop the hard bars, transpose to your key, and record your take. A stem splitter and vocal remover that runs entirely on your PC: no account, no subscription, no uploads.
 
 ---
 
@@ -37,38 +36,15 @@ down, and loop the hard bars.
 
 stemma turns any song into a practice tool.
 
-Import a track and stemma separates it into individual stems -- vocals,
-drums, bass, guitar, piano, and everything else -- so you can mute the
-part you play and perform it yourself. Silence the guitar and it is your
-guitar in the mix. Solo the drums to lock in with them. Pull the vocal
-down and sing the line yourself.
+Import a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, fast, and GPU-accelerated when your PC supports it), four stems, or all six.
 
-Everything else is built around learning a part properly. Set an A-B
-loop over the two bars that keep tripping you up and drill them. Slow
-the passage down without the pitch dropping, or turn on the Loop
-Trainer and let stemma step the speed up a notch on every repeat until
-you are at full tempo. Transpose the whole song into a key that suits
-your voice or instrument, up to seven semitones either way, and the
-displayed key follows. Count yourself in, play along to the metronome,
-and record your take against the backing to hear how it really sat.
+Everything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.
 
-stemma reads the song as you work: tempo, musical key, and the chord
-under the playhead, updated as it plays. There is a
-waveform to scrub, per-stem volume faders, and a library that remembers
-exactly where you left off -- song, position, mix, loop, speed, and
-pitch -- so practice picks up where it stopped. Browse with previous
-and next, loop a single song, shuffle the collection, or autoplay
-through it.
+stemma reads the song as you work: tempo, musical key, and the chord under the playhead, updated as it plays. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers exactly where you left off -- song, position, mix, loop, speed, and pitch -- so practice picks up where it stopped. Browse with previous and next, loop a single song, shuffle the collection, or autoplay through it.
 
-Separation runs on your own machine. Nothing is uploaded, there is no
-account, no subscription, and no internet connection needed once the
-models are downloaded. Import from a file or paste a YouTube link, and
-export any stem or your own custom mix as WAV or MP3 when you want to
-take it elsewhere.
+Separation runs on your own machine. Nothing is uploaded, there is no account, no subscription, and no internet connection needed once the models are downloaded. Import an MP3, WAV, or FLAC file or paste a YouTube link, and export your own mix, a single stem, or just the loop as WAV or MP3 when you want to take it elsewhere.
 
-Built for Windows, keyboard-first, and layout-independent (Space,
-arrows, Ctrl+1-6, and the rest work the same on international
-keyboards). Dark and light themes.
+Built for Windows, with keyboard shortcuts for the whole practice loop that work on any keyboard layout. Dark and light themes.
 
 ---
 
@@ -76,44 +52,36 @@ keyboards). Dark and light themes.
 
 What's new in version 3.0.0
 
-A new practice cockpit: the waveform now shows every stem in its own
-colored lane, so you can see where each part plays, and a muted stem
-dims in place. The practice controls are grouped into three cards --
-Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key,
-chord, and tempo sit together in one readout under the waveform. Play,
-stop, and record stay anchored at the bottom of the window.
+A new practice cockpit: the waveform now shows every stem in its own colored lane, so you can see where each part plays, and a muted stem dims in place. The practice controls are grouped into three cards -- Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key, chord, and tempo sit together in one readout under the waveform. Play, stop, and record stay anchored at the bottom of the window.
 
-Keyboard and feedback: Space or Enter now presses the control you
-tabbed to. Transport and toggle buttons now show hover, pressed, and
-disabled states, and a muted or soloed stem is clearly marked.
+Keyboard and feedback: Space or Enter now presses the control you tabbed to. Transport and toggle buttons now show hover, pressed, and disabled states, and a muted or soloed stem is clearly marked.
 
-Pitch shift: the chord readout now follows the transposition, as the
-key already did.
+Pitch shift: the chord readout now follows the transposition, as the key already did.
 
-Stability: changing loop points quickly no longer risks a crash, and
-many smaller layout and display issues are fixed.
+Stability: changing loop points quickly no longer risks a crash, and many smaller layout and display issues are fixed.
 
 ---
 
 ## Product features
 
-AI stem separation: vocals, drums, bass, guitar, piano, other
-Per-stem mute, solo, and volume faders
-A-B loop for drilling a difficult passage
-Loop Trainer: speed steps up automatically on every loop repeat
-Pitch-preserving speed control from 50% to 200%
+Split any song into vocals, drums, bass, guitar, piano, and other
+Mute your part and play along with the rest of the band
+Per-stem mute, solo, and volume
+Fast two-stem vocal remover, GPU-accelerated when available
+Slow down or speed up from 0.5x to 2x without changing pitch
+A-B loop to drill a difficult passage
+Loop Trainer: speed steps up on every repeat until you reach full tempo
 Transpose up or down seven semitones, tempo unchanged
-Automatic tempo and key detection
-Live chord readout that follows the playhead
+Automatic key and tempo detection, with a live chord readout
 Beat-synced metronome with tap tempo and nudge
 Count-in before playback and before each loop repeat
-Record your own take against the backing track
-Manual timing offset for recorded takes
+Record your own take over the backing track
+Line up recorded takes with a latency offset and per-take nudge
 Stacked waveform with a colored lane per stem, click-to-seek, and loop shading
-Export stems or a custom mix as WAV or MP3
-Import from an audio file or a YouTube link
-Session memory: song, position, mix, loop, speed, and pitch
-Library with previous/next, shuffle, and autoplay
+Import an MP3, WAV, or FLAC file, or a YouTube link
+Export your mix, a single stem, or just the loop as WAV or MP3
+Picks up where you left off: song, position, mix, loop, speed, and pitch
+Library with search, repeat, shuffle, and autoplay
 Keyboard shortcuts for the whole practice loop
 Runs entirely on your PC: no account, no subscription, no uploads
 
@@ -121,7 +89,7 @@ Runs entirely on your PC: no account, no subscription, no uploads
 
 ## Search terms
 
-stem separation, vocal remover, play along, backing track, practice, slow down music, music stem separator
+stem splitter, vocal remover, backing track, slow down music, guitar practice, play along, stem separation
 
 ---
 
