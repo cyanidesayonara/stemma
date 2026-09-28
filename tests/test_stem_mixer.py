@@ -124,8 +124,31 @@ class TestStemRowLayout:
             layout.itemAt(index).widget()
             for index in range(layout.count() - 1)
         ]
-        assert row._nudge_spin in packed
-        assert row._delete_btn in packed
+        # They sit in the take slot every row reserves (so rows align).
+        assert row._take_slot in packed
+        assert row._nudge_spin.parent() is row._take_slot
+        assert row._delete_btn.parent() is row._take_slot
+
+    @pytest.mark.parametrize("width", [560, 700, 900])
+    def test_take_rows_line_up_with_stem_rows(self, app, width):
+        """Sliders stretch now; take rows' extra controls used to make their
+        sliders shorter, so the preset combos zig-zagged down the mixer."""
+        from PySide6.QtWidgets import QApplication
+
+        player = MagicMock()
+        player.muted_stems = set()
+        player.soloed_stems = set()
+        player.volumes = {}
+        rows = [StemRow("drums", player),
+                RecordingStemRow("take-1", "Take 1", player)]
+        for row in rows:
+            row.resize(width, 36)
+            row.show()
+        QApplication.processEvents()
+
+        sliders = {row._volume_slider.width() for row in rows}
+        combos = {row._vol_combo.x() for row in rows}
+        assert len(sliders) == 1 and len(combos) == 1
 
     @pytest.mark.parametrize("button", ["_mute_btn", "_solo_btn"])
     def test_checked_toggle_shows_the_accent_fill(self, app, button):
@@ -169,11 +192,17 @@ class TestStemRowLayout:
         host.deleteLater()
 
     def test_stem_row_snapshot(self, app):
-        from tests.widget_visual import assert_widget_snapshot
+        from tests.widget_visual import (
+            assert_widget_snapshot,
+            deterministic_render_state,
+        )
 
         player = MagicMock()
         player.muted_stems = set()
         player.soloed_stems = set()
         player.volumes = {}
-        row = StemRow("vocals", player)
+        # The row sizes its take slot from a spinbox measured when it is
+        # built, so build it under the pinned stylesheet and font too.
+        with deterministic_render_state():
+            row = StemRow("vocals", player)
         assert_widget_snapshot(row, "stem_row_simplified", width=420, height=36)

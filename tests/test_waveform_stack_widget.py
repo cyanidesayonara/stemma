@@ -377,3 +377,66 @@ def test_lane_labels_are_painted_with_lane_label(app, monkeypatch):
     w.grab()
 
     assert "recording_take1" in seen
+
+
+def test_loop_markers_are_tagged_with_their_times(app):
+    """The loop points are drawn on the markers ("A 0:12", "B 0:21")."""
+    from src.ui.waveform_stack_widget import WaveformStackWidget
+
+    widget = WaveformStackWidget()
+    widget.resize(600, 120)
+    widget.set_total_seconds(100.0)
+    assert widget.loop_tag_texts() is None
+    widget.set_loop_markers(0.21, 0.12)  # either order
+
+    assert widget.loop_tag_texts() == ("A 0:12", "B 0:21")
+    widget.set_total_seconds(4000.0)
+    assert widget.loop_tag_texts() == ("A 8:00", "B 14:00")
+    widget.set_total_seconds(20000.0)
+    assert widget.loop_tag_texts() == ("A 40:00", "B 1:10:00")
+    widget.grab()  # paints the tags without error
+
+
+def test_a_lone_loop_point_is_tagged(app):
+    """Set A before B: the only trace used to be the Loop tooltip."""
+    from src.ui.waveform_stack_widget import WaveformStackWidget
+
+    widget = WaveformStackWidget()
+    widget.set_total_seconds(100.0)
+    widget.set_loop_markers(0.12, None)
+    assert widget.loop_tag_texts() == ("A 0:12",)
+    widget.set_loop_markers(None, 0.21)
+    assert widget.loop_tag_texts() == ("B 0:21",)
+
+
+@pytest.mark.parametrize("a, b", [(0.985, 1.0), (0.0, 0.01), (0.5, 0.505)])
+def test_loop_tags_stay_inside_the_lanes(app, a, b):
+    """A narrow loop at an edge put its B tag past the right edge, or its
+    A tag over the lane names; crowded tags stack instead of overlapping."""
+    from src.ui.waveform_stack_widget import _LABEL_WIDTH, WaveformStackWidget
+
+    width = 700
+    widget = WaveformStackWidget()
+    widget.resize(width, 120)
+    widget.set_total_seconds(240.0)
+    widget.set_loop_markers(a, b)
+    xs = [widget._x_for_ratio(r, width) for r in (a, b)]
+    tag_a, tag_b = widget.loop_tag_rects(xs, width)
+    for rect in (tag_a, tag_b):
+        assert rect.left() >= _LABEL_WIDTH
+        assert rect.right() < width
+    assert not tag_a.intersects(tag_b)
+    widget.grab()
+
+
+def test_a_lone_tag_sits_beside_its_marker(app):
+    from src.ui.waveform_stack_widget import WaveformStackWidget
+
+    widget = WaveformStackWidget()
+    widget.resize(700, 120)
+    widget.set_total_seconds(240.0)
+    widget.set_loop_markers(0.5, None)
+    x = widget._x_for_ratio(0.5, 700)
+    (tag,) = widget.loop_tag_rects([x], 700)
+    assert tag.left() > x
+    widget.grab()

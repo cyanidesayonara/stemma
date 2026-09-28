@@ -7,6 +7,10 @@ theme uses a deeper teal of the same hue, because #4fb8b8 is only about
 Applied globally via QApplication.setStyleSheet().
 """
 
+import os
+
+from src.paths import app_root
+
 STEM_COLORS_DARK = {
     "vocals": "#bfa3dc",   # Purple (brand)
     "drums": "#e4ad6e",    # Gold (brand)
@@ -96,7 +100,13 @@ def badge_html(theme: str, label: str, value: str,
     return value_html
 
 
-def _generate_stylesheet(c: dict[str, str]) -> str:
+def _chevron_path(theme: str) -> str:
+    """Absolute, forward-slashed path of the combo chevron for *theme*."""
+    path = os.path.join(app_root(), "assets", "icons", f"chevron_down_{theme}.svg")
+    return path.replace("\\", "/")
+
+
+def _generate_stylesheet(c: dict[str, str], chevron: str = "") -> str:
     """Generate a QSS stylesheet from a color token dict."""
     return f"""
 QMainWindow, QDialog {{
@@ -397,7 +407,7 @@ QComboBox {{
     color: {c["text"]};
     border: 1px solid {c["surface1"]};
     border-radius: 4px;
-    padding: 4px 4px 4px 6px;
+    padding: 4px 18px 4px 6px;
 }}
 
 QComboBox:editable {{
@@ -408,8 +418,18 @@ QComboBox:focus {{
     border: 1px solid {c["accent"]};
 }}
 
+/* A visible chevron: without one, combos read as text fields (#186). */
 QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 16px;
     border: none;
+}}
+
+QComboBox::down-arrow {{
+    image: url("{chevron}");
+    width: 10px;
+    height: 6px;
 }}
 
 QComboBox QLineEdit {{
@@ -514,8 +534,8 @@ QLabel#copyright {{
 """
 
 
-DARK_STYLESHEET = _generate_stylesheet(DARK_COLORS)
-LIGHT_STYLESHEET = _generate_stylesheet(LIGHT_COLORS)
+DARK_STYLESHEET = _generate_stylesheet(DARK_COLORS, _chevron_path("dark"))
+LIGHT_STYLESHEET = _generate_stylesheet(LIGHT_COLORS, _chevron_path("light"))
 
 THEMES = {
     "dark": {"colors": DARK_COLORS, "stylesheet": DARK_STYLESHEET},

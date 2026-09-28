@@ -205,7 +205,7 @@ def test_practice_cards_compose_in_intended_order(controls):
         controls._loop_b_btn,
         controls._loop_toggle_btn,
         controls._loop_clear_btn,
-        controls._loop_label,
+        # Loop points are tags on the waveform markers, not a card label.
         controls._trainer_check,
         controls._trainer_start_combo,
         controls._trainer_status,
@@ -385,7 +385,9 @@ def test_cards_rewrap_when_their_content_grows(qapp):
     QApplication.processEvents()
     assert rack.cards_side_by_side is True
 
-    rack._loop_label.setText("A: 0:12  B: 0:21  (looping)")
+    # Any label in a card can grow; the trainer status is one that still
+    # lives there (the loop points moved onto the waveform markers).
+    rack._trainer_status.setText("0.75x -> 1.0x at 0.85x, next at 0.90x")
     # The size change travels label -> card frame -> card -> rack as a chain
     # of posted layout requests, which takes more than one event-loop pass.
     for _ in range(3):
@@ -593,3 +595,19 @@ def test_speed_tooltip_names_the_real_shortcut(controls):
 
     assert "Shift+Up" in tip
     assert "[" not in tip
+
+
+def test_setting_a_loop_does_not_widen_the_loop_card():
+    """Loop points used to be a label in the Loop card; setting a loop
+    widened it and wrapped the practice cards at 1366 px (#186)."""
+    host, rack = _hosted_rack()
+    host.resize(rack._required_card_width() + 10, 400)
+    QApplication.processEvents()
+    before = rack._loop_card.minimumSizeHint().width()
+
+    rack._loop_label.setText("A: 12:40  B: 13:00")
+    for _ in range(3):
+        QApplication.processEvents()
+
+    assert rack._loop_card.minimumSizeHint().width() == before
+    assert rack.cards_side_by_side is True
