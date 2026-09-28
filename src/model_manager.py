@@ -17,6 +17,8 @@ import urllib.request
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from src.import_messages import DownloadIntegrityError, describe_error
+
 # Connection/read timeout for model downloads, in seconds. A stalled TCP
 # connection would otherwise hang the download thread forever -- the
 # cancel flag is only checked between chunks, so a dead socket that
@@ -120,7 +122,7 @@ class ModelDownloader(QThread):
                     os.remove(partial)
                 except OSError:
                     pass
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "Model download failed"))
 
     def _download_file(
         self,
@@ -183,7 +185,7 @@ class ModelDownloader(QThread):
                         on_progress(downloaded, total)
 
             if total > 0 and downloaded != total:
-                raise OSError(
+                raise DownloadIntegrityError(
                     f"Incomplete download: received {downloaded} of {total} "
                     f"bytes for {os.path.basename(dest)}."
                 )
@@ -191,7 +193,7 @@ class ModelDownloader(QThread):
             expected = expected_sha256 or self._expected_sha256
             actual = hasher.hexdigest()
             if expected and actual != expected:
-                raise OSError(
+                raise DownloadIntegrityError(
                     "Downloaded model failed SHA-256 integrity check for "
                     f"{os.path.basename(dest)} (got {actual}, expected "
                     f"{expected}). The upstream file may have changed; "

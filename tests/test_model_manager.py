@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import src.model_manager as model_manager
+from src.import_messages import MSG_DOWNLOAD_DAMAGED, MSG_RESET
 from src.model_manager import ModelDownloader, ModelManager, _MODEL_FILES
 
 
@@ -237,8 +238,8 @@ class TestDownloadFile:
         ):
             dl.run()
 
-        assert errors and "SHA-256" in errors[0]
-        assert hashlib.sha256(body).hexdigest() in errors[0]
+        # The user sees readable text; the checksums go to the log.
+        assert errors == [MSG_DOWNLOAD_DAMAGED]
         assert completed == []
         assert not os.path.exists(dest)
         assert not os.path.exists(dest + ".part")
@@ -270,10 +271,10 @@ class TestDownloadFile:
         dl.error.connect(lambda m: errors.append(m))
 
         with patch("src.model_manager.urllib.request.urlopen",
-                   side_effect=OSError("connection reset")):
+                   side_effect=ConnectionResetError("connection reset")):
             dl.run()
 
-        assert errors and "connection reset" in errors[0]
+        assert errors == [MSG_RESET]
         assert not os.path.exists(dest)
         assert not os.path.exists(dest + ".part")
 

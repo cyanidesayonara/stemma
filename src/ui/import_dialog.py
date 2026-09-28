@@ -37,7 +37,7 @@ from src.downloader import (
     extract_metadata,
     is_supported_url,
 )
-from src.import_messages import format_import_error
+from src.import_messages import describe_error, format_import_error
 from src.library import Song, SongLibrary
 from src.mdx_separator import MdxSeparatorWorker
 from src.model_manager import ModelDownloader, ModelManager
@@ -69,7 +69,7 @@ class _MetadataWorker(QThread):
             title, artist = extract_metadata(self._url)
             self.completed.emit(title, artist)
         except DownloadError as exc:
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "YouTube metadata failed"))
 
 
 class _DownloadWorker(QThread):
@@ -101,7 +101,7 @@ class _DownloadWorker(QThread):
             self.progress.emit(100, "Download complete.")
             self.completed.emit(self._output_path)
         except DownloadError as exc:
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "YouTube download failed"))
 
 
 class ImportDialog(QDialog):
@@ -395,7 +395,7 @@ class ImportDialog(QDialog):
                 original_path=path,
             )
         except Exception as exc:
-            self._on_error(str(exc))
+            self._on_error(describe_error(exc, "Import failed"))
             return
 
         self._import_song_id = song.id
