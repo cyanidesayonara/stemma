@@ -82,16 +82,16 @@ def lane_label(stem_name: str) -> str:
     """Short gutter label for a lane.
 
     Recording takes are named ``recording_takeN`` internally; label them
-    "take N" to match the mixer's "Take N" rows. Stems use their first six
-    letters, which covers every stem name.
+    "Take N" to match the mixer's "Take N" rows. Stems use their first six
+    letters, which covers every stem name, capitalised like the mixer.
     """
     if stem_name.startswith(_TAKE_PREFIX):
         number = stem_name[len(_TAKE_PREFIX):]
         # ASCII digits through int(), as the mixer names takes, so a stray
-        # "recording_take01" reads "take 1" in both places.
+        # "recording_take01" reads "Take 1" in both places.
         if number.isascii() and number.isdigit():
-            return f"take {int(number)}"
-    return stem_name[:6]
+            return f"Take {int(number)}"
+    return stem_name[:6].capitalize()
 
 
 @dataclass
