@@ -31,8 +31,10 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
-from src.import_messages import describe_error
+from src.import_messages import ModelDamagedError, describe_error
+from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session, session_provider_label
+from src.separator import to_stereo
 from src.separation_state import (
     clear_completion_marker,
     write_completion_marker,
@@ -169,10 +171,7 @@ class MdxSeparatorWorker(QThread):
                 f"Input audio file not found: {self.input_path}"
             )
         audio, sr = sf.read(self.input_path, always_2d=True)
-        audio = audio.T.astype(np.float32)
-        if audio.shape[0] == 1:
-            audio = np.repeat(audio, 2, axis=0)
-        return audio[:2], sr
+        return to_stereo(audio.T.astype(np.float32)), sr
 
     def _resample(self, audio: np.ndarray, sr: int) -> np.ndarray:
         if sr == SAMPLE_RATE:
@@ -183,7 +182,12 @@ class MdxSeparatorWorker(QThread):
         ]).astype(np.float32)
 
     def _create_session(self):
-        return create_onnx_session(self.model_path)
+        """Create the session; delete a model that exists but won't load."""
+        try:
+            return create_onnx_session(self.model_path)
+        except ModelDamagedError:
+            discard_model_files(self.model_path)
+            raise
 
     # ------------------------------------------------------------------
     # STFT packing (matches UVR's torch.stft usage)

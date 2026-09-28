@@ -34,6 +34,10 @@ class DownloadIntegrityError(OSError):
     """A downloaded file was incomplete or failed its checksum."""
 
 
+class ModelDamagedError(RuntimeError):
+    """A cached model file exists but ONNX Runtime cannot load it."""
+
+
 MSG_GENERIC = "Something went wrong. Try again."
 MSG_CANCELLED = "The operation was cancelled."
 MSG_OFFLINE = (
@@ -96,6 +100,11 @@ MSG_YT_UPCOMING = "This video hasn't premiered yet. Try again after it does."
 MSG_YT_FORMAT = (
     "YouTube changed how this video is served. Try again later, or update "
     "stemma."
+)
+MSG_YT_ONLY = "Only YouTube links are supported."
+MSG_MODEL_DAMAGED = (
+    "The separation model on this PC was damaged, so stemma removed it. "
+    "Import the song again to download a fresh copy."
 )
 
 _READABLE = frozenset(
@@ -196,6 +205,8 @@ def _typed_message(exc: BaseException) -> str | None:
         return MSG_MEMORY
     if isinstance(exc, DownloadIntegrityError):
         return MSG_DOWNLOAD_DAMAGED
+    if isinstance(exc, ModelDamagedError):
+        return MSG_MODEL_DAMAGED
     if isinstance(exc, urllib.error.HTTPError):
         return MSG_HTTP_404 if exc.code == 404 else MSG_HTTP
     if isinstance(exc, sf.SoundFileError):

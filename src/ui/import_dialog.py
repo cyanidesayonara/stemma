@@ -35,12 +35,18 @@ from src.downloader import (
     check_ffmpeg,
     download_audio,
     extract_metadata,
+    ffmpeg_missing_message,
     is_supported_url,
 )
-from src.import_messages import describe_error, format_import_error
+from src.import_messages import (
+    MSG_UNREADABLE_AUDIO,
+    MSG_YT_ONLY,
+    describe_error,
+    format_import_error,
+)
 from src.library import Song, SongLibrary
 from src.mdx_separator import MdxSeparatorWorker
-from src.model_manager import ModelDownloader, ModelManager
+from src.model_manager import ModelDownloader, ModelManager, model_label
 from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 from src.separator import (
     SeparatorWorker,
@@ -51,6 +57,21 @@ from src.separator import (
 
 # Separation loads the full source into RAM; warn above this size (bytes).
 _LARGE_SOURCE_WARN_BYTES = 100 * 1024 * 1024
+
+
+def _is_readable_audio(path: str) -> bool:
+    """True if soundfile can open *path* and it holds some audio.
+
+    Checked before the song is added or a model is downloaded, so a
+    corrupt or unsupported file fails in the dialog with a clear message
+    instead of deep inside separation.
+    """
+    try:
+        info = sf.info(path)
+    except Exception as exc:  # noqa: BLE001 - any failure means unreadable
+        describe_error(exc, f"Import check failed for {path}")
+        return False
+    return info.frames > 0 and info.channels > 0 and info.samplerate > 0
 
 
 class _MetadataWorker(QThread):
@@ -141,6 +162,9 @@ class ImportDialog(QDialog):
         self._pending_model_key: str = "htdemucs"
         self._selected_path: str = ""
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
+        # Model keys the user already agreed to download in this dialog,
+        # so a YouTube import asks once, before the audio download.
+        self._download_consent: set[str] = set()
 
         self._setup_ui()
 
@@ -222,6 +246,8 @@ class ImportDialog(QDialog):
         layout.addWidget(self._progress_bar)
 
         self._status_label = QLabel("")
+        # Error text is a full sentence or two; wrap instead of clipping.
+        self._status_label.setWordWrap(True)
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
 
@@ -241,6 +267,23 @@ class ImportDialog(QDialog):
         self._button_box.accepted.connect(self._on_import)
         self._button_box.rejected.connect(self.reject)
         layout.addWidget(self._button_box)
+
+    def _set_busy(self, busy: bool) -> None:
+        """Block a second import while one runs; Cancel always stays on.
+
+        Cancel is how the user stops a model or audio download, so only
+        the import button is disabled.
+        """
+        self._button_box.button(
+            QDialogButtonBox.StandardButton.Ok
+        ).setEnabled(not busy)
+
+    def _show_problem(self, message: str) -> None:
+        """Show *message* in the status line and allow another try."""
+        self._status_label.setVisible(True)
+        self._status_label.setText(message)
+        self._progress_bar.setVisible(False)
+        self._set_busy(False)
 
     # ------------------------------------------------------------------
     # URL handling
@@ -320,36 +363,41 @@ class ImportDialog(QDialog):
         self._retry_btn.setVisible(False)
 
         # Disable immediately to prevent double-click race.
-        self._button_box.setEnabled(False)
+        self._set_busy(True)
 
         if is_supported_url(url):
             self._start_youtube_import(url)
+        elif url:
+            # Something that is not a YouTube link used to do nothing.
+            self._show_problem(MSG_YT_ONLY)
         elif self._selected_path:
             if not self._warn_large_source_ok(self._selected_path):
-                self._button_box.setEnabled(True)
+                self._set_busy(False)
                 return
             self._start_local_import(self._selected_path)
         else:
             # Nothing selected -- re-enable.
-            self._button_box.setEnabled(True)
+            self._set_busy(False)
 
     def _start_youtube_import(self, url: str) -> None:
         """Download audio from YouTube, then hand off to the separator."""
         if not check_ffmpeg():
             QMessageBox.critical(
-                self,
-                "ffmpeg not found",
-                "YouTube import requires ffmpeg.\n\n"
-                "Install ffmpeg and make sure it is on your PATH.",
+                self, "ffmpeg not found", ffmpeg_missing_message(),
             )
-            self._button_box.setEnabled(True)
+            self._set_busy(False)
+            return
+
+        # Ask about a model download now, not after the audio arrives.
+        if not self._confirm_model_download(self._model_combo.currentData()):
+            self._set_busy(False)
             return
 
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
         self._status_label.setVisible(True)
         self._status_label.setText("Downloading audio...")
-        self._button_box.setEnabled(False)
+        self._set_busy(True)
 
         # Download to a temp file, then import like a local file.
         self._tmp_dir = tempfile.mkdtemp(prefix="stemma_yt_")
@@ -369,20 +417,30 @@ class ImportDialog(QDialog):
         """
         self._selected_path = path
         if not self._warn_large_source_ok(path):
-            self._button_box.setEnabled(True)
+            self._set_busy(False)
             self._cleanup_tmp_dir()
             return
         self._start_local_import(path)
         self._cleanup_tmp_dir()
 
     def _start_local_import(self, path: str) -> None:
-        """Import a local audio file into the library and start separation."""
+        """Import a local audio file into the library and start separation.
+
+        The file is checked, and any model download agreed to, before the
+        library is touched, so a refusal leaves nothing behind.
+        """
         model_key = self._model_combo.currentData()
+        if not _is_readable_audio(path):
+            self._show_problem(MSG_UNREADABLE_AUDIO)
+            return
         if not model_key.startswith("mdx_"):
             is_6_stem = model_key == "htdemucs_6s"
             if not self._check_memory_ok(path, is_6_stem):
-                self._button_box.setEnabled(True)
+                self._set_busy(False)
                 return
+        if not self._confirm_model_download(model_key):
+            self._set_busy(False)
+            return
 
         title = self._title_edit.text() or "Untitled"
         artist = self._artist_edit.text() or "Unknown Artist"
@@ -430,13 +488,39 @@ class ImportDialog(QDialog):
             is_6_stem=model_key == "htdemucs_6s"
         )
 
+    def _confirm_model_download(self, model_key: str) -> bool:
+        """Ask before the first download of *model_key*; True to go on.
+
+        Returns True without asking when the model is already on disk or
+        the user agreed earlier in this dialog.
+        """
+        if model_key in self._download_consent:
+            return True
+        if self._model_downloaded_for(model_key):
+            return True
+        size_mb = self._model_manager.download_size_mb(model_key)
+        reply = QMessageBox.question(
+            self,
+            "Download model",
+            f"stemma needs to download the {model_label(model_key)} "
+            f"(about {size_mb} MB) once. It stays on this PC for later "
+            "imports.\n\nDownload it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+        self._download_consent.add(model_key)
+        return True
+
     def _begin_model_download(self, song: Song, model_key: str) -> None:
         """Download the ONNX model in the background, then run separation."""
         self._pending_model_key = model_key
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
         self._status_label.setVisible(True)
-        self._button_box.setEnabled(False)
+        self._status_label.setText(f"Downloading the {model_label(model_key)}...")
+        self._set_busy(True)
 
         if model_key.startswith("mdx_"):
             self._model_downloader = self._model_manager.download_mdx_model(
@@ -550,7 +634,7 @@ class ImportDialog(QDialog):
 
         self._progress_bar.setVisible(True)
         self._status_label.setVisible(True)
-        self._button_box.setEnabled(False)
+        self._set_busy(True)
 
         if model_key.startswith("mdx_"):
             self._worker = MdxSeparatorWorker(
@@ -620,7 +704,7 @@ class ImportDialog(QDialog):
         self._status_label.setText(f"Error: {format_import_error(message)}")
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
-        self._button_box.setEnabled(True)
+        self._set_busy(False)
         self._retry_btn.setVisible(True)
         self._cleanup_tmp_dir()
 

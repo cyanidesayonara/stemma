@@ -30,6 +30,27 @@ class _FakeResponse:
         return False
 
 
+@pytest.fixture
+def tiny_sizes(monkeypatch):
+    """Shrink the expected artifact sizes so tests can write real files."""
+    sizes = {
+        name: 100 + i * 10
+        for i, name in enumerate(model_manager.MODEL_FILE_SIZES)
+    }
+    monkeypatch.setattr(model_manager, "MODEL_FILE_SIZES", sizes)
+    return sizes
+
+
+def _write(data_dir: str, name: str, size: int) -> str:
+    """Write *size* bytes to ``<data_dir>/models/<name>``; return the path."""
+    models_dir = os.path.join(data_dir, "models")
+    os.makedirs(models_dir, exist_ok=True)
+    path = os.path.join(models_dir, name)
+    with open(path, "wb") as f:
+        f.write(b"x" * size)
+    return path
+
+
 class TestModelManager:
     """Verify ModelManager path resolution and state checks."""
 
@@ -47,25 +68,62 @@ class TestModelManager:
         manager = ModelManager(data_dir=tmp_dir)
         assert not manager.is_model_downloaded(is_6_stem=False)
 
-    def test_is_model_downloaded_true_when_exists(self, tmp_dir):
+    def test_is_model_downloaded_true_when_exists(self, tmp_dir, tiny_sizes):
         manager = ModelManager(data_dir=tmp_dir)
-        models_dir = os.path.join(tmp_dir, "models")
-        os.makedirs(models_dir, exist_ok=True)
         for name in ("htdemucs.onnx", "htdemucs.onnx.data"):
-            with open(os.path.join(models_dir, name), "wb") as f:
-                f.write(b"dummy")
+            _write(tmp_dir, name, tiny_sizes[name])
         assert manager.is_model_downloaded(is_6_stem=False)
 
-    def test_is_model_downloaded_6_stem_requires_both_artifacts(self, tmp_dir):
+    def test_is_model_downloaded_6_stem_requires_both_artifacts(
+        self, tmp_dir, tiny_sizes,
+    ):
         manager = ModelManager(data_dir=tmp_dir)
-        models_dir = os.path.join(tmp_dir, "models")
-        os.makedirs(models_dir, exist_ok=True)
-        with open(os.path.join(models_dir, "htdemucs_6s.onnx"), "wb") as f:
-            f.write(b"stub")
+        _write(tmp_dir, "htdemucs_6s.onnx", tiny_sizes["htdemucs_6s.onnx"])
         assert not manager.is_model_downloaded(is_6_stem=True)
-        with open(os.path.join(models_dir, "htdemucs_6s.onnx.data"), "wb") as f:
-            f.write(b"weights")
+        _write(
+            tmp_dir, "htdemucs_6s.onnx.data",
+            tiny_sizes["htdemucs_6s.onnx.data"],
+        )
         assert manager.is_model_downloaded(is_6_stem=True)
+
+    def test_wrong_size_file_is_not_downloaded(self, tmp_dir, tiny_sizes):
+        """A truncated weights file used to count as cached and then
+        failed to load (INVALID_PROTOBUF) on every import."""
+        manager = ModelManager(data_dir=tmp_dir)
+        _write(tmp_dir, "htdemucs.onnx", tiny_sizes["htdemucs.onnx"])
+        _write(tmp_dir, "htdemucs.onnx.data", 3)
+        assert not manager.is_model_downloaded(is_6_stem=False)
+        _write(tmp_dir, "UVR-MDX-NET-Inst_HQ_3.onnx", 7)
+        assert not manager.is_mdx_model_downloaded("mdx_inst_hq3")
+
+    def test_download_size_counts_only_missing_files(self, tmp_dir):
+        manager = ModelManager(data_dir=tmp_dir)
+        assert manager.download_size_mb("htdemucs") == 172
+        assert manager.download_size_mb("htdemucs_6s") == 114
+        assert manager.download_size_mb("mdx_inst_hq3") == 64
+        assert manager.download_size_mb("beat_this") == 79
+
+    def test_download_size_zero_when_cached(self, tmp_dir, tiny_sizes):
+        manager = ModelManager(data_dir=tmp_dir)
+        _write(tmp_dir, "htdemucs.onnx", tiny_sizes["htdemucs.onnx"])
+        assert manager.download_size_bytes("htdemucs") == (
+            tiny_sizes["htdemucs.onnx.data"]
+        )
+        _write(tmp_dir, "htdemucs.onnx.data", tiny_sizes["htdemucs.onnx.data"])
+        assert manager.download_size_bytes("htdemucs") == 0
+
+    def test_labels_name_models_not_files(self):
+        assert model_manager.model_label("htdemucs") == "4-stem model"
+        assert model_manager.model_label("htdemucs_6s") == "6-stem model"
+        assert model_manager.model_label("mdx_inst_hq3") == "2-stem model"
+
+    def test_discard_removes_graph_and_weights(self, tmp_dir):
+        graph = _write(tmp_dir, "htdemucs.onnx", 4)
+        weights = _write(tmp_dir, "htdemucs.onnx.data", 4)
+        model_manager.discard_model_files(graph)
+        assert not os.path.exists(graph)
+        assert not os.path.exists(weights)
+        model_manager.discard_model_files(graph)  # already gone: no error
 
     def test_download_model_returns_downloader(self, tmp_dir):
         manager = ModelManager(data_dir=tmp_dir)
@@ -80,12 +138,9 @@ class TestModelManager:
         manager = ModelManager(data_dir=tmp_dir)
         assert not manager.is_beat_model_downloaded()
 
-    def test_is_beat_model_downloaded_true(self, tmp_dir):
+    def test_is_beat_model_downloaded_true(self, tmp_dir, tiny_sizes):
         manager = ModelManager(data_dir=tmp_dir)
-        models_dir = os.path.join(tmp_dir, "models")
-        os.makedirs(models_dir, exist_ok=True)
-        with open(os.path.join(models_dir, "beat_this.onnx"), "wb") as f:
-            f.write(b"dummy")
+        _write(tmp_dir, "beat_this.onnx", tiny_sizes["beat_this.onnx"])
         assert manager.is_beat_model_downloaded()
 
     def test_download_beat_model_returns_downloader(self, tmp_dir):
@@ -343,3 +398,67 @@ class TestDownloadFile:
             assert not os.path.exists(
                 os.path.join(manager_dir, fname + ".part")
             )
+
+
+class TestDownloadProgress:
+    """Progress is weighted by bytes and names the model, not files."""
+
+    def _run(self, tmp_dir, sizes, cached=()):
+        manager_dir = os.path.join(tmp_dir, "models")
+        os.makedirs(manager_dir, exist_ok=True)
+        bodies = {
+            name: bytes([i + 1]) * sizes[name]
+            for i, name in enumerate(_MODEL_FILES["htdemucs"])
+        }
+        for name in cached:
+            with open(os.path.join(manager_dir, name), "wb") as f:
+                f.write(bodies[name])
+        hashes = {n: hashlib.sha256(b).hexdigest() for n, b in bodies.items()}
+
+        def respond(request, **_kwargs):
+            name = request.full_url.rsplit("/", 1)[-1]
+            return _FakeResponse(bodies[name])
+
+        dl = ModelDownloader("htdemucs", manager_dir)
+        progress = []
+        dl.progress.connect(lambda p, m: progress.append((p, m)))
+        with (
+            patch(
+                "src.model_manager.urllib.request.urlopen",
+                side_effect=respond,
+            ),
+            patch.dict("src.model_manager._MODEL_SHA256", hashes),
+        ):
+            dl.run()
+        return progress
+
+    def test_small_graph_file_is_a_small_share(self, tmp_dir, monkeypatch):
+        sizes = {"htdemucs.onnx": 1 << 16, "htdemucs.onnx.data": 9 << 16}
+        monkeypatch.setattr(model_manager, "MODEL_FILE_SIZES", sizes)
+        percents = [p for p, _m in self._run(tmp_dir, sizes)]
+        # The graph is 10% of the bytes, so the bar sits at 10% after it,
+        # not at 50% as it did when each file counted as half.
+        assert 10 in percents
+        assert 50 not in percents[:3]
+        assert percents == sorted(percents)
+        assert percents[-1] == 100
+
+    def test_messages_name_the_model_and_megabytes(self, tmp_dir, monkeypatch):
+        sizes = {"htdemucs.onnx": 1 << 20, "htdemucs.onnx.data": 3 << 20}
+        monkeypatch.setattr(model_manager, "MODEL_FILE_SIZES", sizes)
+        messages = [m for _p, m in self._run(tmp_dir, sizes)]
+        assert any("4-stem model" in m and "of 4 MB" in m for m in messages)
+        assert not any(".onnx" in m for m in messages)
+
+    def test_wrong_size_cached_file_is_downloaded_again(
+        self, tmp_dir, monkeypatch,
+    ):
+        sizes = {"htdemucs.onnx": 1 << 16, "htdemucs.onnx.data": 2 << 16}
+        monkeypatch.setattr(model_manager, "MODEL_FILE_SIZES", sizes)
+        manager_dir = os.path.join(tmp_dir, "models")
+        os.makedirs(manager_dir, exist_ok=True)
+        stale = os.path.join(manager_dir, "htdemucs.onnx.data")
+        with open(stale, "wb") as f:
+            f.write(b"truncated")
+        self._run(tmp_dir, sizes, cached=("htdemucs.onnx",))
+        assert os.path.getsize(stale) == sizes["htdemucs.onnx.data"]

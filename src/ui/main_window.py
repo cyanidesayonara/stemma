@@ -58,7 +58,7 @@ from src.app_settings import (
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
-from src.import_messages import format_import_error
+from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
 from src.library import SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
@@ -1900,6 +1900,19 @@ class MainWindow(QMainWindow):
             except KeyError:
                 pass
         self._library_panel.refresh()
+        # A damaged model was deleted by the worker; offer a fresh import,
+        # which asks to download it again.
+        if format_import_error(message) == MSG_MODEL_DAMAGED:
+            reply = QMessageBox.question(
+                self,
+                "Import failed",
+                f"{MSG_MODEL_DAMAGED}\n\nImport a song now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._on_import()
+            return
         # User-initiated cancellations need no dialog; real failures do.
         if "cancelled" not in message.lower():
             QMessageBox.warning(
