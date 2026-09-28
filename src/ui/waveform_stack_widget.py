@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QFontMetrics,
     QLinearGradient,
     QMouseEvent,
     QPainter,
@@ -46,6 +47,12 @@ _BAR_STEP = _BAR_WIDTH + _BAR_GAP
 _BAR_RADIUS = 1.0
 _CURSOR_GLOW_WIDTH = 6
 _LABEL_WIDTH = 52
+_LABEL_PADDING = 4
+
+_MUTED_LANE_OPACITY = 0.15
+# A dimmed lane needs more opacity to stay legible against a light background;
+# at 0.15 on white it disappears entirely and reads as "stem has no audio".
+_MUTED_LANE_OPACITY_LIGHT = 0.3
 
 
 def format_loop_time(seconds: float) -> str:
@@ -56,11 +63,14 @@ def format_loop_time(seconds: float) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}"
-_LABEL_PADDING = 4
-_MUTED_LANE_OPACITY = 0.15
-# A dimmed lane needs more opacity to stay legible against a light background;
-# at 0.15 on white it disappears entirely and reads as "stem has no audio".
-_MUTED_LANE_OPACITY_LIGHT = 0.3
+
+
+def _loop_tag_font() -> QFont:
+    """The small bold font of the loop marker tags."""
+    font = QFont()
+    font.setPixelSize(10)
+    font.setBold(True)
+    return font
 
 
 # Must match src.player.RECORDING_STEM_PREFIX; not imported, to keep this
@@ -257,20 +267,32 @@ class WaveformStackWidget(QWidget):
         self._loop_b_ratio = b_ratio
         self.update()
 
-    def loop_tag_texts(self) -> tuple[str, str] | None:
-        """The "A 0:12" / "B 0:21" tags drawn on the loop markers."""
-        if (self._loop_a_ratio is None or self._loop_b_ratio is None
-                or self._total_seconds <= 0):
+    def _loop_points(self) -> list[tuple[str, float]]:
+        """(letter, ratio) of each loop point that is set, left to right."""
+        a, b = self._loop_a_ratio, self._loop_b_ratio
+        if a is not None and b is not None:
+            a, b = sorted((a, b))
+        points = [("A", a), ("B", b)]
+        return [(letter, ratio) for letter, ratio in points if ratio is not None]
+
+    def loop_tag_texts(self) -> tuple[str, ...] | None:
+        """The "A 0:12" / "B 0:21" tags drawn on the loop markers.
+
+        One tag when only one point is set: with the card label gone, a
+        lone A would otherwise show nowhere (#201 review).
+        """
+        points = self._loop_points()
+        if not points or self._total_seconds <= 0:
             return None
-        a, b = sorted((self._loop_a_ratio, self._loop_b_ratio))
-        return (
-            f"A {format_loop_time(a * self._total_seconds)}",
-            f"B {format_loop_time(b * self._total_seconds)}",
+        return tuple(
+            f"{letter} {format_loop_time(ratio * self._total_seconds)}"
+            for letter, ratio in points
         )
 
     def set_total_seconds(self, total: float) -> None:
-        """Set the total duration for click-to-seek conversion."""
+        """Set the total duration for click-to-seek and the loop tags."""
         self._total_seconds = total
+        self.update()
 
     def _invalidate_lane_paths(self) -> None:
         for lane in self._lanes:
@@ -327,6 +349,8 @@ class WaveformStackWidget(QWidget):
 
             if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
                 self._draw_loop_region(painter, w, h)
+            elif self._loop_points():
+                self._draw_single_marker(painter, w, h)
 
             self._draw_cursor(painter, w, h)
         finally:
@@ -483,31 +507,53 @@ class WaveformStackWidget(QWidget):
         painter.setPen(pen)
         painter.drawLine(QPointF(x_a, 0.0), QPointF(x_a, float(h)))
         painter.drawLine(QPointF(x_b, 0.0), QPointF(x_b, float(h)))
-        self._draw_loop_tags(painter, x_a, x_b)
+        self._draw_loop_tags(painter, [x_a, x_b], w)
 
-    def _draw_loop_tags(self, painter: QPainter, x_a: float, x_b: float) -> None:
-        """Label the markers with their times, inside the loop when it fits.
+    def _draw_single_marker(self, painter: QPainter, w: int, h: int) -> None:
+        """A lone A (or B): its line and tag, before the loop is complete."""
+        (_, ratio), = self._loop_points()
+        x = self._x_for_ratio(ratio, w)
+        painter.setPen(QPen(self._loop_marker_color, 2.0))
+        painter.drawLine(QPointF(x, 0.0), QPointF(x, float(h)))
+        self._draw_loop_tags(painter, [x], w)
+
+    def loop_tag_rects(self, xs: list[float], w: int) -> list[QRectF]:
+        """Where the loop tags go, one per marker x, inside the loop when
+        it fits.
 
         The times used to be a label in the Loop card, and setting a loop
         widened that card enough to wrap the practice cards at 1366 px.
+        Tags stay over the lanes (never over the lane names or past the
+        right edge), and stack when a narrow loop at an edge crowds them.
         """
+        texts = self.loop_tag_texts() or ()
+        metrics = QFontMetrics(_loop_tag_font())
+        pad, gap, height = 3, 2, metrics.height() + 2
+        widths = [metrics.horizontalAdvance(t) + 2 * pad for t in texts]
+        if len(xs) == 2 and len(widths) == 2:
+            x_a, x_b = xs
+            inside = x_b - x_a >= widths[0] + widths[1] + 3 * gap
+            lefts = [x_a + gap if inside else x_a - gap - widths[0],
+                     x_b - gap - widths[1] if inside else x_b + gap]
+        else:
+            lefts = [x + gap for x in xs]
+        rects = []
+        for left, width in zip(lefts, widths):
+            left = max(float(_LABEL_WIDTH), min(left, w - width - 1.0))
+            rects.append(QRectF(left, 1.0, width, height))
+        if len(rects) == 2 and rects[0].intersects(rects[1]):
+            rects[1].moveTop(rects[0].bottom() + gap)
+        return rects
+
+    def _draw_loop_tags(
+        self, painter: QPainter, xs: list[float], w: int,
+    ) -> None:
+        """Label the markers with their times (see ``loop_tag_rects``)."""
         texts = self.loop_tag_texts()
         if texts is None:
             return
-        font = QFont()
-        font.setPixelSize(10)
-        font.setBold(True)
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-        pad, gap, height = 3, 2, metrics.height() + 2
-        widths = [metrics.horizontalAdvance(t) + 2 * pad for t in texts]
-        inside = x_b - x_a >= widths[0] + widths[1] + 3 * gap
-        rects = [
-            QRectF(x_a + gap if inside else x_a - gap - widths[0], 1.0,
-                   widths[0], height),
-            QRectF(x_b - gap - widths[1] if inside else x_b + gap, 1.0,
-                   widths[1], height),
-        ]
+        painter.setFont(_loop_tag_font())
+        rects = self.loop_tag_rects(xs, w)
         for rect, text in zip(rects, texts):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._loop_marker_color)

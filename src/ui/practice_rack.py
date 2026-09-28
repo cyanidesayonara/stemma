@@ -211,7 +211,7 @@ class PracticeRack(QWidget):
         # Loop points are drawn as tags on the waveform markers; the label
         # stays for the facade's text API but is not shown (it widened the
         # card and wrapped the rack at 1366 px when a loop was set).
-        self._loop_label = QLabel("")
+        self._loop_label = QLabel("", self)
         self._loop_label.setObjectName("subtle-label")
         self._loop_label.setVisible(False)
 

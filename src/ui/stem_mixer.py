@@ -139,6 +139,19 @@ class StemRow(QWidget):
         self._vol_combo.activated.connect(self._on_vol_combo)
         layout.addWidget(self._vol_combo)
 
+        # Take rows add a nudge spinbox and a delete button. Every row keeps
+        # that slot, empty on stem rows, so the stretching sliders and the
+        # preset combos line up down the mixer at any width (#201 review).
+        self._take_slot = QWidget()
+        # An empty slot must not paint the app's widget background as a box.
+        self._take_slot.setObjectName("take-slot")
+        self._take_slot.setStyleSheet("#take-slot { background: transparent; }")
+        slot = QHBoxLayout(self._take_slot)
+        slot.setContentsMargins(0, 0, 0, 0)
+        slot.setSpacing(layout.spacing())
+        self._take_slot.setFixedWidth(_take_controls_width(layout.spacing()))
+        layout.addWidget(self._take_slot)
+
         # Every control in this row is fixed width, so without a stretch the
         # layout spreads the slack between them: at 1366px that left roughly
         # 300px of dead space between a stem's name and its own mute button.
@@ -146,9 +159,8 @@ class StemRow(QWidget):
         layout.addStretch()
 
     def _append_control(self, widget: QWidget) -> None:
-        """Add a control at the end of the row, before the packing stretch."""
-        layout = self.layout()
-        layout.insertWidget(layout.count() - 1, widget)
+        """Add a take control to the row's reserved slot."""
+        self._take_slot.layout().addWidget(widget)
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
@@ -197,6 +209,15 @@ class StemRow(QWidget):
         self._solo_btn.setIcon(make_toggle_icon(
             draw_solo, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
         ))
+
+
+def _take_controls_width(spacing: int) -> int:
+    """Width of a take row's nudge spinbox and delete button."""
+    spin = QSpinBox()
+    spin.setRange(-200, 200)
+    spin.setSuffix(" ms")
+    fit_spinbox_width(spin, sample="-200 ms")
+    return spin.width() + spacing + 28
 
 
 class RecordingStemRow(StemRow):
