@@ -328,12 +328,8 @@ class MainWindow(QMainWindow):
         g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
-        g(Qt.Key.Key_Left, lambda: self._player.seek(
-            max(0.0, self._player.current_seconds - 5.0)
-        ))
-        g(Qt.Key.Key_Right, lambda: self._player.seek(
-            self._player.current_seconds + 5.0
-        ))
+        g(Qt.Key.Key_Left, lambda: self._seek_by(-5.0))
+        g(Qt.Key.Key_Right, lambda: self._seek_by(5.0))
         g(Qt.Key.Key_Home, lambda: self._player.seek(0.0))
         g(Qt.Key.Key_End, lambda: self._player.seek(self._player.total_seconds))
 
@@ -555,14 +551,26 @@ class MainWindow(QMainWindow):
             and self.isAncestorOf(widget)
         )
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Let Enter press the focused button.
+    def _seek_by(self, seconds: float) -> None:
+        self._player.seek(max(0.0, self._player.current_seconds + seconds))
 
-        Buttons outside dialogs ignore Enter, so it bubbles up to here.
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Let Enter press the focused button, and unused arrows seek.
+
+        Buttons outside dialogs ignore Enter, so it bubbles up to here. So
+        do Left and Right from a focused control that has no use for them
+        (the song list, a closed combo): the shortcut override handed the
+        key to that control, and it should still seek, as before.
         """
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and (
             self._press_focused_button()
         ):
+            event.accept()
+            return
+        modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if (event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right)
+                and modifiers == Qt.KeyboardModifier.NoModifier):
+            self._seek_by(-5.0 if event.key() == Qt.Key.Key_Left else 5.0)
             event.accept()
             return
         super().keyPressEvent(event)

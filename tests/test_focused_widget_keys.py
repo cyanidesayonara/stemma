@@ -10,7 +10,7 @@ lowered the master volume (#184).
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -52,6 +52,10 @@ def window(app):
     win._adjust_master_volume = MagicMock()
     yield win
     win.close()
+    # Delete it: a closed window keeps its timers and shortcuts alive, and
+    # 46 of them slowed later tests past their waits (#197 review).
+    win.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QApplication.processEvents()
 
 
@@ -170,12 +174,16 @@ def test_focused_combo_gets_the_key(window, key, expected):
 
 
 @pytest.mark.parametrize("key", [K.Key_Left, K.Key_Right])
-def test_focused_combo_swallows_left_right(window, key):
+def test_left_right_still_seek_from_a_combo_that_ignores_them(window, key):
+    """A closed combo has no use for Left/Right; the key comes back up to
+    the window and seeks, as it did before the override (#197 review)."""
     _host(window, _combo())
 
     _press(window, key)
 
-    _assert_no_shortcut(window)
+    window._player.seek.assert_called_once_with(
+        45.0 if key == K.Key_Left else 55.0
+    )
 
 
 @pytest.mark.parametrize("key", [K.Key_Up, K.Key_Down])
@@ -300,3 +308,17 @@ def test_shift_arrow_still_bumps_pitch_from_a_slider(window):
 
     bump.assert_called_once_with(1)
     assert slider.value() == 50
+
+
+def test_right_on_the_song_list_still_seeks(window):
+    """Click a song, then Right to skip ahead: the list ignores Right."""
+    widget = window._library_panel._list
+    widget.addItems(["a", "b"])
+    widget.setCurrentRow(0)
+    widget.setFocus(Qt.FocusReason.TabFocusReason)
+    QApplication.processEvents()
+
+    _press(window, K.Key_Right)
+
+    window._player.seek.assert_called_once_with(55.0)
+    assert widget.currentRow() == 0

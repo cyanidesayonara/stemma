@@ -9,7 +9,7 @@ did nothing on these buttons either.
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
@@ -38,6 +38,10 @@ def window(app):
     QApplication.processEvents()
     yield win
     win.close()
+    # Delete it: a closed window keeps its timers and shortcuts alive, and
+    # 46 of them slowed later tests past their waits (#197 review).
+    win.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QApplication.processEvents()
 
 
