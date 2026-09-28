@@ -176,6 +176,8 @@ class TransportBar(QWidget):
     def apply_theme(self, colors: dict[str, str], playing: bool) -> None:
         """Rebuild theme-dependent transport icons."""
         icon_color = QColor(colors["text"])
+        self._record_icon = make_icon(draw_record, QColor(colors["recording"]))
+        self._record_button.setIcon(self._record_icon)
         self._play_icon = make_icon(draw_play, icon_color)
         self._pause_icon = make_icon(draw_pause, icon_color)
         self._stop_icon = make_icon(draw_stop, icon_color)

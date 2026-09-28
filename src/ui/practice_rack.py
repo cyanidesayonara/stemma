@@ -508,12 +508,13 @@ class PracticeRack(QWidget):
     def apply_theme(self, colors: dict[str, str]) -> None:
         """Rebuild all theme-sensitive toggle icons."""
         icon_color = QColor(colors["text"])
-        self._metronome_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
-        )
-        self._count_in_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
-        )
-        self._count_in_repeats.setIcon(
-            make_toggle_icon(draw_repeat, icon_color)
-        )
+        on_accent = QColor(colors["on_accent"])
+        self._metronome_toggle.setIcon(make_toggle_icon(
+            draw_power, icon_color, checked_color=on_accent,
+        ))
+        self._count_in_toggle.setIcon(make_toggle_icon(
+            draw_power, icon_color, checked_color=on_accent,
+        ))
+        self._count_in_repeats.setIcon(make_toggle_icon(
+            draw_repeat, icon_color, checked_color=on_accent,
+        ))

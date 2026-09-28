@@ -575,14 +575,12 @@ class LibraryPanel(QWidget):
         """Update delegate colors and control icons for the current theme."""
         self._song_delegate.set_separator_color(colors["surface1"])
         self._song_delegate.set_accent_color(colors["accent"])
-        # Selected rows use the teal accent fill, so the text must be
-        # readable on teal in BOTH themes -- use ON_ACCENT (near-black).
-        self._song_delegate.set_selected_text_color(ON_ACCENT)
+        # Selected rows and checked buttons sit on the accent fill, so text
+        # and glyphs there use the theme's on-accent colour.
+        self._song_delegate.set_selected_text_color(colors["on_accent"])
 
         icon_color = QColor(colors["text"])
-        # When a button sits on the teal accent fill, use ON_ACCENT (fixed
-        # near-black) so the icon stays readable in both themes.
-        on_accent_color = QColor(ON_ACCENT)
+        on_accent_color = QColor(colors["on_accent"])
         self._repeat_icons = {
             # REPEAT_OFF has a neutral (grey) background — use theme text color.
             REPEAT_OFF: _make_icon(_draw_repeat, icon_color),

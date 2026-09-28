@@ -28,9 +28,9 @@ from src.ui.control_primitives import (
 from src.ui.styles import (
     DARK_COLORS,
     LIGHT_COLORS,
-    RECORDING_COLOR,
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
+    recording_color,
 )
 
 MAX_RECORDING_TAKES = 2
@@ -78,6 +78,7 @@ class StemRow(QWidget):
 
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         icon_color = QColor(colors["text"])
+        on_accent = QColor(colors["on_accent"])
         display = stem_name.capitalize()
 
         self._mute_btn = QPushButton()
@@ -85,7 +86,9 @@ class StemRow(QWidget):
         self._mute_btn.setCheckable(True)
         self._mute_btn.setFixedSize(28, 28)
         self._mute_btn.setIcon(
-            make_toggle_icon(draw_mute, icon_color, STEM_ICON_SIZE)
+            make_toggle_icon(
+                draw_mute, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
+            )
         )
         self._mute_btn.setIconSize(QSize(STEM_ICON_SIZE, STEM_ICON_SIZE))
         self._mute_btn.setToolTip(f"Mute {display}")
@@ -98,7 +101,9 @@ class StemRow(QWidget):
         self._solo_btn.setCheckable(True)
         self._solo_btn.setFixedSize(28, 28)
         self._solo_btn.setIcon(
-            make_toggle_icon(draw_solo, icon_color, STEM_ICON_SIZE)
+            make_toggle_icon(
+                draw_solo, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
+            )
         )
         self._solo_btn.setIconSize(QSize(STEM_ICON_SIZE, STEM_ICON_SIZE))
         self._solo_btn.setToolTip(f"Solo {display}")
@@ -182,18 +187,27 @@ class StemRow(QWidget):
         )
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         icon_color = QColor(colors["text"])
-        self._mute_btn.setIcon(
-            make_toggle_icon(draw_mute, icon_color, STEM_ICON_SIZE)
-        )
-        self._solo_btn.setIcon(
-            make_toggle_icon(draw_solo, icon_color, STEM_ICON_SIZE)
-        )
+        on_accent = QColor(colors["on_accent"])
+        self._mute_btn.setIcon(make_toggle_icon(
+            draw_mute, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
+        ))
+        self._solo_btn.setIcon(make_toggle_icon(
+            draw_solo, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
+        ))
 
 
 class RecordingStemRow(StemRow):
     """A recording take row with nudge and delete controls."""
 
     delete_requested = Signal(str)
+
+    def apply_stem_theme(self, theme: str) -> None:
+        """Takes are not in the stem palette: label them in recording rose
+        (the base lookup by name turned them grey on a theme switch)."""
+        super().apply_stem_theme(theme)
+        self._label.setStyleSheet(
+            f"color: {recording_color(theme)}; font-weight: bold;"
+        )
 
     def __init__(
         self,
@@ -205,9 +219,7 @@ class RecordingStemRow(StemRow):
     ) -> None:
         super().__init__(stem_name, player, theme, parent)
         self._label.setText(display_name)
-        self._label.setStyleSheet(
-            f"color: {RECORDING_COLOR}; font-weight: bold;"
-        )
+        self.apply_stem_theme(theme)
 
         self._nudge_spin = QSpinBox()
         self._nudge_spin.setRange(-200, 200)

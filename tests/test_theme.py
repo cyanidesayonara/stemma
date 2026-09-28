@@ -43,10 +43,18 @@ class TestThemeColors:
                      "text", "accent", "red", "item_hover"}
         assert required.issubset(LIGHT_COLORS.keys())
 
-    def test_accent_color_shared(self):
-        """Both themes share the brand teal accent."""
-        assert DARK_COLORS["accent"] == LIGHT_COLORS["accent"]
+    def test_accent_is_the_brand_teal_per_theme(self):
+        """Dark uses the brand teal; light a deeper teal of the same hue,
+        since #4fb8b8 is only about 2:1 on the light background."""
+        import colorsys
+
         assert DARK_COLORS["accent"] == "#4fb8b8"
+
+        def hue(hex_color):
+            r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            return colorsys.rgb_to_hls(r, g, b)[0]
+
+        assert abs(hue(LIGHT_COLORS["accent"]) - hue("#4fb8b8")) < 0.01
 
     def test_dark_and_light_differ(self):
         """Dark and light themes have different base/text colors."""

@@ -3,7 +3,7 @@
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
-from src.ui.styles import CONFIDENCE_COLORS, DARK_COLORS, LIGHT_COLORS
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS, badge_html
 
 
 class SongInfoBar(QWidget):
@@ -96,9 +96,6 @@ class SongInfoBar(QWidget):
                 return True
         return super().eventFilter(watched, event)
 
-    def confidence_color(self, level: str) -> str:
-        return CONFIDENCE_COLORS[self._theme].get(level, "")
-
     def badge_style(self) -> str:
         colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
         return (
@@ -114,17 +111,9 @@ class SongInfoBar(QWidget):
         self,
         label: str,
         value: str,
-        color: str = "",
+        confidence: str = "",
     ) -> str:
-        colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
-        text_color = colors["text"]
-        value_color = color or text_color
-        if label:
-            return (
-                f'<span style="color:{text_color};">{label} </span>'
-                f'<span style="color:{value_color};">{value}</span>'
-            )
-        return f'<span style="color:{value_color};">{value}</span>'
+        return badge_html(self._theme, label, value, confidence)
 
     def set_key(
         self,
@@ -145,10 +134,9 @@ class SongInfoBar(QWidget):
             )
             return
 
-        color = self.confidence_color(confidence) if confidence else ""
         shown = key if effective_key is None else f"{key} → {effective_key}"
         self._key_label.setStyleSheet(self.badge_style())
-        self._key_label.setText(self.badge_html("Key:", shown, color))
+        self._key_label.setText(self.badge_html("Key:", shown, confidence))
         tooltip = [f"Detected key: {key}"]
         if effective_key is not None:
             tooltip.append(
@@ -172,10 +160,9 @@ class SongInfoBar(QWidget):
             )
             return
 
-        color = self.confidence_color(confidence) if confidence else ""
         self._detected_bpm_label.setStyleSheet(self.badge_style())
         self._detected_bpm_label.setText(
-            self.badge_html("Tempo:", text, color)
+            self.badge_html("Tempo:", text, confidence)
         )
         tooltip = [f"Detected tempo: {text}"]
         if confidence:
