@@ -345,6 +345,10 @@ class EditSongDialog(QDialog):
         form.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        form.setVerticalSpacing(8)
         self._title_edit = QLineEdit(song.title)
         form.addRow("Title:", self._title_edit)
         self._artist_edit = QLineEdit(song.artist)

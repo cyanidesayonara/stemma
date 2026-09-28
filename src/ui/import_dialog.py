@@ -129,22 +129,24 @@ class _DownloadWorker(QThread):
             self.error.emit(describe_error(exc, "YouTube download failed"))
 
 
+def _rule() -> QFrame:
+    """A 1 px horizontal line in the divider colour."""
+    line = QFrame()
+    line.setObjectName("divider-line")
+    line.setFixedHeight(1)
+    return line
+
 
 def _or_divider() -> QWidget:
     """A rule with "or" in the middle, between the two ways to import."""
     row = QWidget()
     box = QHBoxLayout(row)
     box.setContentsMargins(0, 2, 0, 2)
-    for part in ("line", "label", "line"):
-        if part == "label":
-            label = QLabel("or")
-            label.setObjectName("subtle-label")
-            box.addWidget(label)
-            continue
-        line = QFrame()
-        line.setObjectName("divider-line")
-        line.setFixedHeight(1)
-        box.addWidget(line, 1)
+    label = QLabel("or")
+    label.setObjectName("subtle-label")
+    box.addWidget(_rule(), 1)
+    box.addWidget(label)
+    box.addWidget(_rule(), 1)
     return row
 
 
@@ -224,12 +226,15 @@ class ImportDialog(QDialog):
         url_row.addWidget(self._url_edit)
 
         self._fetch_btn = QPushButton("Fetch")
-        self._fetch_btn.setFixedWidth(60)
         self._fetch_btn.setToolTip("Fetch title and artist from YouTube")
         self._fetch_btn.clicked.connect(self._on_fetch_metadata)
         self._fetch_btn.setEnabled(False)
         url_row.addWidget(self._fetch_btn)
-        form.addRow("YouTube URL:", url_row)
+        # A row that is a layout gets no buddy from addRow, so link the
+        # label by hand: screen readers name the field from it.
+        url_label = QLabel("YouTube &URL:")
+        url_label.setBuddy(self._url_edit)
+        form.addRow(url_label, url_row)
 
         form.addRow(_or_divider())
 
@@ -240,26 +245,34 @@ class ImportDialog(QDialog):
         self._path_edit.setReadOnly(True)
         file_row.addWidget(self._path_edit)
 
-        browse_btn = QPushButton("Browse...")
+        browse_btn = QPushButton("Browse…")
         browse_btn.clicked.connect(self._on_browse)
         file_row.addWidget(browse_btn)
-        form.addRow("Audio file:", file_row)
+        # Both source rows end at the same x.
+        button_width = max(
+            browse_btn.sizeHint().width(), self._fetch_btn.sizeHint().width()
+        )
+        browse_btn.setFixedWidth(button_width)
+        self._fetch_btn.setFixedWidth(button_width)
+        file_label = QLabel("Audio &file:")
+        file_label.setBuddy(self._path_edit)
+        form.addRow(file_label, file_row)
 
         # A little air between the source and the song's details.
         form.addItem(QSpacerItem(0, 1))
 
         # -- Metadata fields --
         self._title_edit = QLineEdit()
-        form.addRow("Title:", self._title_edit)
+        form.addRow("&Title:", self._title_edit)
         self._artist_edit = QLineEdit()
-        form.addRow("Artist:", self._artist_edit)
+        form.addRow("&Artist:", self._artist_edit)
 
         # -- Model selection --
         self._model_combo = QComboBox()
         for model_key, label in SEPARATION_MODELS:
             self._model_combo.addItem(label, model_key)
         self._model_combo.setToolTip(SEPARATION_MODEL_TOOLTIP)
-        form.addRow("Model:", self._model_combo)
+        form.addRow("&Model:", self._model_combo)
 
         # -- Progress --
         self._progress_bar = QProgressBar()

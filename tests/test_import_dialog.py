@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMessageBox
 
 from src.app_settings import open_settings
 from src.library import SongLibrary
-from src.model_manager import ModelDownloader
+from src.model_manager import ModelDownloader, ModelManager
 from src.ui.import_dialog import (
     ImportDialog,
     _MetadataWorker,
@@ -300,24 +300,68 @@ class TestDefaultModel:
             settings.remove("import/default_model")
 
 
-def test_import_fields_share_one_label_column(qapp, tmp_path):
-    """Separate rows started each field after its own label's width."""
-    from unittest.mock import MagicMock
-
-    from src.library import SongLibrary
-    from src.model_manager import ModelManager
-    from src.ui.import_dialog import ImportDialog
-
+def _form_dialog(tmp_path):
     data = str(tmp_path / "data")
-    dlg = ImportDialog(
+    return ImportDialog(
         SongLibrary(data), ModelManager(data_dir=data),
         separation_queue=MagicMock(),
     )
-    dlg.show()
-    qapp.processEvents()
-    fields = (dlg._url_edit, dlg._path_edit, dlg._title_edit,
-              dlg._artist_edit, dlg._model_combo)
-    xs = {field.mapTo(dlg, field.rect().topLeft()).x() for field in fields}
-    assert len(xs) == 1
-    dlg.close()
-    dlg.deleteLater()
+
+
+def test_import_fields_share_one_label_column(qapp, tmp_path):
+    """Separate rows started each field after its own label's width."""
+    dlg = _form_dialog(tmp_path)
+    try:
+        dlg.show()
+        qapp.processEvents()
+        fields = (dlg._url_edit, dlg._path_edit, dlg._title_edit,
+                  dlg._artist_edit, dlg._model_combo)
+        xs = {field.mapTo(dlg, field.rect().topLeft()).x() for field in fields}
+        assert len(xs) == 1
+        # Both source rows also end at the same x.
+        rights = {
+            field.mapTo(dlg, field.rect().topRight()).x()
+            for field in (dlg._url_edit, dlg._path_edit)
+        }
+        assert len(rights) == 1
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_every_import_field_has_a_label(qapp, tmp_path):
+    """Screen readers name a field from its buddy label; the URL and file
+    rows are layouts, which addRow cannot link."""
+    from PySide6.QtWidgets import QLabel
+
+    dlg = _form_dialog(tmp_path)
+    try:
+        buddies = {
+            label.buddy() for label in dlg.findChildren(QLabel)
+            if label.buddy() is not None
+        }
+        for field in (dlg._url_edit, dlg._path_edit, dlg._title_edit,
+                      dlg._artist_edit, dlg._model_combo):
+            assert field in buddies
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_edit_song_fields_line_up(qapp):
+    from src.ui.library_panel import EditSongDialog
+
+    song = MagicMock()
+    song.title, song.artist = "Makes-Shift Salvation", "HoliznaCC0"
+    dlg = EditSongDialog(song)
+    try:
+        dlg.show()
+        qapp.processEvents()
+        xs = {
+            field.mapTo(dlg, field.rect().topLeft()).x()
+            for field in (dlg._title_edit, dlg._artist_edit)
+        }
+        assert len(xs) == 1
+    finally:
+        dlg.close()
+        dlg.deleteLater()
