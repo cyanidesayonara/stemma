@@ -7,6 +7,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 
 import glob
 import json
+import logging
 import math
 import os
 import random
@@ -78,6 +79,8 @@ from src.ui.player_controls import (
 )
 from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
 from src.version import __version__
+
+logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
@@ -242,6 +245,18 @@ class MainWindow(QMainWindow):
     def _on_playback_failed(self, message: str) -> None:
         """Show a dialog when the player cannot open an output stream."""
         QMessageBox.warning(self, "Playback", message)
+
+    def _on_recording_unavailable(self, message: str) -> None:
+        """Recording could not start; the player disarmed it and played on."""
+        record_btn = self._player_controls._record_btn
+        record_btn.blockSignals(True)
+        record_btn.setChecked(False)
+        record_btn.blockSignals(False)
+        QMessageBox.warning(self, "Recording", message)
+
+    def _on_recording_save_failed(self, message: str) -> None:
+        """A take could not be written; the player kept it in memory."""
+        QMessageBox.warning(self, "Recording", message)
 
     def _setup_ui(self) -> None:
         """Build the main window layout."""
@@ -1179,21 +1194,55 @@ class MainWindow(QMainWindow):
             self._intro_pending = False
             QTimer.singleShot(300, self._player_controls.play_intro_animation)
 
+    def _confirm_quit(self) -> bool:
+        """Ask before quitting discards a separation; True to quit."""
+        pending = self._separation_queue.pending_count
+        if pending == 0:
+            return True
+        if pending == 1:
+            text = "A song is still separating. Quit and discard it?"
+        else:
+            text = (
+                f"{pending} songs are still separating or waiting. "
+                "Quit and discard them?"
+            )
+        reply = QMessageBox.question(
+            self,
+            "Quit stemma",
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
+        if not self._confirm_quit():
+            event.ignore()
+            return
         try:
             self._save_session()
         except Exception:
             pass  # Never prevent the window from closing.
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
+        # Close visibly now: the waits below can take a while when a
+        # separation stage is slow to notice the cancel.
+        self.hide()
 
         if self._export_worker is not None and self._export_worker.isRunning():
             self._export_worker.wait(5000)
 
         # Abort any background separation; interrupted songs are pruned
         # from the library on the next launch (no stems on disk).
-        self._separation_queue.shutdown(5000)
+        if not self._separation_queue.shutdown():
+            # A stage that cannot be interrupted (for example a stuck
+            # DirectML call) would otherwise leave a hidden process running
+            # forever. Settings and the session are already saved.
+            logger.warning("Separation did not stop on close; ending stemma.")
+            self._settings.sync()
+            logging.shutdown()
+            os._exit(0)
         self._shutdown_stem_loads()
 
         self._suppress_recording_reload = True
@@ -1254,7 +1303,13 @@ class MainWindow(QMainWindow):
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.playback_failed.connect(self._on_playback_failed)
+        self._player.recording_unavailable.connect(
+            self._on_recording_unavailable
+        )
         self._player.recording_saved.connect(self._on_recording_saved)
+        self._player.recording_save_failed.connect(
+            self._on_recording_save_failed
+        )
 
     # ------------------------------------------------------------------
     # Slots

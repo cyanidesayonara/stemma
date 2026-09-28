@@ -57,6 +57,9 @@ class SeparationQueue(QObject):
         self._pending: deque[SeparationJob] = deque()
         self._active_job: SeparationJob | None = None
         self._active_worker = None  # SeparatorWorker | MdxSeparatorWorker
+        # A worker that ignored the cancel past shutdown's limit. Held so
+        # the running QThread is never destroyed mid-run.
+        self._stuck_worker = None
 
     # ------------------------------------------------------------------
     # State
@@ -105,20 +108,31 @@ class SeparationQueue(QObject):
             if self._active_worker is not None:
                 self._active_worker.cancel()
 
-    def shutdown(self, wait_ms: int = 5000) -> None:
+    def shutdown(self, wait_ms: int = 30000) -> bool:
         """Cancel the active job and drop queued ones (app close).
 
         Interrupted songs keep the pending marker their import wrote and
         get no completion marker, so the startup prune removes them on the
         next launch.
+
+        Returns True once the worker has stopped. The inference and write
+        stages check the cancel flag, but loading, resampling, session
+        creation, and a single ONNX run cannot be interrupted, and a stuck
+        DirectML call may never return. After *wait_ms* this returns False
+        and keeps the worker referenced (dropping the last reference to a
+        running QThread destroys it mid-run and crashes the process); the
+        caller should then end the process.
         """
         self._pending.clear()
         worker = self._active_worker
-        if worker is not None:
-            worker.cancel()
-            self._detach_active()
-            if worker.isRunning():
-                worker.wait(wait_ms)
+        if worker is None:
+            return True
+        worker.cancel()
+        self._detach_active()
+        if not worker.isRunning() or worker.wait(wait_ms):
+            return True
+        self._stuck_worker = worker
+        return False
 
     # ------------------------------------------------------------------
     # Internals
