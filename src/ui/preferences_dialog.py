@@ -39,6 +39,7 @@ from src.app_settings import (
     read_sync_recording_pitch,
 )
 from src.data_paths import platform_user_data_dir
+from src.import_messages import describe_error
 from src.version import __version__
 
 
@@ -278,7 +279,8 @@ class PreferencesDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "Preferences",
-                    f"Cannot use this data folder (create or write failed):\n{exc}",
+                    "Cannot use this data folder:\n"
+                    f"{describe_error(exc, 'Data folder check failed')}",
                 )
                 return
 

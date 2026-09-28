@@ -12,6 +12,7 @@ import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
 from src.click_utils import generate_count_in
+from src.import_messages import describe_error
 from src.separator import SAMPLE_RATE
 
 # Supported output formats by extension.
@@ -325,4 +326,4 @@ class ExportWorker(QThread):
             )
             self.finished.emit(self.output_path)
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "Export failed"))
