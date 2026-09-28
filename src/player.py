@@ -24,6 +24,7 @@ import librosa
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
 from src.click_utils import generate_click
+from src.import_messages import describe_error
 from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 
 
@@ -94,7 +95,7 @@ class StemLoadWorker(QThread):
             stems, sample_rate = read_stem_files(self._stem_paths)
             self.completed.emit(stems, sample_rate)
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "Could not load song"))
 
 
 def next_take_number(song_dir: str) -> int:

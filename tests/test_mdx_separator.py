@@ -18,6 +18,7 @@ import pytest
 import soundfile as sf
 from PySide6.QtWidgets import QApplication
 
+from src.import_messages import MSG_DOWNLOAD_DAMAGED
 from src.mdx_separator import (
     MDX_MODELS,
     MdxSeparatorWorker,
@@ -290,7 +291,7 @@ class TestDownloadVerification:
         ):
             dl.run()
 
-        assert errors and "SHA-256" in errors[0]
+        assert errors == [MSG_DOWNLOAD_DAMAGED]
         assert not os.path.exists(tmp_path / "m.onnx")
         assert not os.path.exists(tmp_path / "m.onnx.part")
 

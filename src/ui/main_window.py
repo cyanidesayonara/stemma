@@ -57,6 +57,7 @@ from src.app_settings import (
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
+from src.import_messages import format_import_error
 from src.library import SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
@@ -1445,7 +1446,9 @@ class MainWindow(QMainWindow):
         self._library_panel.clear_selection()
         self.setWindowTitle("stemma")
         QMessageBox.warning(
-            self, "Load Song", f"Could not load this song:\n{message}",
+            self,
+            "Load Song",
+            f"Could not load this song:\n{format_import_error(message)}",
         )
 
     @Slot()
@@ -1847,7 +1850,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Import failed",
-                f"Stem separation did not complete:\n{message}",
+                "Stem separation did not complete:\n"
+                f"{format_import_error(message)}",
             )
 
     # ------------------------------------------------------------------
@@ -2066,4 +2070,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Export", f"Mix successfully exported to {path}")
 
     def _on_export_error(self, err: str) -> None:
-        QMessageBox.critical(self, "Export Error", f"Failed to export mix:\n{err}")
+        QMessageBox.critical(
+            self,
+            "Export Error",
+            f"Failed to export mix:\n{format_import_error(err)}",
+        )
