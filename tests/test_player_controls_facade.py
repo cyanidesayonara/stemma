@@ -200,7 +200,8 @@ def test_practice_cards_compose_in_intended_order(controls):
         controls._key_label,
         controls._chord_label,
         controls._detected_bpm_label,
-        # Card: Loop and Trainer
+        # Card: Loop and Trainer (trainer progress beside the card title)
+        controls._trainer_status,
         controls._loop_a_btn,
         controls._loop_b_btn,
         controls._loop_toggle_btn,
@@ -208,7 +209,6 @@ def test_practice_cards_compose_in_intended_order(controls):
         # Loop points are tags on the waveform markers, not a card label.
         controls._trainer_check,
         controls._trainer_start_combo,
-        controls._trainer_status,
         # Card: Speed and Pitch
         controls._speed_label,
         controls._speed_combo,
@@ -385,9 +385,9 @@ def test_cards_rewrap_when_their_content_grows(qapp):
     QApplication.processEvents()
     assert rack.cards_side_by_side is True
 
-    # Any label in a card can grow; the trainer status is one that still
-    # lives there (the loop points moved onto the waveform markers).
-    rack._trainer_status.setText("0.75x -> 1.0x at 0.85x, next at 0.90x")
+    # Any label in a card can grow; the speed status is one that still
+    # lives there (loop points and trainer progress moved out).
+    rack._speed_status.setText("rendering 0.85x, then 0.90x, then 0.95x...")
     # The size change travels label -> card frame -> card -> rack as a chain
     # of posted layout requests, which takes more than one event-loop pass.
     for _ in range(3):
@@ -611,3 +611,22 @@ def test_setting_a_loop_does_not_widen_the_loop_card():
 
     assert rack._loop_card.minimumSizeHint().width() == before
     assert rack.cards_side_by_side is True
+
+
+def test_trainer_progress_does_not_widen_the_loop_card():
+    """"now 0.75x" in the card wrapped every card at 1366 px (#211 review);
+    it sits beside the card title now, which has room to spare."""
+    host, rack = _hosted_rack()
+    host.resize(rack._required_card_width() + 10, 400)
+    QApplication.processEvents()
+    before = rack._loop_card.minimumSizeHint().width()
+
+    for text in ("(set an A-B loop)", "now 0.75x", "at 1.0x"):
+        rack._trainer_status.setText(text)
+        for _ in range(3):
+            QApplication.processEvents()
+        assert rack._loop_card.minimumSizeHint().width() == before
+        assert rack.cards_side_by_side is True
+
+    host.close()
+    host.deleteLater()

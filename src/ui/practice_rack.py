@@ -40,11 +40,15 @@ from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS
 
 
-def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
+def _make_card(
+    title: str, status: QLabel | None = None,
+) -> tuple[QWidget, QVBoxLayout]:
     """Build a titled card and return it with the layout for its contents.
 
     Matches the label-above-frame idiom StemMixer uses for Stems and
     Recordings, so the practice controls read as part of the same interface.
+    *status*, if given, sits beside the title: the title row has room to
+    spare, where a status inside the card widened it and wrapped the cards.
     """
     container = QWidget()
     outer = QVBoxLayout(container)
@@ -53,7 +57,15 @@ def _make_card(title: str) -> tuple[QWidget, QVBoxLayout]:
 
     label = QLabel(title)
     label.setObjectName("title-label")
-    outer.addWidget(label)
+    if status is None:
+        outer.addWidget(label)
+    else:
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(label)
+        title_row.addWidget(status)
+        title_row.addStretch()
+        outer.addLayout(title_row)
 
     frame = QFrame()
     frame.setObjectName("card-frame")
@@ -183,7 +195,14 @@ class PracticeRack(QWidget):
         self._cards_grid.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(self._cards_grid)
 
-        loop_card, loop_body = _make_card("Loop and Trainer")
+        # The Loop Trainer's progress ("now 0.75x"). Inside the card it
+        # widened the Loop card enough to wrap every card at 1366 px, and
+        # the waveform lanes shrank to slivers (#211 review).
+        self._trainer_status = QLabel("")
+        self._trainer_status.setObjectName("subtle-label")
+        loop_card, loop_body = _make_card(
+            "Loop and Trainer", status=self._trainer_status,
+        )
         self._loop_card = loop_card
 
         loop_row = QHBoxLayout()
@@ -292,10 +311,6 @@ class PracticeRack(QWidget):
         )
         trainer.addWidget(self._trainer_start_combo)
         trainer.addWidget(QLabel("→ 1.0x"))
-
-        self._trainer_status = QLabel("")
-        self._trainer_status.setObjectName("subtle-label")
-        trainer.addWidget(self._trainer_status)
         trainer.addStretch()
         loop_body.addLayout(trainer)
 

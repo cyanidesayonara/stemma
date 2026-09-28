@@ -550,3 +550,14 @@ def test_loaded_listing_has_no_wrapped_lines() -> None:
                  *data.whats_new.values()):
         for paragraph in text.split("\n\n"):
             assert "\n" not in paragraph
+
+
+def test_validate_listing_needs_five_screenshots(tmp_path: Path) -> None:
+    """The v3.0 set has five shots; the gate was still at three."""
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    for index in range(4):
+        (shots / f"{index}.png").write_bytes(_minimal_png(1920, 1080))
+    with pytest.raises(ValidationError) as exc:
+        validate_listing(_data(), version="2.6.0", screenshots_dir=shots)
+    assert any("need >= 5 screenshots" in err for err in exc.value.errors)
