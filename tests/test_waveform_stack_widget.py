@@ -344,12 +344,12 @@ def test_solo_vocals_snapshot(app):
 
 
 @pytest.mark.parametrize("name, label", [
-    ("vocals", "vocals"),
-    ("guitar", "guitar"),
-    ("recording_take1", "take 1"),
-    ("recording_take2", "take 2"),
-    ("recording_take01", "take 1"),
-    ("recording_take", "record"),
+    ("vocals", "Vocals"),
+    ("guitar", "Guitar"),
+    ("recording_take1", "Take 1"),
+    ("recording_take2", "Take 2"),
+    ("recording_take01", "Take 1"),
+    ("recording_take", "Record"),
 ])
 def test_lane_labels_name_takes_like_the_mixer(name, label):
     """Take lanes showed the first six letters of the internal stem name,
