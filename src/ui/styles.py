@@ -1,7 +1,9 @@
 """Theme stylesheets for stemma.
 
 Provides dark (Catppuccin Mocha) and light (Catppuccin Latte) themes.
-Both themes share the brand accent teal (#4fb8b8).
+The dark theme uses the brand teal (#4fb8b8) as its accent; the light
+theme uses a deeper teal of the same hue, because #4fb8b8 is only about
+2:1 against a light background (WCAG asks 3:1 for controls and focus).
 Applied globally via QApplication.setStyleSheet().
 """
 
@@ -14,29 +16,32 @@ STEM_COLORS_DARK = {
     "other": "#4fb8b8",    # Teal (brand accent)
 }
 
+# The brand hues darkened until stem names reach 4.5:1 on the light
+# mantle (the lanes use them too, which also keeps them from washing out).
 STEM_COLORS_LIGHT = {
-    "vocals": "#9878b8",   # Darker purple for light background
-    "drums": "#c89040",    # Darker gold for light background
-    "bass": "#c0707e",     # Darker rose for light background
-    "guitar": "#3d8b3d",   # Darker green
-    "piano": "#3d7fb0",    # Darker blue
-    "other": "#3da8a8",    # Darker teal
+    "vocals": "#765d8f",   # Purple
+    "drums": "#87612b",    # Gold
+    "bass": "#955762",     # Rose
+    "guitar": "#347734",   # Green
+    "piano": "#346d97",    # Blue
+    "other": "#297272",    # Teal
 }
 
 STEM_COLORS = STEM_COLORS_DARK
 
 RECORDING_COLOR = "#d4849a"  # Brand rose -- used for recording stem rows
+RECORDING_COLOR_LIGHT = "#955762"  # The same rose at 4.5:1 on light
 
-# Foreground color to use on top of the teal accent fill. Fixed near-black
-# (Catppuccin Mocha "crust") — readable on #4fb8b8 in both dark and light
-# themes. Do NOT bind this to theme.base: in light mode base is near-white
-# and becomes invisible on teal.
+
+def recording_color(theme: str) -> str:
+    """The recording rose, readable on the given theme's background."""
+    return RECORDING_COLOR_LIGHT if theme == "light" else RECORDING_COLOR
+
+
+# Foreground on the dark theme's accent fill: near-black (Catppuccin Mocha
+# "crust") on #4fb8b8. Per theme it is colors["on_accent"]; this constant
+# is the dark value, for code that builds widgets before a theme is applied.
 ON_ACCENT = "#11111b"
-
-CONFIDENCE_COLORS = {
-    "dark": {"high": "#a6e3a1", "medium": "#f9e2af", "low": "#f38ba8"},
-    "light": {"high": "#40a02b", "medium": "#df8e1d", "low": "#d20f39"},
-}
 
 DARK_COLORS = {
     "base": "#1e1e2e",
@@ -45,6 +50,9 @@ DARK_COLORS = {
     "surface1": "#45475a",
     "surface2": "#585b70",
     "text": "#cdd6f4",
+    # Secondary text that still carries information: 4.5:1 or better.
+    "subtext": "#a6adc8",
+    "recording": RECORDING_COLOR,
     "accent": "#4fb8b8",
     "on_accent": ON_ACCENT,
     "red": "#f38ba8",
@@ -58,11 +66,34 @@ LIGHT_COLORS = {
     "surface1": "#bcc0cc",
     "surface2": "#9ca0b0",
     "text": "#4c4f69",
-    "accent": "#4fb8b8",
-    "on_accent": ON_ACCENT,
+    "subtext": "#5c5f77",
+    "recording": RECORDING_COLOR_LIGHT,
+    "accent": "#1f7373",
+    "on_accent": "#ffffff",
     "red": "#d20f39",
     "item_hover": "#dce0e8",
 }
+
+
+def badge_html(theme: str, label: str, value: str,
+               confidence: str = "") -> str:
+    """Rich text for a key/chord/tempo readout: label and value in the
+    text colour, with a "?" after a low-confidence value. For a
+    transposed key ("C major → D major") the mark goes on the detected key,
+    which is what the confidence is about.
+
+    Confidence used to colour the value green, amber, or red, and red read
+    as an error; the light-theme amber and green were also under 3:1.
+    """
+    colors = LIGHT_COLORS if theme == "light" else DARK_COLORS
+    text = colors["text"]
+    if confidence == "low" and value not in ("", "--"):
+        detected, arrow, rest = value.partition(" → ")
+        value = f"{detected}?{arrow}{rest}"
+    value_html = f'<span style="color:{text};">{value}</span>'
+    if label:
+        return f'<span style="color:{text};">{label} </span>' + value_html
+    return value_html
 
 
 def _generate_stylesheet(c: dict[str, str]) -> str:
@@ -135,7 +166,7 @@ QLabel#title-label {{
 }}
 
 QLabel#subtle-label {{
-    color: {c["surface2"]};
+    color: {c["subtext"]};
 }}
 
 QPushButton {{
@@ -448,7 +479,7 @@ QWidget#transport-bar {{
 }}
 
 QLabel#copyright {{
-    color: {c["surface1"]};
+    color: {c["subtext"]};
     font-size: 9pt;
     border: none;
 }}
