@@ -60,3 +60,20 @@ def test_committed_art_matches_the_generator(images):
                             abs(a.green() - b.green()),
                             abs(a.blue() - b.blue()))
         assert worst <= 8, name
+
+
+@pytest.mark.parametrize("name", ["poster_720x1080.png", "box_1080x1080.png"])
+def test_brand_art_is_centred_on_its_ink(images, name):
+    """The logo's viewBox has uneven padding; centring on it put the art
+    visibly left of centre."""
+    image = images[name]
+    left, _top, right, _bottom = art.ink_bounds(image)
+    assert abs(left - (image.width() - 1 - right)) <= 2
+
+
+@pytest.mark.parametrize("name", ["poster_720x1080.png", "box_1080x1080.png"])
+def test_brand_art_stays_out_of_the_bottom_third(images, name):
+    """The Store may lay text over the bottom third of these images."""
+    image = images[name]
+    _left, _top, _right, bottom = art.ink_bounds(image)
+    assert bottom < image.height() * 2 / 3
