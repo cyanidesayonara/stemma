@@ -21,6 +21,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -338,18 +339,21 @@ class EditSongDialog(QDialog):
         self._song = song
 
         layout = QVBoxLayout(self)
-
-        title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("Title:"))
+        # A form keeps both fields starting at the same x; the labels
+        # have different widths.
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        form.setVerticalSpacing(8)
         self._title_edit = QLineEdit(song.title)
-        title_row.addWidget(self._title_edit)
-        layout.addLayout(title_row)
-
-        artist_row = QHBoxLayout()
-        artist_row.addWidget(QLabel("Artist:"))
+        form.addRow("Title:", self._title_edit)
         self._artist_edit = QLineEdit(song.artist)
-        artist_row.addWidget(self._artist_edit)
-        layout.addLayout(artist_row)
+        form.addRow("Artist:", self._artist_edit)
+        layout.addLayout(form)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
