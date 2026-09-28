@@ -3,10 +3,11 @@
 import math
 import re
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
+    QPushButton,
     QSpinBox,
     QStyle,
     QStyleOptionSpinBox,
@@ -32,6 +33,33 @@ _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
 DISABLED_ICON_OPACITY = 0.35
 
 
+class _KeepFixedSize(QObject):
+    """Put a button's fixed size back after the stylesheet re-polishes it.
+
+    The global ``QPushButton { min-height: 24px }`` rule sets the minimum
+    height to 30 px on every polish, overriding ``setFixedSize``, so the
+    "square" icon buttons were 36x30 and 28x30 (#209 review).
+    """
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.StyleChange:
+            size = obj.property("fixed_size")
+            if size is not None:
+                obj.setFixedSize(size)
+        return False
+
+
+_KEEP_FIXED_SIZE = _KeepFixedSize()
+
+
+def fix_button_size(button: QPushButton, width: int, height: int) -> None:
+    """Give *button* a fixed size the stylesheet cannot override."""
+    button.setProperty("fixed_size", QSize(width, height))
+    button.installEventFilter(_KEEP_FIXED_SIZE)
+    button.ensurePolished()
+    button.setFixedSize(width, height)
+
+
 def make_display_combo(combo: QComboBox) -> None:
     """Make an editable combo act as a read-only display."""
     combo.setEditable(True)
@@ -47,6 +75,35 @@ def make_display_combo(combo: QComboBox) -> None:
             original_mouse(event)
 
     line_edit.mousePressEvent = open_on_click
+
+
+def add_volume_presets(combo: QComboBox) -> None:
+    """Fill a volume display combo with 200% down to 0%, showing 100%.
+
+    Highest first, like a fader, so Down lowers the volume: Down selects
+    the next item in the list.
+    """
+    for value in range(200, -1, -20):
+        combo.addItem(f"{value}%", value)
+    show_preset_value(combo, 100)
+
+
+def show_preset_value(combo: QComboBox, value: int) -> None:
+    """Show *value* in a preset display combo, with the index in step.
+
+    Setting only the edit text left the index at whatever was last picked
+    (the first item, at startup), so Up, Down, or the wheel jumped from
+    that stale preset: 100% plus Down gave 20% (#209 review). Between
+    presets the nearest one is selected, so a step goes to a neighbour.
+    """
+    presets = [combo.itemData(i) for i in range(combo.count())]
+    if presets:
+        nearest = min(range(len(presets)),
+                      key=lambda i: abs(presets[i] - value))
+        combo.blockSignals(True)
+        combo.setCurrentIndex(nearest)
+        combo.blockSignals(False)
+    combo.setEditText(f"{value}%")
 
 
 def fit_spinbox_width(spin: QSpinBox, sample: str | None = None) -> None:

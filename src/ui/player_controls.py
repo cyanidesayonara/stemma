@@ -37,6 +37,7 @@ from src.qt_signal_utils import safe_disconnect
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.control_primitives import format_time as _format_time
+from src.ui.control_primitives import show_preset_value
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.stem_mixer import RecordingStemRow, StemMixer, StemRow
@@ -673,11 +674,6 @@ class PlayerControls(QWidget):
     def _on_stop(self) -> None:
         self._player.stop()
 
-    def _on_master_volume_slider_changed(self, value: int) -> None:
-        """Slider moved -- mirror the new value into the player and label."""
-        self._player.set_master_volume(value / 100.0)
-        self._master_volume_combo.setEditText(f"{value}%")
-
     def set_master_volume(self, volume: float) -> None:
         """Set master volume from any entry point (shortcut, session load).
 
@@ -689,7 +685,7 @@ class PlayerControls(QWidget):
             self._master_volume_slider.blockSignals(True)
             self._master_volume_slider.setValue(value)
             self._master_volume_slider.blockSignals(False)
-        self._master_volume_combo.setEditText(f"{value}%")
+        show_preset_value(self._master_volume_combo, value)
         self._player.set_master_volume(value / 100.0)
 
     def _on_waveform_seek(self, seconds: float) -> None:
@@ -1856,9 +1852,7 @@ class PlayerControls(QWidget):
     def _on_metronome_vol_changed(self, value: int) -> None:
         """User moved the metronome volume slider."""
         self._player.set_metronome_volume(value / 100.0)
-        self._metronome_vol_combo.blockSignals(True)
-        self._metronome_vol_combo.setEditText(f"{value}%")
-        self._metronome_vol_combo.blockSignals(False)
+        show_preset_value(self._metronome_vol_combo, value)
 
     def _on_metronome_vol_combo(self, index: int) -> None:
         """User selected a metronome volume preset."""
@@ -1884,13 +1878,7 @@ class PlayerControls(QWidget):
         self._metronome_vol_slider.blockSignals(True)
         self._metronome_vol_slider.setValue(round(volume * 100))
         self._metronome_vol_slider.blockSignals(False)
-        val_pct = round(volume * 100)
-        text = f"{val_pct}%"
-        idx = self._metronome_vol_combo.findText(text)
-        if idx >= 0:
-            self._metronome_vol_combo.blockSignals(True)
-            self._metronome_vol_combo.setCurrentIndex(idx)
-            self._metronome_vol_combo.blockSignals(False)
+        show_preset_value(self._metronome_vol_combo, round(volume * 100))
         self._player.set_metronome_volume(volume)
 
         self._metronome_toggle.blockSignals(True)

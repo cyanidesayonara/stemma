@@ -206,3 +206,47 @@ class TestStemRowLayout:
         with deterministic_render_state():
             row = StemRow("vocals", player)
         assert_widget_snapshot(row, "stem_row_simplified", width=420, height=36)
+
+
+def test_preset_combo_index_follows_the_value(app):
+    from PySide6.QtWidgets import QComboBox
+
+    from src.ui.control_primitives import make_display_combo, show_preset_value
+
+    combo = QComboBox()
+    make_display_combo(combo)
+    for value in range(0, 201, 20):
+        combo.addItem(f"{value}%", value)
+    show_preset_value(combo, 100)
+    assert combo.currentData() == 100 and combo.currentText() == "100%"
+    show_preset_value(combo, 67)  # between presets: nearest is selected
+    assert combo.currentData() == 60 and combo.currentText() == "67%"
+
+
+@pytest.mark.parametrize("size", [28, 30, 36])
+def test_fixed_buttons_stay_square_under_the_stylesheet(app, size):
+    """QPushButton's min-height rule made every icon button 30 px tall."""
+    from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+
+    from src.ui.control_primitives import fix_button_size
+    from src.ui.styles import get_stylesheet
+
+    previous = app.styleSheet()
+    try:
+        app.setStyleSheet(get_stylesheet("dark"))
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        button = QPushButton()
+        button.setObjectName("icon-btn")
+        fix_button_size(button, size, size)
+        layout.addWidget(button)
+        host.show()
+        app.processEvents()
+        assert button.size().width() == button.size().height() == size
+        app.setStyleSheet(get_stylesheet("light"))  # theme switch re-polishes
+        app.processEvents()
+        assert button.size().width() == button.size().height() == size
+        host.close()
+        host.deleteLater()
+    finally:
+        app.setStyleSheet(previous)
