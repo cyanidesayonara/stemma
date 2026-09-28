@@ -47,6 +47,13 @@ def recording_color(theme: str) -> str:
 # is the dark value, for code that builds widgets before a theme is applied.
 ON_ACCENT = "#11111b"
 
+# Square icon-button sizes the stylesheet enforces (see fix_button_size).
+# The global QPushButton min-height rule would otherwise make every icon
+# button 30 px tall whatever setFixedSize asked for (#209 review).
+ICON_BUTTON_SIZES = (28, 30, 36)
+# padding 2px + border 1px on each side of #icon-btn.
+_ICON_BUTTON_CHROME = 6
+
 DARK_COLORS = {
     "base": "#1e1e2e",
     "mantle": "#181825",
@@ -106,6 +113,22 @@ def _chevron_path(theme: str, direction: str = "down") -> str:
         app_root(), "assets", "icons", f"chevron_{direction}_{theme}.svg"
     )
     return path.replace("\\", "/")
+
+
+def _icon_button_size_rules() -> str:
+    """One rule per square icon-button size, keyed on its "squareSize" property.
+
+    Qt's min/max sizes are content-box, so the chrome is subtracted.
+    """
+    rules = []
+    for size in ICON_BUTTON_SIZES:
+        inner = size - _ICON_BUTTON_CHROME
+        rules.append(
+            f'QPushButton#icon-btn[squareSize="{size}"] {{ '
+            f"min-width: {inner}px; max-width: {inner}px; "
+            f"min-height: {inner}px; max-height: {inner}px; }}"
+        )
+    return "\n".join(rules)
 
 
 def _generate_stylesheet(
@@ -258,6 +281,8 @@ QPushButton#icon-btn:disabled {{
     background-color: {c["base"]};
     border-color: {c["surface0"]};
 }}
+
+{_icon_button_size_rules()}
 
 QSlider::groove:horizontal {{
     background: {c["surface0"]};

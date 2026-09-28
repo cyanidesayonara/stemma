@@ -290,3 +290,11 @@ def test_repeat_stays_square_after_it_turns_on(app, tmp_path):
         panel.deleteLater()
     finally:
         app.setStyleSheet(previous)
+
+
+def test_named_button_sizes_have_stylesheet_rules():
+    from src.ui import control_primitives as cp
+    from src.ui.styles import ICON_BUTTON_SIZES
+
+    for size in (cp.TRANSPORT_BUTTON, cp.ROW_BUTTON, cp.COMPACT_BUTTON):
+        assert size in ICON_BUTTON_SIZES

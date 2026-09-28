@@ -3,7 +3,7 @@
 import math
 import re
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QStyleOptionSpinBox,
 )
 
-from src.ui.styles import ON_ACCENT
+from src.ui.styles import ICON_BUTTON_SIZES, ON_ACCENT
 
 ICON_SIZE = 24
 STEM_ICON_SIZE = 18
@@ -34,30 +34,16 @@ _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
 DISABLED_ICON_OPACITY = 0.35
 
 
-class _KeepFixedSize(QObject):
-    """Put a button's fixed size back after the stylesheet re-polishes it.
-
-    The global ``QPushButton { min-height: 24px }`` rule sets the minimum
-    height to 30 px on every polish, overriding ``setFixedSize``, so the
-    "square" icon buttons were 36x30 and 28x30 (#209 review).
-    """
-
-    def eventFilter(self, obj, event):  # noqa: N802
-        if event.type() == QEvent.Type.StyleChange:
-            size = obj.property("fixed_size")
-            if size is not None:
-                obj.setFixedSize(size)
-        return False
-
-
-_KEEP_FIXED_SIZE = _KeepFixedSize()
-
-
 def fix_button_size(button: QPushButton, width: int, height: int) -> None:
-    """Give *button* a fixed size the stylesheet cannot override."""
-    button.setProperty("fixed_size", QSize(width, height))
-    button.installEventFilter(_KEEP_FIXED_SIZE)
-    button.ensurePolished()
+    """Give *button* a fixed size the stylesheet cannot override.
+
+    Square sizes listed in ``ICON_BUTTON_SIZES`` are also pinned by a
+    stylesheet rule on the button's "squareSize" property, so no polish (theme
+    switch, or a dynamic-property repolish) can bring back the 30 px
+    minimum of the global QPushButton rule.
+    """
+    if width == height and width in ICON_BUTTON_SIZES:
+        button.setProperty("squareSize", str(width))
     button.setFixedSize(width, height)
 
 
@@ -79,18 +65,10 @@ def make_display_combo(combo: QComboBox) -> None:
 
 
 def repolish(widget: QWidget) -> None:
-    """Re-apply the stylesheet after a dynamic property changed.
-
-    ``unpolish``/``polish`` sends no StyleChange event, so a button sized
-    with ``fix_button_size`` would fall back to the 30 px stylesheet
-    minimum; its fixed size is put back here (#209 re-review).
-    """
+    """Re-apply the stylesheet after a dynamic property changed."""
     style = widget.style()
     style.unpolish(widget)
     style.polish(widget)
-    size = widget.property("fixed_size")
-    if size is not None:
-        widget.setFixedSize(size)
     widget.update()
 
 
