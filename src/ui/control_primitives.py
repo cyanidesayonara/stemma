@@ -164,7 +164,9 @@ def draw_mute(painter: QPainter, size: int) -> None:
     margin = size * 0.18
     body_width = size * 0.16
     body_height = size * 0.28
-    body_x = margin
+    # Speaker sits left and the X starts clear of the cone: at 18 px the
+    # X's rounded cap used to touch the cone (#186).
+    body_x = size * 0.10
     body_y = size / 2.0 - body_height / 2.0
     painter.drawRect(QRectF(body_x, body_y, body_width, body_height))
     cone_x = body_x + body_width
@@ -178,14 +180,14 @@ def draw_mute(painter: QPainter, size: int) -> None:
     pen = QPen(painter.brush().color(), size * 0.09)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
-    x_start = size * 0.58
+    x_start, x_end = size * 0.62, size * 0.88
     painter.drawLine(
         QPointF(x_start, margin * 1.3),
-        QPointF(size - margin, size - margin * 1.3),
+        QPointF(x_end, size - margin * 1.3),
     )
     painter.drawLine(
         QPointF(x_start, size - margin * 1.3),
-        QPointF(size - margin, margin * 1.3),
+        QPointF(x_end, margin * 1.3),
     )
     painter.setPen(Qt.PenStyle.NoPen)
 

@@ -416,7 +416,9 @@ class LibraryPanel(QWidget):
         layout.addWidget(header)
 
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search songs...")
+        self._search_edit.setPlaceholderText("Search songs…")
+        # A placeholder is not a name for screen readers.
+        self._search_edit.setAccessibleName("Search songs")
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.textChanged.connect(self._apply_filter)
         layout.addWidget(self._search_edit)
@@ -432,6 +434,13 @@ class LibraryPanel(QWidget):
         )
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._list)
+
+        # A search with no match used to leave a blank list.
+        self._no_match_label = QLabel("No songs match your search")
+        self._no_match_label.setObjectName("subtle-label")
+        self._no_match_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._no_match_label.setVisible(False)
+        layout.addWidget(self._no_match_label)
 
         # -- Playback control bar --
         ctrl_bar = QHBoxLayout()
@@ -680,6 +689,10 @@ class LibraryPanel(QWidget):
         for i in range(self._list.count()):
             item = self._list.item(i)
             item.setHidden(query not in item.text().lower())
+        visible = any(
+            not self._list.item(i).isHidden() for i in range(self._list.count())
+        )
+        self._no_match_label.setVisible(bool(query) and not visible)
         # Disable Remove if the current selection is hidden or gone.
         current = self._list.currentItem()
         if current is None or current.isHidden():

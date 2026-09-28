@@ -53,6 +53,26 @@ def _combo_int_data(combo: QComboBox, default: int = -1) -> int:
         return default
 
 
+def _align_form_labels(forms) -> None:
+    """Give every form's labels the widest label's width.
+
+    Each group has its own QFormLayout, so the fields started at a
+    different x in every group (#186).
+    """
+    labels = [
+        form.itemAt(row, QFormLayout.ItemRole.LabelRole).widget()
+        for form in forms
+        for row in range(form.rowCount())
+        if form.itemAt(row, QFormLayout.ItemRole.LabelRole) is not None
+    ]
+    labels = [label for label in labels if label is not None]
+    width = max((label.sizeHint().width() for label in labels), default=0)
+    for label in labels:
+        label.setMinimumWidth(width)
+    for form in forms:
+        form.setVerticalSpacing(8)
+
+
 class PreferencesDialog(QDialog):
     """Modal preferences editor backed by ``QSettings``."""
 
@@ -152,6 +172,8 @@ class PreferencesDialog(QDialog):
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+
+        _align_form_labels((dform, aform, iform, eform, pform, sform))
 
         layout = QVBoxLayout(self)
         layout.addWidget(data_box)

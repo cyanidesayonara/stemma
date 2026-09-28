@@ -128,7 +128,7 @@ class PracticeRack(QWidget):
         self._count_in_toggle.setToolTip(
             "Toggle count-in before playback (C)"
         )
-        self._count_in_toggle.setAccessibleName("Toggle count-in")
+        self._count_in_toggle.setAccessibleName("Count-in")
         self._count_in_toggle.toggled.connect(
             self.count_in_toggled.emit
         )
@@ -196,7 +196,7 @@ class PracticeRack(QWidget):
         self._loop_toggle_button = QPushButton("Loop")
         self._loop_toggle_button.setCheckable(True)
         self._loop_toggle_button.setToolTip("Toggle A-B loop (L)")
-        self._loop_toggle_button.setAccessibleName("Toggle loop")
+        self._loop_toggle_button.setAccessibleName("A-B loop")
         self._loop_toggle_button.toggled.connect(self.loop_toggled.emit)
         loop_row.addWidget(self._loop_toggle_button)
 
@@ -306,7 +306,7 @@ class PracticeRack(QWidget):
         )
         self._metronome_toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         self._metronome_toggle.setToolTip("Toggle metronome (M)")
-        self._metronome_toggle.setAccessibleName("Toggle metronome")
+        self._metronome_toggle.setAccessibleName("Metronome")
         self._metronome_toggle.toggled.connect(
             self.metronome_toggled.emit
         )
