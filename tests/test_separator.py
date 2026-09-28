@@ -111,7 +111,8 @@ class TestSeparatorWorkerLoadAudio:
         )
         audio, sr = worker._load_audio()
         assert audio.ndim == 2
-        assert audio.shape[0] == 1  # mono -> 1 channel
+        # The model is stereo-only; mono is duplicated at load time.
+        assert audio.shape[0] == 2
 
 
 class TestSeparatorResample:

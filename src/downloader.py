@@ -7,6 +7,7 @@ for subsequent import into the stemma library.
 import os
 import re
 import shutil
+import sys
 from typing import Callable
 
 import imageio_ffmpeg
@@ -44,6 +45,23 @@ def _get_ffmpeg_exe() -> str | None:
 def check_ffmpeg() -> bool:
     """Return True if ffmpeg is available (bundled or on PATH)."""
     return _get_ffmpeg_exe() is not None
+
+
+def ffmpeg_missing_message() -> str:
+    """Explain a missing ffmpeg in terms that fit how stemma was installed.
+
+    Installed builds (Store, installer) ship ffmpeg inside the app, so
+    telling their users to edit PATH is wrong: the fix is a reinstall.
+    """
+    if getattr(sys, "frozen", False):
+        return (
+            "YouTube import needs ffmpeg, which comes with stemma, but it "
+            "could not be found. Reinstall stemma to restore it."
+        )
+    return (
+        "YouTube import needs ffmpeg. Install the imageio-ffmpeg package "
+        "or put ffmpeg on your PATH."
+    )
 
 
 def is_supported_url(text: str) -> bool:

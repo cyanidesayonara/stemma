@@ -25,7 +25,8 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
-from src.import_messages import describe_error
+from src.import_messages import ModelDamagedError, describe_error
+from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session
 from src.separation_state import (
     EXPECTED_STEMS,
@@ -53,6 +54,31 @@ SEGMENT_SECONDS = SEGMENT_SAMPLES / SAMPLE_RATE  # ~7.8 seconds
 
 
 _ORT_OVERHEAD_BYTES = 400 * 1024 * 1024  # ~400 MB for ORT session + runtime
+
+# Gain for folding the extra channels of a multichannel file into both
+# sides, as a center channel is folded into stereo (-3 dB).
+_FOLD_GAIN = 0.7071
+
+
+def to_stereo(audio: np.ndarray) -> np.ndarray:
+    """Return *audio* (channels, samples) as two channels.
+
+    Mono is duplicated. For more than two channels (such as a 5.1 WAV),
+    the first two are kept as left and right and the average of the rest
+    is folded into both at -3 dB, then the result is scaled down only if
+    that would clip. The models are stereo-only.
+    """
+    channels = audio.shape[0]
+    if channels == 2:
+        return audio
+    if channels == 1:
+        return np.repeat(audio, 2, axis=0)
+    rest = audio[2:].mean(axis=0) * _FOLD_GAIN
+    stereo = np.stack([audio[0] + rest, audio[1] + rest])
+    peak = float(np.max(np.abs(stereo))) if stereo.size else 0.0
+    if peak > 1.0:
+        stereo /= peak
+    return stereo.astype(np.float32, copy=False)
 
 
 def estimate_separation_memory(
@@ -209,7 +235,7 @@ class SeparatorWorker(QThread):
 
         audio, sr = sf.read(self.input_path, always_2d=True)
         # Transpose to (channels, samples) for consistency with Demucs.
-        return audio.T.astype(np.float32), sr
+        return to_stereo(audio.T.astype(np.float32)), sr
 
     def _resample(self, audio: np.ndarray, sr: int) -> np.ndarray:
         """Resample audio to SAMPLE_RATE if necessary.
@@ -233,8 +259,16 @@ class SeparatorWorker(QThread):
         return np.stack(resampled_channels)
 
     def _create_session(self):
-        """Create a DML-first ONNX session with CPU fallback."""
-        return create_onnx_session(self.model_path)
+        """Create a DML-first ONNX session with CPU fallback.
+
+        A model that exists but will not load is deleted, so the next
+        import asks to download a fresh copy instead of failing again.
+        """
+        try:
+            return create_onnx_session(self.model_path)
+        except ModelDamagedError:
+            discard_model_files(self.model_path)
+            raise
 
     def _run_segmented_inference(
         self, audio: np.ndarray, session

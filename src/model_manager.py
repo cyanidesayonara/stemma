@@ -42,6 +42,24 @@ _MODEL_FILES = {
     "htdemucs": ("htdemucs.onnx", "htdemucs.onnx.data"),
     "htdemucs_6s": ("htdemucs_6s.onnx", "htdemucs_6s.onnx.data"),
 }
+# Exact byte sizes of every artifact, from the pinned upstream revisions.
+# They feed the download consent prompt, byte-weighted progress, and the
+# cache check: a file of the wrong size is treated as not downloaded.
+MODEL_FILE_SIZES = {
+    "htdemucs.onnx": 2_399_845,
+    "htdemucs.onnx.data": 177_995_776,
+    "htdemucs_6s.onnx": 2_390_444,
+    "htdemucs_6s.onnx.data": 117_178_368,
+    "UVR-MDX-NET-Inst_HQ_3.onnx": 66_759_214,
+    "beat_this.onnx": 83_077_778,
+}
+# What the user sees instead of file names.
+MODEL_LABELS = {
+    "htdemucs": "4-stem model",
+    "htdemucs_6s": "6-stem model",
+    "mdx_inst_hq3": "2-stem model",
+    "beat_this": "beat detection model",
+}
 _MODEL_SHA256 = {
     "htdemucs.onnx": (
         "be6fa125c457bc4fcdba43b0506270b5ed2113872748e8163de817f418db17bb"
@@ -211,78 +229,104 @@ class ModelDownloader(QThread):
             self._current_partial_path = None
             raise
 
-    def _download(self) -> None:
-        """Core download logic."""
-        os.makedirs(self.models_dir, exist_ok=True)
-
-        # Single-file direct-URL mode (used for beat_this.onnx).
+    def _plan(self) -> list[tuple[str, str, str | None, int]]:
+        """Return ``(file_name, url, sha256, size)`` for each artifact."""
         if self._url and self._file_name:
-            dest = os.path.join(self.models_dir, self._file_name)
-            if os.path.exists(dest):
-                self.progress.emit(100, f"{self._file_name} already cached.")
-                self.download_complete.emit(dest)
-                return
-            self.progress.emit(0, f"Downloading {self._file_name}...")
-
-            def _on_progress(downloaded: int, total: int) -> None:
-                if total > 0:
-                    pct = min(99, int(downloaded * 100 / total))
-                    self.progress.emit(
-                        pct, f"Downloading {self._file_name}... {pct}%",
-                    )
-
-            self._download_file(
-                self._url,
-                dest,
-                _on_progress,
-                expected_sha256=self._expected_sha256,
+            return [(
+                self._file_name, self._url, self._expected_sha256,
+                MODEL_FILE_SIZES.get(self._file_name, 0),
+            )]
+        return [
+            (
+                name, f"{_REPO_URL}/{name}", _MODEL_SHA256[name],
+                MODEL_FILE_SIZES.get(name, 0),
             )
-            self.progress.emit(100, "Download complete.")
-            self.download_complete.emit(dest)
+            for name in _MODEL_FILES[self.model_name]
+        ]
+
+    def _download(self) -> None:
+        """Download every missing artifact, reporting progress by bytes."""
+        os.makedirs(self.models_dir, exist_ok=True)
+        plan = self._plan()
+        primary_path = os.path.join(self.models_dir, plan[0][0])
+        label = model_label(self.model_name)
+
+        pending = []
+        for name, url, sha, size in plan:
+            dest = os.path.join(self.models_dir, name)
+            if _is_complete(dest, size):
+                continue
+            if os.path.exists(dest):
+                # A truncated or stale copy would never load; replace it.
+                os.remove(dest)
+            pending.append((dest, url, sha, size))
+
+        if not pending:
+            self.progress.emit(100, f"The {label} is already downloaded.")
+            self.download_complete.emit(primary_path)
             return
 
-        artifacts = _MODEL_FILES[self.model_name]
-        n = len(artifacts)
-        primary_path = os.path.join(self.models_dir, artifacts[0])
+        # Weight progress by bytes so the tiny graph file does not count
+        # as half of a two-file model.
+        known_total = sum(size for _dest, _url, _sha, size in pending)
+        done_before = 0
+        self.progress.emit(0, f"Downloading the {label}...")
 
-        for i, file_name in enumerate(artifacts):
-            dest_path = os.path.join(self.models_dir, file_name)
-            if os.path.exists(dest_path):
-                self.progress.emit(
-                    int((i + 1) / n * 100),
-                    f"{file_name} already cached.",
-                )
-                continue
-
-            url = f"{_REPO_URL}/{file_name}"
-            self.progress.emit(
-                int(i / n * 100),
-                f"Downloading {file_name}...",
-            )
-
+        for dest, url, sha, size in pending:
             def _on_progress(
-                downloaded: int, total: int, idx: int = i, name: str = file_name,
+                downloaded: int, total: int, before: int = done_before,
             ) -> None:
-                if total > 0:
-                    file_pct = min(100.0, downloaded * 100.0 / total)
-                    overall = min(99, int(((idx + file_pct / 100.0) / n) * 100))
-                    self.progress.emit(
-                        overall, f"Downloading {name}... {int(file_pct)}%",
-                    )
-                else:
-                    self.progress.emit(
-                        int(idx / n * 100), f"Downloading {name}...",
-                    )
+                overall_total = known_total or total
+                if overall_total <= 0:
+                    self.progress.emit(0, f"Downloading the {label}...")
+                    return
+                done = before + downloaded
+                pct = min(99, int(done * 100 / overall_total))
+                self.progress.emit(
+                    pct,
+                    f"Downloading the {label}... "
+                    f"{_mb(done)} of {_mb(overall_total)} MB",
+                )
 
-            self._download_file(
-                url,
-                dest_path,
-                _on_progress,
-                expected_sha256=_MODEL_SHA256[file_name],
-            )
+            self._download_file(url, dest, _on_progress, expected_sha256=sha)
+            done_before += size or os.path.getsize(dest)
 
         self.progress.emit(100, "Download complete.")
         self.download_complete.emit(primary_path)
+
+
+def _mb(num_bytes: int) -> int:
+    """Whole megabytes (MiB), rounded, for progress and consent text."""
+    return int(round(num_bytes / (1024 * 1024)))
+
+
+def _is_complete(path: str, expected_size: int) -> bool:
+    """True if *path* exists and, when its size is known, matches it."""
+    try:
+        actual = os.path.getsize(path)
+    except OSError:
+        return False
+    return expected_size <= 0 or actual == expected_size
+
+
+def model_label(model_key: str) -> str:
+    """Return the user-facing name of a model, such as "4-stem model"."""
+    return MODEL_LABELS.get(model_key, "separation model")
+
+
+def discard_model_files(model_path: str) -> None:
+    """Delete a damaged model and its external weights, if present.
+
+    HTDemucs keeps its weights next to the graph as ``<name>.data``; both
+    go so the next import downloads a fresh, verified copy.
+    """
+    for path in (model_path, model_path + ".data"):
+        try:
+            os.remove(path)
+        except OSError:
+            # Missing already, or held open elsewhere: the next load finds
+            # it damaged again and retries the delete.
+            pass
 
 
 class ModelManager(QObject):
@@ -302,18 +346,49 @@ class ModelManager(QObject):
         self.models_dir = os.path.join(data_dir, "models")
         self._active_downloader: ModelDownloader | None = None
 
+    def _files_for(self, model_key: str) -> tuple[str, ...]:
+        """Return the artifact file names that make up *model_key*."""
+        if model_key in _MODEL_FILES:
+            return _MODEL_FILES[model_key]
+        if model_key == "beat_this":
+            return (_BEAT_THIS_FILE,)
+        # Deferred: mdx_separator imports this module (discard_model_files).
+        from src.mdx_separator import MDX_MODELS
+
+        return (MDX_MODELS[model_key]["file"],)
+
+    def _is_key_downloaded(self, model_key: str) -> bool:
+        return all(
+            _is_complete(
+                os.path.join(self.models_dir, name),
+                MODEL_FILE_SIZES.get(name, 0),
+            )
+            for name in self._files_for(model_key)
+        )
+
+    def download_size_bytes(self, model_key: str) -> int:
+        """Bytes still to download for *model_key* (0 when cached)."""
+        return sum(
+            MODEL_FILE_SIZES.get(name, 0)
+            for name in self._files_for(model_key)
+            if not _is_complete(
+                os.path.join(self.models_dir, name),
+                MODEL_FILE_SIZES.get(name, 0),
+            )
+        )
+
+    def download_size_mb(self, model_key: str) -> int:
+        """Megabytes still to download for *model_key*, rounded."""
+        return _mb(self.download_size_bytes(model_key))
+
     def model_path(self, is_6_stem: bool = False) -> str:
         """Return the expected local path to the ONNX graph (``.onnx``) file."""
         name = "htdemucs_6s" if is_6_stem else "htdemucs"
         return os.path.join(self.models_dir, _MODEL_FILES[name][0])
 
     def is_model_downloaded(self, is_6_stem: bool = False) -> bool:
-        """Check whether all ONNX artifacts (graph + external data) exist."""
-        name = "htdemucs_6s" if is_6_stem else "htdemucs"
-        return all(
-            os.path.isfile(os.path.join(self.models_dir, f))
-            for f in _MODEL_FILES[name]
-        )
+        """Check that every ONNX artifact exists with its expected size."""
+        return self._is_key_downloaded("htdemucs_6s" if is_6_stem else "htdemucs")
 
     def download_model(self, is_6_stem: bool = False) -> ModelDownloader:
         """Create and return a ModelDownloader thread (not yet started).
@@ -326,13 +401,11 @@ class ModelManager(QObject):
 
     def mdx_model_path(self, model_key: str = "mdx_inst_hq3") -> str:
         """Return the expected local path to an MDX-Net ONNX model."""
-        from src.mdx_separator import MDX_MODELS
-
-        return os.path.join(self.models_dir, MDX_MODELS[model_key]["file"])
+        return os.path.join(self.models_dir, self._files_for(model_key)[0])
 
     def is_mdx_model_downloaded(self, model_key: str = "mdx_inst_hq3") -> bool:
-        """Check whether the MDX-Net model exists on disk."""
-        return os.path.isfile(self.mdx_model_path(model_key))
+        """Check that the MDX-Net model exists with its expected size."""
+        return self._is_key_downloaded(model_key)
 
     def download_mdx_model(
         self, model_key: str = "mdx_inst_hq3",
@@ -342,6 +415,7 @@ class ModelManager(QObject):
         The downloader verifies the file against the reviewed SHA-256
         before atomically publishing it.
         """
+        # Deferred: mdx_separator imports this module (discard_model_files).
         from src.mdx_separator import MDX_MODELS
 
         info = MDX_MODELS[model_key]
@@ -357,8 +431,8 @@ class ModelManager(QObject):
         return os.path.join(self.models_dir, _BEAT_THIS_FILE)
 
     def is_beat_model_downloaded(self) -> bool:
-        """Check whether the beat_this ONNX model exists on disk."""
-        return os.path.isfile(self.beat_model_path())
+        """Check that the beat_this model exists with its expected size."""
+        return self._is_key_downloaded("beat_this")
 
     def download_beat_model(self) -> ModelDownloader:
         """Create a downloader for the beat_this ONNX model (not started)."""

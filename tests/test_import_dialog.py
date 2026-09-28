@@ -10,9 +10,11 @@ These tests verify that:
 import os
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
+import soundfile as sf
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMessageBox
 
 from src.app_settings import open_settings
 from src.library import SongLibrary
@@ -22,6 +24,11 @@ from src.ui.import_dialog import (
     _MetadataWorker,
     _DownloadWorker,
 )
+
+
+def _write_wav(path) -> None:
+    """Write a short real audio file; the dialog now checks it opens."""
+    sf.write(str(path), np.zeros((4410, 2), dtype=np.float32), 44100)
 
 
 @pytest.fixture(scope="session")
@@ -149,7 +156,7 @@ class TestModelDownloadWhenMissing:
 
     def test_starts_model_download_when_onnx_missing(self, dialog, tmp_path):
         dummy = tmp_path / "track.mp3"
-        dummy.write_bytes(b"\x00\x00")
+        _write_wav(dummy)
 
         song = MagicMock()
         song.id = "songabc"
@@ -164,7 +171,12 @@ class TestModelDownloadWhenMissing:
         # model artifacts exist; report them missing.
         dialog._model_manager.is_model_downloaded.return_value = False
 
-        dialog._start_local_import(str(dummy))
+        # The first download of a model now asks first; agree.
+        with patch(
+            "src.ui.import_dialog.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            dialog._start_local_import(str(dummy))
 
         dialog._model_manager.download_model.assert_called_once()
         md.start.assert_called_once()
@@ -176,16 +188,18 @@ class TestLocalImportErrorHandling:
     def test_add_song_failure_calls_on_error(self, dialog, tmp_path):
         """If library.add_song raises, dialog should show error."""
         dialog._library.add_song.side_effect = OSError("disk full")
-        dialog._button_box.setEnabled(False)
+        dialog._set_busy(True)
 
         # Create a dummy file so the path is valid.
         dummy = tmp_path / "song.mp3"
-        dummy.write_bytes(b"fake audio")
+        _write_wav(dummy)
 
         dialog._start_local_import(str(dummy))
 
-        # The dialog should have recovered: error shown, buttons re-enabled.
-        assert dialog._button_box.isEnabled()
+        # The dialog should have recovered: error shown, import re-enabled.
+        assert dialog._button_box.button(
+            QDialogButtonBox.StandardButton.Ok
+        ).isEnabled()
         text = dialog._status_label.text()
         assert "Error" in text
         assert "space" in text.lower() or "disk" in text.lower()
@@ -196,7 +210,7 @@ class TestDemucsMemoryConfirmation:
 
     def test_decline_leaves_no_row_and_retry_adds_once(self, qapp, tmp_path):
         source = tmp_path / "song.wav"
-        source.write_bytes(b"audio")
+        _write_wav(source)
         library = SongLibrary(str(tmp_path / "data"))
         manager = MagicMock()
         manager.model_path.return_value = str(tmp_path / "htdemucs.onnx")
@@ -228,7 +242,7 @@ class TestDemucsMemoryConfirmation:
 
     def test_mdx_import_does_not_prompt_for_demucs_ram(self, qapp, tmp_path):
         source = tmp_path / "song.wav"
-        source.write_bytes(b"audio")
+        _write_wav(source)
         library = SongLibrary(str(tmp_path / "data"))
         manager = MagicMock()
         manager.mdx_model_path.return_value = str(tmp_path / "mdx.onnx")

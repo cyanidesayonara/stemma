@@ -16,6 +16,8 @@ import librosa
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
+from src.import_messages import ModelDamagedError
+from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session
 
 
@@ -578,6 +580,13 @@ def detect_bpm_and_key(
         try:
             beat_times, downbeat_times, bpm = _detect_beats_onnx(
                 mono, sample_rate, model_path,
+            )
+        except ModelDamagedError:
+            # Delete it so the next detection downloads a fresh copy,
+            # rather than falling back to librosa on every song.
+            discard_model_files(model_path)
+            beat_times, downbeat_times, bpm = _detect_beats_librosa(
+                mono, sample_rate,
             )
         except Exception:
             beat_times, downbeat_times, bpm = _detect_beats_librosa(

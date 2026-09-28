@@ -58,7 +58,7 @@ from src.app_settings import (
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
-from src.import_messages import format_import_error
+from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
 from src.library import SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
@@ -167,6 +167,9 @@ class MainWindow(QMainWindow):
         self._session_restore_song_id: str | None = None
         self._pending_restore_callbacks: list[tuple[object, object]] = []
         self._suppress_recording_reload = False
+        # Queued jobs all fail once the damaged model is deleted; offer the
+        # fresh import once, not once per song.
+        self._damaged_prompt_open = False
 
         self._settings = open_settings()
         self._theme = self._settings.value("theme", "dark")
@@ -1910,6 +1913,26 @@ class MainWindow(QMainWindow):
             except KeyError:
                 pass
         self._library_panel.refresh()
+        # A damaged model was deleted by the worker; offer a fresh import,
+        # which asks to download it again.
+        if format_import_error(message) == MSG_MODEL_DAMAGED:
+            if self._damaged_prompt_open:
+                return
+            self._damaged_prompt_open = True
+            try:
+                reply = QMessageBox.question(
+                    self,
+                    "Import failed",
+                    f"{MSG_MODEL_DAMAGED}\n\nImport a song now?",
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._on_import()
+            finally:
+                self._damaged_prompt_open = False
+            return
         # User-initiated cancellations need no dialog; real failures do.
         if "cancelled" not in message.lower():
             QMessageBox.warning(
