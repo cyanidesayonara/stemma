@@ -434,9 +434,14 @@ class MainWindow(QMainWindow):
         w = QApplication.focusWidget()
         if w is None:
             return False
-        return isinstance(w, (QLineEdit, QAbstractSpinBox)) or (
-            isinstance(w, QComboBox) and w.isEditable()
-        )
+        # The volume preset combos are editable only to show values between
+        # presets; their line edit is read-only and takes no typing, so
+        # Space and the letter shortcuts keep working after a pick.
+        if isinstance(w, QLineEdit):
+            return not w.isReadOnly()
+        if isinstance(w, QComboBox):
+            return w.isEditable() and not w.lineEdit().isReadOnly()
+        return isinstance(w, QAbstractSpinBox)
 
     def _make_mute_toggler(self, stem_name: str):
         """Return a callable that toggles mute for a stem and updates the UI."""

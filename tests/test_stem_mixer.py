@@ -206,3 +206,95 @@ class TestStemRowLayout:
         with deterministic_render_state():
             row = StemRow("vocals", player)
         assert_widget_snapshot(row, "stem_row_simplified", width=420, height=36)
+
+
+def test_preset_combo_index_follows_the_value(app):
+    from PySide6.QtWidgets import QComboBox
+
+    from src.ui.control_primitives import (
+        add_volume_presets,
+        make_display_combo,
+        show_preset_value,
+    )
+
+    combo = QComboBox()
+    make_display_combo(combo)
+    add_volume_presets(combo)
+    # Highest first, so Down (the next item) lowers the volume.
+    assert combo.itemData(0) == 200 and combo.itemData(combo.count() - 1) == 0
+    assert combo.currentData() == 100
+    show_preset_value(combo, 100)
+    assert combo.currentData() == 100 and combo.currentText() == "100%"
+    show_preset_value(combo, 67)  # between presets: nearest is selected
+    assert combo.currentData() == 60 and combo.currentText() == "67%"
+
+
+@pytest.mark.parametrize("size", [28, 30, 36])
+def test_fixed_buttons_stay_square_under_the_stylesheet(app, size):
+    """QPushButton's min-height rule made every icon button 30 px tall."""
+    from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+
+    from src.ui.control_primitives import fix_button_size
+    from src.ui.styles import get_stylesheet
+
+    previous = app.styleSheet()
+    try:
+        app.setStyleSheet(get_stylesheet("dark"))
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        button = QPushButton()
+        button.setObjectName("icon-btn")
+        fix_button_size(button, size, size)
+        layout.addWidget(button)
+        host.show()
+        app.processEvents()
+        assert button.size().width() == button.size().height() == size
+        app.setStyleSheet(get_stylesheet("light"))  # theme switch re-polishes
+        app.processEvents()
+        assert button.size().width() == button.size().height() == size
+        host.close()
+        host.deleteLater()
+    finally:
+        app.setStyleSheet(previous)
+
+
+def test_metronome_combo_follows_its_slider(app):
+    """Only the edit text followed the slider, so Down jumped from 100%."""
+    from src.ui.practice_rack import PracticeRack
+    from src.ui.song_info_bar import SongInfoBar
+
+    rack = PracticeRack(SongInfoBar())
+    rack._metronome_volume_slider.setValue(40)
+    assert rack._metronome_volume_combo.currentData() == 40
+    assert rack._metronome_volume_combo.currentText() == "40%"
+
+
+def test_repeat_stays_square_after_it_turns_on(app, tmp_path):
+    """Its active-state repolish restored the 30 px stylesheet minimum."""
+    from src.library import SongLibrary
+    from src.ui.library_panel import LibraryPanel
+    from src.ui.styles import get_stylesheet
+
+    previous = app.styleSheet()
+    try:
+        app.setStyleSheet(get_stylesheet("dark"))
+        panel = LibraryPanel(SongLibrary(str(tmp_path)))
+        panel.show()
+        app.processEvents()
+        button = panel._repeat_btn
+        for _ in range(3):  # off -> all -> one -> off
+            button.click()
+            app.processEvents()
+            assert button.width() == button.height() == 28
+        panel.close()
+        panel.deleteLater()
+    finally:
+        app.setStyleSheet(previous)
+
+
+def test_named_button_sizes_have_stylesheet_rules():
+    from src.ui import control_primitives as cp
+    from src.ui.styles import ICON_BUTTON_SIZES
+
+    for size in (cp.TRANSPORT_BUTTON, cp.ROW_BUTTON, cp.COMPACT_BUTTON):
+        assert size in ICON_BUTTON_SIZES

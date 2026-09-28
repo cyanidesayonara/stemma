@@ -8,6 +8,7 @@ of the practice content.
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -17,13 +18,19 @@ from PySide6.QtWidgets import (
 )
 
 from src.ui.control_primitives import (
+    add_volume_presets,
+    fix_button_size,
+    COMPACT_BUTTON,
     ICON_SIZE,
+    TRANSPORT_BUTTON,
     draw_pause,
     draw_play,
     draw_record,
     draw_stop,
+    make_display_combo,
     make_icon,
     make_toggle_icon,
+    show_preset_value,
 )
 from src.ui.styles import DARK_COLORS
 
@@ -64,7 +71,7 @@ class TransportBar(QWidget):
         self._play_button.setObjectName("icon-btn")
         self._play_button.setIcon(self._play_icon)
         self._play_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self._play_button.setFixedSize(36, 36)
+        fix_button_size(self._play_button, TRANSPORT_BUTTON, TRANSPORT_BUTTON)
         self._play_button.setToolTip("Play / Pause (Space)")
         self._play_button.setAccessibleName("Play")
         self._play_button.clicked.connect(self.play_pause_requested.emit)
@@ -74,7 +81,7 @@ class TransportBar(QWidget):
         self._stop_button.setObjectName("icon-btn")
         self._stop_button.setIcon(self._stop_icon)
         self._stop_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self._stop_button.setFixedSize(36, 36)
+        fix_button_size(self._stop_button, TRANSPORT_BUTTON, TRANSPORT_BUTTON)
         self._stop_button.setToolTip("Stop (S)")
         self._stop_button.setAccessibleName("Stop")
         self._stop_button.clicked.connect(self.stop_requested.emit)
@@ -85,7 +92,7 @@ class TransportBar(QWidget):
         self._record_button.setObjectName("icon-btn")
         self._record_button.setIcon(self._record_icon)
         self._record_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self._record_button.setFixedSize(36, 36)
+        fix_button_size(self._record_button, TRANSPORT_BUTTON, TRANSPORT_BUTTON)
         self._record_button.setCheckable(True)
         self._record_button.setToolTip("Arm recording (R)")
         self._record_button.setAccessibleName("Record")
@@ -113,11 +120,16 @@ class TransportBar(QWidget):
         )
         transport.addWidget(self._master_volume_slider)
 
-        self._master_volume_label = QLabel("100%")
-        self._master_volume_label.setFixedWidth(42)
-        self._master_volume_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._master_volume_label.setObjectName("subtle-label")
-        transport.addWidget(self._master_volume_label)
+        # The same preset readout as each stem row, where it used to be a
+        # plain grey label styled unlike every other volume (#186).
+        self._master_volume_combo = QComboBox()
+        make_display_combo(self._master_volume_combo)
+        add_volume_presets(self._master_volume_combo)
+        self._master_volume_combo.setFixedSize(70, COMPACT_BUTTON)
+        self._master_volume_combo.setToolTip("Master volume")
+        self._master_volume_combo.setAccessibleName("Master volume preset")
+        self._master_volume_combo.activated.connect(self._on_master_preset)
+        transport.addWidget(self._master_volume_combo)
 
         transport.addStretch()
         layout.addLayout(transport)
@@ -147,8 +159,8 @@ class TransportBar(QWidget):
         return self._master_volume_slider
 
     @property
-    def master_volume_label(self) -> QLabel:
-        return self._master_volume_label
+    def master_volume_combo(self) -> QComboBox:
+        return self._master_volume_combo
 
     @property
     def play_icon(self):
@@ -167,8 +179,13 @@ class TransportBar(QWidget):
         return self._record_icon
 
     def _on_master_volume_changed(self, value: int) -> None:
-        self._master_volume_label.setText(f"{value}%")
+        show_preset_value(self._master_volume_combo, value)
         self.master_volume_changed.emit(value / 100.0)
+
+    def _on_master_preset(self, index: int) -> None:
+        value = self._master_volume_combo.itemData(index)
+        if value is not None:
+            self._master_volume_slider.setValue(value)
 
     def set_master_volume_display(self, volume: float) -> float:
         """Update the slider and label, returning the clamped gain."""
@@ -177,7 +194,7 @@ class TransportBar(QWidget):
             self._master_volume_slider.blockSignals(True)
             self._master_volume_slider.setValue(value)
             self._master_volume_slider.blockSignals(False)
-        self._master_volume_label.setText(f"{value}%")
+        show_preset_value(self._master_volume_combo, value)
         return value / 100.0
 
     def apply_theme(self, colors: dict[str, str], playing: bool) -> None:

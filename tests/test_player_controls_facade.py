@@ -242,7 +242,7 @@ def test_practice_cards_compose_in_intended_order(controls):
         controls._time_label,
         controls._master_vol_label_prefix,
         controls._master_volume_slider,
-        controls._master_volume_label,
+        controls._master_volume_combo,
     ]
     markers = set(expected)
     actual = [

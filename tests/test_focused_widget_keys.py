@@ -322,3 +322,28 @@ def test_right_on_the_song_list_still_seeks(window):
 
     window._player.seek.assert_called_once_with(55.0)
     assert widget.currentRow() == 0
+
+
+def _master_combo(window):
+    combo = window._player_controls._master_volume_combo
+    combo.setFocus(Qt.FocusReason.TabFocusReason)
+    QApplication.processEvents()
+    return combo
+
+
+def test_master_preset_steps_from_the_shown_value(window):
+    """The index sat on "0%" while the text said 100%, so Down gave 20%."""
+    combo = _master_combo(window)
+
+    _press(window, K.Key_Down)
+
+    assert combo.currentText() == "80%"
+
+
+def test_space_still_plays_after_picking_a_master_preset(window):
+    """The read-only display combo takes no typing; Space must still play."""
+    _master_combo(window)
+
+    _press(window, K.Key_Space)
+
+    window._player.play.assert_called_once()

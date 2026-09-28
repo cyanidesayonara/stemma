@@ -37,7 +37,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.library import Song, SongLibrary
-from src.ui.control_primitives import add_disabled_pixmaps
+from src.ui.control_primitives import (
+    COMPACT_BUTTON,
+    add_disabled_pixmaps,
+    fix_button_size,
+    repolish,
+)
 from src.ui.styles import DARK_COLORS, ON_ACCENT
 
 # Custom data roles for two-line display.
@@ -48,7 +53,6 @@ _TITLE_ROLE = Qt.ItemDataRole.UserRole + 2
 _PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 3
 
 _CTRL_ICON = 18  # Icon size for library control buttons.
-_CTRL_BTN = 28   # Button size for library control buttons.
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +466,7 @@ class LibraryPanel(QWidget):
         # Repeat (cycles: off → all → one)
         self._repeat_btn = QPushButton()
         self._repeat_btn.setObjectName("icon-btn")
-        self._repeat_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
+        fix_button_size(self._repeat_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._repeat_btn.setToolTip("Repeat: off")
         self._repeat_btn.setAccessibleName("Repeat")
         self._repeat_btn.clicked.connect(self._on_repeat_clicked)
@@ -479,7 +483,7 @@ class LibraryPanel(QWidget):
         self._shuffle_btn = QPushButton()
         self._shuffle_btn.setObjectName("icon-btn")
         self._shuffle_btn.setCheckable(True)
-        self._shuffle_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
+        fix_button_size(self._shuffle_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._shuffle_btn.setToolTip("Shuffle: off")
         self._shuffle_btn.setAccessibleName("Shuffle")
         self._shuffle_btn.setIcon(
@@ -494,7 +498,7 @@ class LibraryPanel(QWidget):
         # Previous
         self._prev_btn = QPushButton()
         self._prev_btn.setObjectName("icon-btn")
-        self._prev_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
+        fix_button_size(self._prev_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._prev_btn.setToolTip("Previous song (P)")
         self._prev_btn.setAccessibleName("Previous song")
         self._prev_btn.setIcon(_make_icon(_draw_prev, icon_color))
@@ -505,7 +509,7 @@ class LibraryPanel(QWidget):
         # Next
         self._next_btn = QPushButton()
         self._next_btn.setObjectName("icon-btn")
-        self._next_btn.setFixedSize(_CTRL_BTN, _CTRL_BTN)
+        fix_button_size(self._next_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._next_btn.setToolTip("Next song (N)")
         self._next_btn.setAccessibleName("Next song")
         self._next_btn.setIcon(_make_icon(_draw_next, icon_color))
@@ -575,10 +579,7 @@ class LibraryPanel(QWidget):
         active = self._repeat_mode != REPEAT_OFF
         if self._repeat_btn.property("active") != active:
             self._repeat_btn.setProperty("active", active)
-            style = self._repeat_btn.style()
-            style.unpolish(self._repeat_btn)
-            style.polish(self._repeat_btn)
-            self._repeat_btn.update()
+            repolish(self._repeat_btn)
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"

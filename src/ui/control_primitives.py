@@ -7,21 +7,44 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
+    QPushButton,
+    QWidget,
     QSpinBox,
     QStyle,
     QStyleOptionSpinBox,
 )
 
-from src.ui.styles import ON_ACCENT
+from src.ui.styles import ICON_BUTTON_SIZES, ON_ACCENT
 
 ICON_SIZE = 24
 STEM_ICON_SIZE = 18
+
+# Three button sizes, one per kind of row (#186): the transport's primary
+# buttons, controls that sit beside 30 px fields in the practice rack, and
+# the compact rows of the mixer and library.
+TRANSPORT_BUTTON = 36
+ROW_BUTTON = 30
+ROW_ICON_SIZE = 20
+COMPACT_BUTTON = 28
 
 _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
 # A disabled glyph is its normal color at this opacity, so it recedes toward
 # whatever sits behind it in either theme. Qt's generated disabled pixmap
 # blends toward white instead, which made light dark-theme glyphs brighter.
 DISABLED_ICON_OPACITY = 0.35
+
+
+def fix_button_size(button: QPushButton, width: int, height: int) -> None:
+    """Give *button* a fixed size the stylesheet cannot override.
+
+    Square sizes listed in ``ICON_BUTTON_SIZES`` are also pinned by a
+    stylesheet rule on the button's "squareSize" property, so no polish (theme
+    switch, or a dynamic-property repolish) can bring back the 30 px
+    minimum of the global QPushButton rule.
+    """
+    if width == height and width in ICON_BUTTON_SIZES:
+        button.setProperty("squareSize", str(width))
+    button.setFixedSize(width, height)
 
 
 def make_display_combo(combo: QComboBox) -> None:
@@ -39,6 +62,43 @@ def make_display_combo(combo: QComboBox) -> None:
             original_mouse(event)
 
     line_edit.mousePressEvent = open_on_click
+
+
+def repolish(widget: QWidget) -> None:
+    """Re-apply the stylesheet after a dynamic property changed."""
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
+
+
+def add_volume_presets(combo: QComboBox) -> None:
+    """Fill a volume display combo with 200% down to 0%, showing 100%.
+
+    Highest first, like a fader, so Down lowers the volume: Down selects
+    the next item in the list.
+    """
+    for value in range(200, -1, -20):
+        combo.addItem(f"{value}%", value)
+    show_preset_value(combo, 100)
+
+
+def show_preset_value(combo: QComboBox, value: int) -> None:
+    """Show *value* in a preset display combo, with the index in step.
+
+    Setting only the edit text left the index at whatever was last picked
+    (the first item, at startup), so Up, Down, or the wheel jumped from
+    that stale preset: 100% plus Down gave 20% (#209 review). Between
+    presets the nearest one is selected, so a step goes to a neighbour.
+    """
+    presets = [combo.itemData(i) for i in range(combo.count())]
+    if presets:
+        nearest = min(range(len(presets)),
+                      key=lambda i: abs(presets[i] - value))
+        combo.blockSignals(True)
+        combo.setCurrentIndex(nearest)
+        combo.blockSignals(False)
+    combo.setEditText(f"{value}%")
 
 
 def fit_spinbox_width(spin: QSpinBox, sample: str | None = None) -> None:

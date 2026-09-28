@@ -23,7 +23,10 @@ from src.player import (
     SPEED_PRESETS,
 )
 from src.ui.control_primitives import (
-    ICON_SIZE,
+    add_volume_presets,
+    fix_button_size,
+    ROW_BUTTON,
+    ROW_ICON_SIZE,
     PitchSpinBox,
     draw_power,
     draw_repeat,
@@ -31,6 +34,7 @@ from src.ui.control_primitives import (
     fit_spinbox_width,
     make_display_combo,
     make_toggle_icon,
+    show_preset_value,
 )
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS
@@ -120,11 +124,11 @@ class PracticeRack(QWidget):
         self._count_in_toggle = QPushButton()
         self._count_in_toggle.setObjectName("icon-btn")
         self._count_in_toggle.setCheckable(True)
-        self._count_in_toggle.setFixedSize(36, 36)
+        fix_button_size(self._count_in_toggle, ROW_BUTTON, ROW_BUTTON)
         self._count_in_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
+            make_toggle_icon(draw_power, icon_color, ROW_ICON_SIZE)
         )
-        self._count_in_toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._count_in_toggle.setIconSize(QSize(ROW_ICON_SIZE, ROW_ICON_SIZE))
         self._count_in_toggle.setToolTip(
             "Toggle count-in before playback (C)"
         )
@@ -149,11 +153,13 @@ class PracticeRack(QWidget):
         self._count_in_repeats = QPushButton()
         self._count_in_repeats.setObjectName("icon-btn")
         self._count_in_repeats.setCheckable(True)
-        self._count_in_repeats.setFixedSize(36, 36)
+        fix_button_size(self._count_in_repeats, ROW_BUTTON, ROW_BUTTON)
         self._count_in_repeats.setIcon(
-            make_toggle_icon(draw_repeat, icon_color)
+            make_toggle_icon(draw_repeat, icon_color, ROW_ICON_SIZE)
         )
-        self._count_in_repeats.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._count_in_repeats.setIconSize(
+            QSize(ROW_ICON_SIZE, ROW_ICON_SIZE)
+        )
         self._count_in_repeats.setToolTip(
             "Also count in before each A-B loop repeat"
         )
@@ -303,11 +309,13 @@ class PracticeRack(QWidget):
         self._metronome_toggle = QPushButton()
         self._metronome_toggle.setObjectName("icon-btn")
         self._metronome_toggle.setCheckable(True)
-        self._metronome_toggle.setFixedSize(36, 36)
+        fix_button_size(self._metronome_toggle, ROW_BUTTON, ROW_BUTTON)
         self._metronome_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
+            make_toggle_icon(draw_power, icon_color, ROW_ICON_SIZE)
         )
-        self._metronome_toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._metronome_toggle.setIconSize(
+            QSize(ROW_ICON_SIZE, ROW_ICON_SIZE)
+        )
         self._metronome_toggle.setToolTip("Toggle metronome (M)")
         self._metronome_toggle.setAccessibleName("Metronome")
         self._metronome_toggle.toggled.connect(
@@ -379,9 +387,7 @@ class PracticeRack(QWidget):
 
         self._metronome_volume_combo = QComboBox()
         make_display_combo(self._metronome_volume_combo)
-        for value in range(0, 201, 20):
-            self._metronome_volume_combo.addItem(f"{value}%", value)
-        self._metronome_volume_combo.setCurrentText("100%")
+        add_volume_presets(self._metronome_volume_combo)
         self._metronome_volume_combo.setFixedWidth(70)  # room for the chevron
         self._metronome_volume_combo.setToolTip("Metronome volume")
         self._metronome_volume_combo.setAccessibleName(
@@ -497,9 +503,7 @@ class PracticeRack(QWidget):
             self.trainer_start_changed.emit(float(speed))
 
     def _on_metronome_volume_changed(self, value: int) -> None:
-        self._metronome_volume_combo.blockSignals(True)
-        self._metronome_volume_combo.setEditText(f"{value}%")
-        self._metronome_volume_combo.blockSignals(False)
+        show_preset_value(self._metronome_volume_combo, value)
         self.metronome_volume_changed.emit(value / 100.0)
 
     def _on_metronome_volume_preset(self, index: int) -> None:
@@ -512,11 +516,11 @@ class PracticeRack(QWidget):
         icon_color = QColor(colors["text"])
         on_accent = QColor(colors["on_accent"])
         self._metronome_toggle.setIcon(make_toggle_icon(
-            draw_power, icon_color, checked_color=on_accent,
+            draw_power, icon_color, ROW_ICON_SIZE, checked_color=on_accent,
         ))
         self._count_in_toggle.setIcon(make_toggle_icon(
-            draw_power, icon_color, checked_color=on_accent,
+            draw_power, icon_color, ROW_ICON_SIZE, checked_color=on_accent,
         ))
         self._count_in_repeats.setIcon(make_toggle_icon(
-            draw_repeat, icon_color, checked_color=on_accent,
+            draw_repeat, icon_color, ROW_ICON_SIZE, checked_color=on_accent,
         ))

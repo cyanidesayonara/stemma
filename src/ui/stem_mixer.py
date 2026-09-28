@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
 
 from src.player import MultiTrackPlayer
 from src.ui.control_primitives import (
+    add_volume_presets,
+    fix_button_size,
+    COMPACT_BUTTON,
     STEM_ICON_SIZE,
     draw_mute,
     draw_solo,
@@ -24,6 +27,7 @@ from src.ui.control_primitives import (
     make_display_combo,
     make_icon,
     make_toggle_icon,
+    show_preset_value,
 )
 from src.ui.styles import (
     DARK_COLORS,
@@ -84,7 +88,7 @@ class StemRow(QWidget):
         self._mute_btn = QPushButton()
         self._mute_btn.setObjectName("icon-btn")
         self._mute_btn.setCheckable(True)
-        self._mute_btn.setFixedSize(28, 28)
+        fix_button_size(self._mute_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._mute_btn.setIcon(
             make_toggle_icon(
                 draw_mute, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
@@ -99,7 +103,7 @@ class StemRow(QWidget):
         self._solo_btn = QPushButton()
         self._solo_btn.setObjectName("icon-btn")
         self._solo_btn.setCheckable(True)
-        self._solo_btn.setFixedSize(28, 28)
+        fix_button_size(self._solo_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._solo_btn.setIcon(
             make_toggle_icon(
                 draw_solo, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
@@ -130,10 +134,8 @@ class StemRow(QWidget):
 
         self._vol_combo = QComboBox()
         make_display_combo(self._vol_combo)
-        for value in range(0, 201, 20):
-            self._vol_combo.addItem(f"{value}%", value)
-        self._vol_combo.setCurrentText("100%")
-        self._vol_combo.setFixedSize(70, 28)  # room for the chevron
+        add_volume_presets(self._vol_combo)
+        self._vol_combo.setFixedSize(70, COMPACT_BUTTON)  # room for the chevron
         self._vol_combo.setToolTip(f"{display} volume")
         self._vol_combo.setAccessibleName(f"{display} volume preset")
         self._vol_combo.activated.connect(self._on_vol_combo)
@@ -172,9 +174,7 @@ class StemRow(QWidget):
 
     def _on_volume(self, value: int) -> None:
         self._player.set_volume(self._stem_name, value / 100.0)
-        self._vol_combo.blockSignals(True)
-        self._vol_combo.setEditText(f"{value}%")
-        self._vol_combo.blockSignals(False)
+        show_preset_value(self._vol_combo, value)
         self.mix_changed.emit()
 
     def _on_vol_combo(self, index: int) -> None:
@@ -190,7 +190,7 @@ class StemRow(QWidget):
 
     def set_volume_slider(self, value: int) -> None:
         self._volume_slider.setValue(value)
-        self._vol_combo.setEditText(f"{value}%")
+        show_preset_value(self._vol_combo, value)
 
     def apply_stem_theme(self, theme: str) -> None:
         palette = (
@@ -217,7 +217,7 @@ def _take_controls_width(spacing: int) -> int:
     spin.setRange(-200, 200)
     spin.setSuffix(" ms")
     fit_spinbox_width(spin, sample="-200 ms")
-    return spin.width() + spacing + 28
+    return spin.width() + spacing + COMPACT_BUTTON
 
 
 class RecordingStemRow(StemRow):
@@ -252,7 +252,7 @@ class RecordingStemRow(StemRow):
         colors = DARK_COLORS if theme == "dark" else LIGHT_COLORS
         self._delete_btn = QPushButton()
         self._delete_btn.setObjectName("icon-btn")
-        self._delete_btn.setFixedSize(28, 28)
+        fix_button_size(self._delete_btn, COMPACT_BUTTON, COMPACT_BUTTON)
         self._delete_btn.setIcon(
             make_icon(
                 draw_trash,

@@ -492,7 +492,7 @@ class TestMasterVolumeSlider:
 
     def test_default_value_is_full(self, controls):
         assert controls._master_volume_slider.value() == 100
-        assert controls._master_volume_label.text() == "100%"
+        assert controls._master_volume_combo.currentText() == "100%"
 
     def test_slider_drag_calls_player(self, controls, player):
         """Moving the slider propagates into the player."""
@@ -502,13 +502,13 @@ class TestMasterVolumeSlider:
 
     def test_slider_drag_updates_label(self, controls):
         controls._master_volume_slider.setValue(125)
-        assert controls._master_volume_label.text() == "125%"
+        assert controls._master_volume_combo.currentText() == "125%"
 
     def test_set_master_volume_updates_slider(self, controls):
         """External callers (shortcuts, session restore) use set_master_volume."""
         controls.set_master_volume(0.5)
         assert controls._master_volume_slider.value() == 50
-        assert controls._master_volume_label.text() == "50%"
+        assert controls._master_volume_combo.currentText() == "50%"
 
     def test_set_master_volume_clamps(self, controls):
         """Out-of-range values are clamped to the 0-200% range."""
