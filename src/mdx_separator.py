@@ -31,6 +31,7 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.import_messages import describe_error
 from src.onnx_session import create_onnx_session, session_provider_label
 from src.separation_state import (
     clear_completion_marker,
@@ -125,7 +126,7 @@ class MdxSeparatorWorker(QThread):
         try:
             self._separate()
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(describe_error(exc, "Separation failed"))
 
     # ------------------------------------------------------------------
     # Pipeline
