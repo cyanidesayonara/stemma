@@ -24,7 +24,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.app_settings import open_settings, read_default_import_6_stem
+from src.app_settings import (
+    SEPARATION_MODEL_TOOLTIP,
+    SEPARATION_MODELS,
+    open_settings,
+    read_default_import_model,
+)
 from src.downloader import (
     DownloadError,
     check_ffmpeg,
@@ -139,8 +144,9 @@ class ImportDialog(QDialog):
 
         self._setup_ui()
 
-        if read_default_import_6_stem(open_settings()):
-            self._model_combo.setCurrentIndex(1)
+        self._model_combo.setCurrentIndex(max(0, self._model_combo.findData(
+            read_default_import_model(open_settings()),
+        )))
 
         if file_path:
             self._selected_path = file_path
@@ -204,18 +210,9 @@ class ImportDialog(QDialog):
         model_row = QHBoxLayout()
         model_row.addWidget(QLabel("Model:"))
         self._model_combo = QComboBox()
-        self._model_combo.addItem(
-            "4-stem (vocals, drums, bass, other)", "htdemucs"
-        )
-        self._model_combo.addItem("6-stem (+ guitar, piano)", "htdemucs_6s")
-        self._model_combo.addItem(
-            "2-stem fast (vocals + backing, GPU)", "mdx_inst_hq3"
-        )
-        self._model_combo.setToolTip(
-            "Choose separation model. 4/6-stem separate every instrument "
-            "(slow, CPU); 2-stem splits vocals from the backing track in "
-            "seconds using the GPU where available."
-        )
+        for model_key, label in SEPARATION_MODELS:
+            self._model_combo.addItem(label, model_key)
+        self._model_combo.setToolTip(SEPARATION_MODEL_TOOLTIP)
         model_row.addWidget(self._model_combo)
         layout.addLayout(model_row)
 

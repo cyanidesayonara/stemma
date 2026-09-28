@@ -625,7 +625,7 @@ class MainWindow(QMainWindow):
             + row("Shift+Up / Down", "Speed up / down")
             + row("Shift+Left / Right", "Transpose \u2212 / + 1 semitone")
             + section("Stems")
-            + row("Ctrl+1-6", "Mute/unmute stem")
+            + row("Ctrl+1-6", "Mute/unmute vocals, drums, bass, other, guitar, piano")
             + section("Loop")
             + row("A", "Set loop point A")
             + row("B", "Set loop point B")
@@ -669,7 +669,7 @@ class MainWindow(QMainWindow):
         info = QLabel(
             f"<h2 style='margin:0'>stemma</h2>"
             f"<p>Version {__version__}</p>"
-            f"<p>A music player with AI stem separation.</p>"
+            f"<p>A practice player with AI stem separation.</p>"
             f'<p><a href="https://github.com/cyanidesayonara/stemma">'
             f"github.com/cyanidesayonara/stemma</a></p>"
             f"<p>MIT License</p>"

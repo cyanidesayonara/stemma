@@ -188,7 +188,7 @@ Generated `build/`, `dist/`, model, and package artifacts are not committed.
 build. A release tag still synchronizes both before packaging:
 
 ```powershell
-.\scripts\sync_release_version.ps1 -Tag v2.6.0
+.\scripts\sync_release_version.ps1 -Tag v3.0.0
 ```
 
 Running that command does not publish a release. The GitHub Release is the
@@ -207,8 +207,9 @@ artifact, checksum, and Store submission details.
 7. Open a pull request, then have it reviewed independently: the reviewer
    in `.claude/agents/pr-reviewer.md` runs in a fresh context and its own
    worktree, and its report is posted on the PR unedited. Address the
-   findings in follow-up commits. The builder never merges their own pull
-   request; the maintainer merges.
+   findings in follow-up commits. Squash-merge once the findings are
+   addressed and CI passes. Hand to the maintainer only what needs a human:
+   a listening or hands-on check, or a product decision.
 8. Close issues and move Project items to Done only after the change is
    merged or the issue's acceptance criteria are otherwise satisfied.
 

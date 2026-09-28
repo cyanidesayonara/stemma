@@ -14,6 +14,7 @@ import pytest
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
+from src.app_settings import open_settings
 from src.library import SongLibrary
 from src.model_manager import ModelDownloader
 from src.ui.import_dialog import (
@@ -269,3 +270,17 @@ class TestSafeDisconnect:
             pytest.fail(
                 "disconnect() raised RuntimeError on already-disconnected signal"
             )
+
+
+class TestDefaultModel:
+    @pytest.mark.parametrize("key", ["htdemucs", "htdemucs_6s", "mdx_inst_hq3"])
+    def test_dialog_opens_on_the_preferred_model(self, qapp, tmp_path, key):
+        """Preferences can now pick the 2-stem model as the default too."""
+        settings = open_settings()  # conftest isolates this per test
+        settings.setValue("import/default_model", key)
+        dlg = ImportDialog(MagicMock(), MagicMock())
+        try:
+            assert dlg._model_combo.currentData() == key
+        finally:
+            dlg.close()
+            settings.remove("import/default_model")
