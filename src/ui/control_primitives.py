@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
     QPushButton,
+    QWidget,
     QSpinBox,
     QStyle,
     QStyleOptionSpinBox,
@@ -75,6 +76,22 @@ def make_display_combo(combo: QComboBox) -> None:
             original_mouse(event)
 
     line_edit.mousePressEvent = open_on_click
+
+
+def repolish(widget: QWidget) -> None:
+    """Re-apply the stylesheet after a dynamic property changed.
+
+    ``unpolish``/``polish`` sends no StyleChange event, so a button sized
+    with ``fix_button_size`` would fall back to the 30 px stylesheet
+    minimum; its fixed size is put back here (#209 re-review).
+    """
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    size = widget.property("fixed_size")
+    if size is not None:
+        widget.setFixedSize(size)
+    widget.update()
 
 
 def add_volume_presets(combo: QComboBox) -> None:

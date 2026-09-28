@@ -1849,17 +1849,6 @@ class PlayerControls(QWidget):
         """Restore beat-sync state from a saved session."""
         self._beat_sync_btn.setChecked(enabled)
 
-    def _on_metronome_vol_changed(self, value: int) -> None:
-        """User moved the metronome volume slider."""
-        self._player.set_metronome_volume(value / 100.0)
-        show_preset_value(self._metronome_vol_combo, value)
-
-    def _on_metronome_vol_combo(self, index: int) -> None:
-        """User selected a metronome volume preset."""
-        value = self._metronome_vol_combo.itemData(index)
-        if value is not None:
-            self._metronome_vol_slider.setValue(value)
-
     def toggle_metronome(self) -> None:
         """Toggle metronome on/off (for keyboard shortcut)."""
         self._metronome_toggle.setChecked(

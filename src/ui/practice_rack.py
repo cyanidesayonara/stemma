@@ -34,6 +34,7 @@ from src.ui.control_primitives import (
     fit_spinbox_width,
     make_display_combo,
     make_toggle_icon,
+    show_preset_value,
 )
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.styles import DARK_COLORS
@@ -502,9 +503,7 @@ class PracticeRack(QWidget):
             self.trainer_start_changed.emit(float(speed))
 
     def _on_metronome_volume_changed(self, value: int) -> None:
-        self._metronome_volume_combo.blockSignals(True)
-        self._metronome_volume_combo.setEditText(f"{value}%")
-        self._metronome_volume_combo.blockSignals(False)
+        show_preset_value(self._metronome_volume_combo, value)
         self.metronome_volume_changed.emit(value / 100.0)
 
     def _on_metronome_volume_preset(self, index: int) -> None:

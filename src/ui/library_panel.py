@@ -41,6 +41,7 @@ from src.ui.control_primitives import (
     COMPACT_BUTTON,
     add_disabled_pixmaps,
     fix_button_size,
+    repolish,
 )
 from src.ui.styles import DARK_COLORS, ON_ACCENT
 
@@ -578,10 +579,7 @@ class LibraryPanel(QWidget):
         active = self._repeat_mode != REPEAT_OFF
         if self._repeat_btn.property("active") != active:
             self._repeat_btn.setProperty("active", active)
-            style = self._repeat_btn.style()
-            style.unpolish(self._repeat_btn)
-            style.polish(self._repeat_btn)
-            self._repeat_btn.update()
+            repolish(self._repeat_btn)
 
     def _update_shuffle_ui(self) -> None:
         tip = f"Shuffle: {'on' if self._shuffle_enabled else 'off'}"
