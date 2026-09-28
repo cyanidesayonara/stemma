@@ -208,9 +208,12 @@ class PracticeRack(QWidget):
         )
         loop_row.addWidget(self._loop_clear_button)
 
-        self._loop_label = QLabel("")
+        # Loop points are drawn as tags on the waveform markers; the label
+        # stays for the facade's text API but is not shown (it widened the
+        # card and wrapped the rack at 1366 px when a loop was set).
+        self._loop_label = QLabel("", self)
         self._loop_label.setObjectName("subtle-label")
-        loop_row.addWidget(self._loop_label)
+        self._loop_label.setVisible(False)
 
         loop_row.addStretch()
         loop_body.addLayout(loop_row)
@@ -379,7 +382,7 @@ class PracticeRack(QWidget):
         for value in range(0, 201, 20):
             self._metronome_volume_combo.addItem(f"{value}%", value)
         self._metronome_volume_combo.setCurrentText("100%")
-        self._metronome_volume_combo.setFixedWidth(62)
+        self._metronome_volume_combo.setFixedWidth(70)  # room for the chevron
         self._metronome_volume_combo.setToolTip("Metronome volume")
         self._metronome_volume_combo.setAccessibleName(
             "Metronome volume preset"

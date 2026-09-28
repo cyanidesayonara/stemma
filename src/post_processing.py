@@ -7,6 +7,8 @@ Chunked processing keeps peak per-chunk memory bounded regardless of
 track length.
 """
 
+from typing import Callable
+
 import numpy as np
 import librosa
 
@@ -22,6 +24,7 @@ def wiener_filter(
     stems: np.ndarray,
     n_iterations: int = 1,
     exponent: float = 2.0,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> np.ndarray:
     """Apply multi-channel Wiener filtering to reduce inter-stem bleed.
 
@@ -42,6 +45,8 @@ def wiener_filter(
         n_iterations: Number of Wiener iterations (1 is usually enough).
         exponent: Power applied to magnitudes when computing masks.
             Higher values create sharper masks (2.0 = standard Wiener).
+        should_cancel: Checked before each chunk; when it returns True,
+            `InterruptedError` is raised.
 
     Returns:
         The same ``stems`` array (modified in-place).
@@ -54,6 +59,7 @@ def wiener_filter(
     chunks = _chunk_boundaries(total_samples, _CHUNK_SAMPLES, _CHUNK_OVERLAP)
 
     for chunk_start, chunk_end, out_start, out_end in chunks:
+        _check_cancel(should_cancel)
         for ch in range(n_channels):
             chunk_len = chunk_end - chunk_start
             out_len = out_end - out_start
@@ -111,6 +117,7 @@ def soft_gate(
     hop_length: int = 512,
     attack_frames: int = 2,
     release_frames: int = 4,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> np.ndarray:
     """Apply per-stem soft gating to suppress faint ghost artifacts.
 
@@ -130,6 +137,8 @@ def soft_gate(
         hop_length: RMS analysis hop size in samples.
         attack_frames: Number of RMS frames for gate to open (smooth on).
         release_frames: Number of RMS frames for gate to close (smooth off).
+        should_cancel: Checked before each stem; when it returns True,
+            `InterruptedError` is raised.
 
     Returns:
         The same ``stems`` array (modified in-place).
@@ -141,6 +150,7 @@ def soft_gate(
     release_coeff = 1.0 / max(release_frames, 1)
 
     for s in range(n_stems):
+        _check_cancel(should_cancel)
         mono = np.mean(stems[s], axis=0)
 
         rms = librosa.feature.rms(
@@ -171,6 +181,12 @@ def soft_gate(
         del mono, rms, gate, smoothed, envelope
 
     return stems
+
+
+def _check_cancel(should_cancel: Callable[[], bool] | None) -> None:
+    """Raise `InterruptedError` if the caller asked to stop."""
+    if should_cancel is not None and should_cancel():
+        raise InterruptedError("Separation cancelled by user.")
 
 
 def _chunk_boundaries(

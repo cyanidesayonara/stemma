@@ -7,6 +7,7 @@ Menu bar: File / Edit / Help; theme toggle in the menu bar corner.
 
 import glob
 import json
+import logging
 import math
 import os
 import random
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -56,6 +58,7 @@ from src.app_settings import (
 )
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
+from src.import_messages import format_import_error
 from src.library import SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
@@ -76,6 +79,8 @@ from src.ui.player_controls import (
 )
 from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
 from src.version import __version__
+
+logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
@@ -240,6 +245,18 @@ class MainWindow(QMainWindow):
     def _on_playback_failed(self, message: str) -> None:
         """Show a dialog when the player cannot open an output stream."""
         QMessageBox.warning(self, "Playback", message)
+
+    def _on_recording_unavailable(self, message: str) -> None:
+        """Recording could not start; the player disarmed it and played on."""
+        record_btn = self._player_controls._record_btn
+        record_btn.blockSignals(True)
+        record_btn.setChecked(False)
+        record_btn.blockSignals(False)
+        QMessageBox.warning(self, "Recording", message)
+
+    def _on_recording_save_failed(self, message: str) -> None:
+        """A take could not be written; the player kept it in memory."""
+        QMessageBox.warning(self, "Recording", message)
 
     def _setup_ui(self) -> None:
         """Build the main window layout."""
@@ -634,74 +651,87 @@ class MainWindow(QMainWindow):
         self.apply_theme(self._theme, colors)
         self._update_theme_btn()
 
+    # (section, [(key, description), ...]) per column of the shortcuts
+    # dialog. Two columns: in one the dialog was about 880 px tall, which
+    # put OK off-screen on a 768 px laptop display (#186).
+    _SHORTCUT_COLUMNS = (
+        (
+            ("Playback", (
+                ("Space", "Play / Pause (presses a focused button)"),
+                ("Enter", "Press the focused button"),
+                ("Tab", "Move keyboard focus between controls"),
+                ("S", "Stop"),
+            )),
+            ("Navigation", (
+                ("0-9", "Jump to 0%\u201390% position"),
+                ("Left / Right", "Seek \u22125s / +5s"),
+                ("Home / End", "Jump to start / end"),
+            )),
+            ("Volume, Speed & Pitch", (
+                ("Up / Down", "Master volume"),
+                ("Shift+Up / Down", "Speed up / down"),
+                ("Shift+Left / Right", "Transpose \u2212 / + 1 semitone"),
+            )),
+            ("Stems", (
+                ("Ctrl+1-6", "Mute/unmute vocals, drums, bass,\n"
+                             "other, guitar, piano"),
+            )),
+        ),
+        (
+            ("Loop", (
+                ("A", "Set loop point A"),
+                ("B", "Set loop point B"),
+                ("L", "Toggle A-B loop"),
+            )),
+            ("Metronome & Recording", (
+                ("M", "Toggle metronome"),
+                ("C", "Toggle count-in"),
+                ("R", "Arm/disarm recording"),
+            )),
+            ("Library", (
+                ("N", "Next song"),
+                ("P", "Previous song"),
+            )),
+            ("Help", (
+                ("F1", "This dialog"),
+            )),
+        ),
+    )
+
     def _on_keyboard_shortcuts(self) -> None:
         """Show a dialog listing all keyboard shortcuts."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Keyboard Shortcuts")
-        dlg.setMinimumWidth(400)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(20, 20, 20, 20)
+        accent = get_colors(self._theme)["accent"]
 
-        colors = get_colors(self._theme)
-        accent = colors["accent"]
-        surface1 = colors["surface1"]
-
-        def section(title: str, first: bool = False) -> str:
-            spacer = "" if first else (
-                f"<tr><td colspan='2' style='padding-top:10px;"
-                f"border-top:1px solid {surface1};'></td></tr>"
-            )
-            return (
-                spacer
-                + f"<tr><td colspan='2' style='padding-top:4px;padding-bottom:2px;'>"
-                f"<span style='color:{accent};font-weight:600;'>{title}</span>"
-                f"</td></tr>"
-            )
-
-        def row(key: str, desc: str) -> str:
-            return (
-                f"<tr>"
-                f"<td style='padding:2px 16px 2px 8px;white-space:nowrap;'><b>{key}</b></td>"
-                f"<td style='padding:2px 8px 2px 0;'>{desc}</td>"
-                f"</tr>"
-            )
-
-        shortcuts_text = (
-            "<table cellspacing='0' cellpadding='0'>"
-            + section("Playback", first=True)
-            + row("Space", "Play / Pause (presses a focused button)")
-            + row("Enter", "Press the focused button")
-            + row("Tab", "Move keyboard focus between controls")
-            + row("S", "Stop")
-            + section("Navigation")
-            + row("0-9", "Jump to 0%–90% position")
-            + row("Left / Right", "Seek −5s / +5s")
-            + row("Home / End", "Jump to start / end")
-            + section("Volume, Speed &amp; Pitch")
-            + row("Up / Down", "Master volume")
-            + row("Shift+Up / Down", "Speed up / down")
-            + row("Shift+Left / Right", "Transpose \u2212 / + 1 semitone")
-            + section("Stems")
-            + row("Ctrl+1-6", "Mute/unmute vocals, drums, bass, other, guitar, piano")
-            + section("Loop")
-            + row("A", "Set loop point A")
-            + row("B", "Set loop point B")
-            + row("L", "Toggle A-B loop")
-            + section("Metronome &amp; Recording")
-            + row("M", "Toggle metronome")
-            + row("C", "Toggle count-in")
-            + row("R", "Arm/disarm recording")
-            + section("Library")
-            + row("N", "Next song")
-            + row("P", "Previous song")
-            + section("Help")
-            + row("F1", "This dialog")
-            + "</table>"
-        )
-        label = QLabel(shortcuts_text)
-        label.setWordWrap(False)
-        layout.addWidget(label)
+        # Plain widgets rather than an HTML table: a rich-text table's size
+        # hint is narrower than its text, so its columns clipped.
+        columns = QHBoxLayout()
+        columns.setSpacing(32)
+        for sections in self._SHORTCUT_COLUMNS:
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(3)
+            row = 0
+            for index, (title, rows) in enumerate(sections):
+                heading = QLabel(title)
+                heading.setStyleSheet(f"color: {accent}; font-weight: 600;")
+                if index:
+                    heading.setContentsMargins(0, 10, 0, 0)
+                grid.addWidget(heading, row, 0, 1, 2)
+                row += 1
+                for key, desc in rows:
+                    key_label = QLabel(key)
+                    key_label.setStyleSheet("font-weight: bold;")
+                    grid.addWidget(key_label, row, 0, Qt.AlignmentFlag.AlignTop)
+                    grid.addWidget(QLabel(desc), row, 1)
+                    row += 1
+            grid.setRowStretch(row, 1)
+            columns.addLayout(grid)
+        layout.addLayout(columns)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(dlg.accept)
@@ -1164,21 +1194,55 @@ class MainWindow(QMainWindow):
             self._intro_pending = False
             QTimer.singleShot(300, self._player_controls.play_intro_animation)
 
+    def _confirm_quit(self) -> bool:
+        """Ask before quitting discards a separation; True to quit."""
+        pending = self._separation_queue.pending_count
+        if pending == 0:
+            return True
+        if pending == 1:
+            text = "A song is still separating. Quit and discard it?"
+        else:
+            text = (
+                f"{pending} songs are still separating or waiting. "
+                "Quit and discard them?"
+            )
+        reply = QMessageBox.question(
+            self,
+            "Quit stemma",
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
+        if not self._confirm_quit():
+            event.ignore()
+            return
         try:
             self._save_session()
         except Exception:
             pass  # Never prevent the window from closing.
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
+        # Close visibly now: the waits below can take a while when a
+        # separation stage is slow to notice the cancel.
+        self.hide()
 
         if self._export_worker is not None and self._export_worker.isRunning():
             self._export_worker.wait(5000)
 
         # Abort any background separation; interrupted songs are pruned
         # from the library on the next launch (no stems on disk).
-        self._separation_queue.shutdown(5000)
+        if not self._separation_queue.shutdown():
+            # A stage that cannot be interrupted (for example a stuck
+            # DirectML call) would otherwise leave a hidden process running
+            # forever. Settings and the session are already saved.
+            logger.warning("Separation did not stop on close; ending stemma.")
+            self._settings.sync()
+            logging.shutdown()
+            os._exit(0)
         self._shutdown_stem_loads()
 
         self._suppress_recording_reload = True
@@ -1239,7 +1303,13 @@ class MainWindow(QMainWindow):
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.playback_failed.connect(self._on_playback_failed)
+        self._player.recording_unavailable.connect(
+            self._on_recording_unavailable
+        )
         self._player.recording_saved.connect(self._on_recording_saved)
+        self._player.recording_save_failed.connect(
+            self._on_recording_save_failed
+        )
 
     # ------------------------------------------------------------------
     # Slots
@@ -1431,7 +1501,9 @@ class MainWindow(QMainWindow):
         self._library_panel.clear_selection()
         self.setWindowTitle("stemma")
         QMessageBox.warning(
-            self, "Load Song", f"Could not load this song:\n{message}",
+            self,
+            "Load Song",
+            f"Could not load this song:\n{format_import_error(message)}",
         )
 
     @Slot()
@@ -1833,7 +1905,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Import failed",
-                f"Stem separation did not complete:\n{message}",
+                "Stem separation did not complete:\n"
+                f"{format_import_error(message)}",
             )
 
     # ------------------------------------------------------------------
@@ -2052,4 +2125,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Export", f"Mix successfully exported to {path}")
 
     def _on_export_error(self, err: str) -> None:
-        QMessageBox.critical(self, "Export Error", f"Failed to export mix:\n{err}")
+        QMessageBox.critical(
+            self,
+            "Export Error",
+            f"Failed to export mix:\n{format_import_error(err)}",
+        )
