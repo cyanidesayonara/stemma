@@ -19,7 +19,7 @@ from PySide6.QtGui import (
     QImage,
     QPainter,
 )
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -294,8 +294,12 @@ def test_repeat_stays_a_button_for_assistive_tech(app):
     actions = QAccessible.queryAccessibleInterface(button).actionInterface()
     assert "Toggle" not in actions.actionNames()
 
+    # Press is routed through animateClick, which clicks only when its
+    # 100 ms timer fires. Wait for the click itself: a fixed wait can run
+    # out on a loaded machine before an event pass sees the timer due.
+    clicked = QSignalSpy(button.clicked)
     actions.doAction(QAccessibleActionInterface.pressAction())
-    QTest.qWait(300)  # Press is routed through animateClick.
+    assert clicked.count() >= 1 or clicked.wait(5000), "Press never clicked"
 
     assert panel._repeat_mode == REPEAT_ALL
     assert _fill(button) == QColor(colors["accent"]).name()

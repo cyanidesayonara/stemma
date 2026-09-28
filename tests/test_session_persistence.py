@@ -231,7 +231,7 @@ class TestPlayerControlsShutdown:
 
         with patch.object(controls, "_run_detection") as run_detection:
             controls.start_detection(1.0, 2.0)
-            assert downloader.started_running.wait(timeout=1.0)
+            assert downloader.started_running.wait(timeout=5.0)
             try:
                 controls.shutdown()
                 downloader.download_complete.emit("beat_this.onnx")
