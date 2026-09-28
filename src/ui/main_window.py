@@ -12,7 +12,7 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QByteArray, QPointF, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QByteArray, QEvent, QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -24,6 +24,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractItemView,
+    QAbstractSlider,
     QAbstractSpinBox,
     QApplication,
     QCheckBox,
@@ -91,6 +93,21 @@ def _is_audio_path(path: str) -> bool:
 
 
 _THEME_TOGGLE_ICON_PX = 18
+
+# Keys a focused control uses for itself, ahead of the window shortcuts.
+_NAVIGATION_KEYS = frozenset({
+    Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+    Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown,
+})
+# Controls that own the navigation keys while focused. An editable combo
+# is covered by QComboBox: it keeps focus itself, not its line edit.
+_NAVIGATION_KEY_WIDGETS = (
+    QAbstractSlider,
+    QAbstractItemView,
+    QAbstractSpinBox,
+    QComboBox,
+    QLineEdit,
+)
 
 
 def _moon_icon(color: QColor) -> QIcon:
@@ -297,7 +314,9 @@ class MainWindow(QMainWindow):
         Shortcuts are guarded: they don't fire when the user is typing
         into a text field, spinbox, or editable combobox. Modifier
         combos (Ctrl+1-6, Shift+Up/Down) and F-keys bypass the guard
-        since they can't collide with normal text entry.
+        since they can't collide with normal text entry. Arrows, Home, and
+        End go to a focused slider, list, spinbox, combo, or text field
+        instead (see event()).
         """
         g = self._guarded_shortcut  # Guarded: skipped when text input focused.
         u = self._unguarded_shortcut  # Unguarded: always fires.
@@ -309,12 +328,8 @@ class MainWindow(QMainWindow):
         g(Qt.Key.Key_S, self._player.stop)
 
         # -- Navigation --
-        g(Qt.Key.Key_Left, lambda: self._player.seek(
-            max(0.0, self._player.current_seconds - 5.0)
-        ))
-        g(Qt.Key.Key_Right, lambda: self._player.seek(
-            self._player.current_seconds + 5.0
-        ))
+        g(Qt.Key.Key_Left, lambda: self._seek_by(-5.0))
+        g(Qt.Key.Key_Right, lambda: self._seek_by(5.0))
         g(Qt.Key.Key_Home, lambda: self._player.seek(0.0))
         g(Qt.Key.Key_End, lambda: self._player.seek(self._player.total_seconds))
 
@@ -505,14 +520,57 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Let Enter press the focused button.
+    def event(self, event: QEvent) -> bool:
+        """Hand navigation keys to the focused control that uses them.
 
-        Buttons outside dialogs ignore Enter, so it bubbles up to here.
+        Qt sends ShortcutOverride to the focus widget and then up its
+        parents before any window shortcut fires; accepting it delivers
+        the key as a normal key press instead. Without this, Left, Right,
+        Home, End, Up, and Down always seeked or changed the master volume,
+        so no slider, list, spinbox, or combo could be used without a mouse.
+        """
+        if (
+            event.type() == QEvent.Type.ShortcutOverride
+            and self._focus_widget_takes_key(event)
+        ):
+            event.accept()
+            return True
+        return super().event(event)
+
+    def _focus_widget_takes_key(self, event: QKeyEvent) -> bool:
+        """True when *event* is a navigation key the focused control uses."""
+        if event.key() not in _NAVIGATION_KEYS:
+            return False
+        # Shift+arrows (speed, pitch) and other combos stay global.
+        modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if modifiers != Qt.KeyboardModifier.NoModifier:
+            return False
+        widget = QApplication.focusWidget()
+        return (
+            isinstance(widget, _NAVIGATION_KEY_WIDGETS)
+            and self.isAncestorOf(widget)
+        )
+
+    def _seek_by(self, seconds: float) -> None:
+        self._player.seek(max(0.0, self._player.current_seconds + seconds))
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Let Enter press the focused button, and unused arrows seek.
+
+        Buttons outside dialogs ignore Enter, so it bubbles up to here. So
+        do Left and Right from a focused control that has no use for them
+        (the song list, a closed combo): the shortcut override handed the
+        key to that control, and it should still seek, as before.
         """
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and (
             self._press_focused_button()
         ):
+            event.accept()
+            return
+        modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if (event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right)
+                and modifiers == Qt.KeyboardModifier.NoModifier):
+            self._seek_by(-5.0 if event.key() == Qt.Key.Key_Left else 5.0)
             event.accept()
             return
         super().keyPressEvent(event)
