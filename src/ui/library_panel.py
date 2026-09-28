@@ -212,11 +212,13 @@ class _SongDelegate(QStyledItemDelegate):
         self, parent=None, separator_color: str = DARK_COLORS["surface1"],
         accent_color: str = DARK_COLORS["accent"],
         selected_text_color: str = ON_ACCENT,
+        subtext_color: str = DARK_COLORS["subtext"],
     ):
         super().__init__(parent)
         self._separator_color = QColor(separator_color)
         self._accent_color = QColor(accent_color)
         self._selected_text_color = QColor(selected_text_color)
+        self._subtext_color = QColor(subtext_color)
         self._playing_song_id: str | None = None
 
     def set_separator_color(self, color: str) -> None:
@@ -227,6 +229,9 @@ class _SongDelegate(QStyledItemDelegate):
 
     def set_selected_text_color(self, color: str) -> None:
         self._selected_text_color = QColor(color)
+
+    def set_subtext_color(self, color: str) -> None:
+        self._subtext_color = QColor(color)
 
     def set_playing_song(self, song_id: str | None) -> None:
         """Set the currently playing song ID for the 'now playing' indicator."""
@@ -241,16 +246,15 @@ class _SongDelegate(QStyledItemDelegate):
 
         # Draw selection / hover background.
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        # The title line is subdued by the subtext token, not by alpha:
+        # 60-70% alpha dropped it under 4.5:1 (on the light accent 3.6:1).
         if selected:
             painter.fillRect(option.rect, self._accent_color)
             text_color = QColor(self._selected_text_color)
             sub_color = QColor(text_color)
-            sub_color.setAlphaF(0.7)
         else:
             text_color = option.palette.text().color()
-            # Subdued color for title line.
-            sub_color = QColor(text_color)
-            sub_color.setAlphaF(0.6)
+            sub_color = QColor(self._subtext_color)
 
         # "Now playing" indicator — accent bar on the left edge.
         left_inset = 6
@@ -296,7 +300,10 @@ class _SongDelegate(QStyledItemDelegate):
         # (e.g. "Separating... 42%").
         progress = index.data(_PROGRESS_ROLE)
         if progress:
-            painter.setPen(QColor(self._accent_color))
+            # On a selected row the fill is the accent itself.
+            painter.setPen(
+                sub_color if selected else QColor(self._accent_color)
+            )
             painter.drawText(
                 title_rect,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -575,14 +582,13 @@ class LibraryPanel(QWidget):
         """Update delegate colors and control icons for the current theme."""
         self._song_delegate.set_separator_color(colors["surface1"])
         self._song_delegate.set_accent_color(colors["accent"])
-        # Selected rows use the teal accent fill, so the text must be
-        # readable on teal in BOTH themes -- use ON_ACCENT (near-black).
-        self._song_delegate.set_selected_text_color(ON_ACCENT)
+        # Selected rows and checked buttons sit on the accent fill, so text
+        # and glyphs there use the theme's on-accent colour.
+        self._song_delegate.set_selected_text_color(colors["on_accent"])
+        self._song_delegate.set_subtext_color(colors["subtext"])
 
         icon_color = QColor(colors["text"])
-        # When a button sits on the teal accent fill, use ON_ACCENT (fixed
-        # near-black) so the icon stays readable in both themes.
-        on_accent_color = QColor(ON_ACCENT)
+        on_accent_color = QColor(colors["on_accent"])
         self._repeat_icons = {
             # REPEAT_OFF has a neutral (grey) background — use theme text color.
             REPEAT_OFF: _make_icon(_draw_repeat, icon_color),

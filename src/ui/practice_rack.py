@@ -265,7 +265,7 @@ class PracticeRack(QWidget):
             "Step speed up one preset each loop repeat, from the start "
             "speed up to 1.0x. Requires an A-B loop."
         )
-        self._trainer_check.setAccessibleName("Loop trainer")
+        self._trainer_check.setAccessibleName("Loop Trainer")
         self._trainer_check.toggled.connect(self.trainer_toggled.emit)
         trainer.addWidget(self._trainer_check)
         trainer.addWidget(QLabel("from"))
@@ -331,10 +331,9 @@ class PracticeRack(QWidget):
         self._beat_sync_button = QPushButton("Sync")
         self._beat_sync_button.setCheckable(True)
         self._beat_sync_button.setToolTip(
-            "Sync metronome to detected beats "
-            "(click on actual beat positions)"
+            "Sync the metronome to the beats detected in the song"
         )
-        self._beat_sync_button.setAccessibleName("Sync to track")
+        self._beat_sync_button.setAccessibleName("Sync metronome to song")
         self._beat_sync_button.setEnabled(False)
         self._beat_sync_button.toggled.connect(
             self.beat_sync_toggled.emit
@@ -347,9 +346,9 @@ class PracticeRack(QWidget):
         self._beat_nudge_spin.setSuffix(" ms")
         fit_spinbox_width(self._beat_nudge_spin, sample="-500 ms")
         self._beat_nudge_spin.setToolTip(
-            "Metronome nudge (shift metronome clicking)"
+            "Shift the metronome clicks earlier or later"
         )
-        self._beat_nudge_spin.setAccessibleName("Sync Nudge")
+        self._beat_nudge_spin.setAccessibleName("Metronome nudge")
         self._beat_nudge_spin.valueChanged.connect(
             self.beat_nudge_changed.emit
         )
@@ -508,12 +507,13 @@ class PracticeRack(QWidget):
     def apply_theme(self, colors: dict[str, str]) -> None:
         """Rebuild all theme-sensitive toggle icons."""
         icon_color = QColor(colors["text"])
-        self._metronome_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
-        )
-        self._count_in_toggle.setIcon(
-            make_toggle_icon(draw_power, icon_color)
-        )
-        self._count_in_repeats.setIcon(
-            make_toggle_icon(draw_repeat, icon_color)
-        )
+        on_accent = QColor(colors["on_accent"])
+        self._metronome_toggle.setIcon(make_toggle_icon(
+            draw_power, icon_color, checked_color=on_accent,
+        ))
+        self._count_in_toggle.setIcon(make_toggle_icon(
+            draw_power, icon_color, checked_color=on_accent,
+        ))
+        self._count_in_repeats.setIcon(make_toggle_icon(
+            draw_repeat, icon_color, checked_color=on_accent,
+        ))

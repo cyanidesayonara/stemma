@@ -1,6 +1,6 @@
 # stemma Privacy Policy
 
-Last updated: 2026-03-27
+Last updated: 2026-09-27
 
 ## Summary
 
@@ -16,29 +16,35 @@ The app can process:
 
 - Audio files you import from your computer.
 - Audio downloaded from YouTube URLs when you choose that import option.
+- Recordings you make with your own microphone or audio interface.
 - App settings and library metadata stored locally on your device.
 
 ## Data Collection and Sharing
 
-- We do not collect personal data through in-app analytics.
+- We do not collect personal data through in-app analytics or telemetry.
 - We do not sell personal data.
-- We do not upload your songs, stems, or recordings to our servers.
+- We do not upload your songs, stems, recordings, or logs to our servers or anyone else's.
 
-Third-party services may be contacted only when required for app features you use:
+Third-party services are contacted only when required for app features you use:
 
-- Model file download (first-time setup for stem separation models).
-- YouTube import via `yt-dlp` and related network requests.
+- Model file downloads, the first time a feature needs them: stem separation models from Hugging Face and GitHub (huggingface.co, api.github.com, and their download servers), and the beat detection model from GitHub (raw.githubusercontent.com).
+- YouTube import via `yt-dlp`, which contacts YouTube to download the audio of the link you paste.
+
+These services receive the ordinary information any download involves, such as your IP address, and handle it under their own privacy policies.
 
 ## Local Storage
 
-The app stores data locally in the Windows user app data location (for example, `%LOCALAPPDATA%\stemma`) including:
+The app stores these files in a local folder, by default `%LOCALAPPDATA%\stemma` (you can choose another folder under Edit > Preferences):
 
 - Downloaded model files.
 - Song library metadata.
-- Generated stems and recordings.
-- App preferences.
+- Imported audio, generated stems, and recordings.
 
-You can delete local app data at any time by uninstalling the app and removing that folder.
+The app also keeps an error log with technical details of problems it runs into, such as error messages and file paths on your computer. It is always at `%LOCALAPPDATA%\stemma\logs\stemma.log` (or `%TEMP%\stemma\stemma.log` if that folder cannot be written), even when you choose another data folder. It stays on your device and is never sent anywhere.
+
+Preferences and session state (window size, the last song, mixer and loop settings) are stored in the Windows registry under your user account.
+
+Uninstalling the Microsoft Store version removes its preferences and its default data folder. A data folder you chose yourself stays until you delete it. The zip version has no uninstaller: delete its data folder to remove your songs, stems, recordings, and models, delete `%LOCALAPPDATA%\stemma` to remove the error log, and its preferences are under HKEY_CURRENT_USER\Software\stemma in the registry.
 
 ## Security
 
@@ -57,4 +63,3 @@ We may update this policy. The latest version will be published at this URL with
 For privacy questions, open an issue on the project repository:
 
 https://github.com/cyanidesayonara/stemma/issues
-

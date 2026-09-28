@@ -41,12 +41,12 @@ from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.stem_mixer import RecordingStemRow, StemMixer, StemRow
 from src.ui.styles import (
-    CONFIDENCE_COLORS,
     DARK_COLORS,
     LIGHT_COLORS,
-    RECORDING_COLOR,
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
+    badge_html,
+    recording_color,
 )
 from src.ui.transport_bar import TransportBar
 from src.ui.waveform_panel import WaveformPanel
@@ -305,7 +305,7 @@ class PlayerControls(QWidget):
         self._footer_widget.setFixedHeight(44)
         footer_layout = QHBoxLayout(self._footer_widget)
         footer_layout.setContentsMargins(0, 5, 0, 2)
-        self._copyright_label = QLabel("© 2026 stemma")
+        self._copyright_label = QLabel("© 2026 Santtu Nykänen")
         self._copyright_label.setObjectName("copyright")
         self._copyright_label.setFixedHeight(36)
         self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -753,7 +753,7 @@ class PlayerControls(QWidget):
             if peaks is None:
                 continue
             if name in self._stem_mixer.recording_rows:
-                color = RECORDING_COLOR
+                color = recording_color(self._theme)
             else:
                 color = palette.get(name, "#95a5a6")
             lanes.append((name, peaks, color))
@@ -1461,10 +1461,6 @@ class PlayerControls(QWidget):
         self._detection_worker = worker
         worker.start()
 
-    def _conf_color(self, level: str) -> str:
-        """Return the themed colour string for a confidence level."""
-        return CONFIDENCE_COLORS[self._theme].get(level, "")
-
     def _badge_style(self) -> str:
         """Return the CSS stylesheet for a detection badge label."""
         colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
@@ -1477,24 +1473,18 @@ class PlayerControls(QWidget):
             f"margin: 0px 1px;"
         )
 
-    def _badge_html(self, label: str, value: str, color: str = "") -> str:
-        """Build rich-text HTML for a detection badge: white label, coloured value."""
-        colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
-        text_c = colors["text"]
-        val_c = color or text_c
-        if label:
-            return (
-                f'<span style="color:{text_c};">{label} </span>'
-                f'<span style="color:{val_c};">{value}</span>'
-            )
-        return f'<span style="color:{val_c};">{value}</span>'
+    def _badge_html(
+        self, label: str, value: str, confidence: str = "",
+    ) -> str:
+        """Rich text for a detection badge (see styles.badge_html)."""
+        return badge_html(self._theme, label, value, confidence)
 
     def _refresh_key_label(self) -> None:
         """Re-render the key badge, showing ``detected → effective`` when pitch != 0."""
         if not self._detected_key_raw:
             return
         pitch = self._player.pitch_semitones
-        key_c = self._conf_color(self._key_conf) if self._key_conf else ""
+        key_c = self._key_conf
         self._key_label.setStyleSheet(self._badge_style())
         if pitch == 0:
             self._key_label.setText(
@@ -1544,7 +1534,7 @@ class PlayerControls(QWidget):
             bpm_rounded = round(result.bpm)
             self._bpm_conf = result.bpm_confidence
             self._detected_bpm_raw = f"~{bpm_rounded} BPM"
-            bpm_c = self._conf_color(result.bpm_confidence)
+            bpm_c = result.bpm_confidence
             self._detected_bpm_label.setStyleSheet(badge)
             self._detected_bpm_label.setText(
                 self._badge_html("Tempo:", self._detected_bpm_raw, bpm_c)
@@ -1702,7 +1692,7 @@ class PlayerControls(QWidget):
             bpm_rounded = round(result.bpm)
             self._bpm_conf = result.bpm_confidence
             self._detected_bpm_raw = f"~{bpm_rounded} BPM"
-            bpm_c = self._conf_color(result.bpm_confidence)
+            bpm_c = result.bpm_confidence
             self._detected_bpm_label.setStyleSheet(self._badge_style())
             self._detected_bpm_label.setText(
                 self._badge_html("Tempo:", self._detected_bpm_raw, bpm_c)
@@ -1779,7 +1769,7 @@ class PlayerControls(QWidget):
                 text = f"~{text}"
             self._detected_bpm_raw = text
             self._bpm_conf = confidence
-            c = self._conf_color(confidence) if confidence else ""
+            c = confidence
             self._detected_bpm_label.setStyleSheet(self._badge_style())
             self._detected_bpm_label.setText(
                 self._badge_html("Tempo:", text, c)

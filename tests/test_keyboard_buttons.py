@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
 
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF
 from src.ui.main_window import MainWindow
@@ -58,8 +58,20 @@ def _tab_to(window, widget, limit: int = 200) -> None:
 def _press(window, key) -> None:
     # Through the window, so the window's shortcuts get their chance first,
     # exactly as with real key input.
+    button = QApplication.focusWidget()
+    clicked = (
+        QSignalSpy(button.clicked)
+        if isinstance(button, QAbstractButton) else None
+    )
     QTest.keyClick(window.windowHandle(), key)
-    QTest.qWait(250)  # animateClick releases the button after ~100 ms.
+    # Enter presses through animateClick: the button goes down now and is
+    # clicked only when a 100 ms timer fires. Wait for that click, not for
+    # a fixed time, which can run out on a loaded machine before an event
+    # pass sees the timer due. A button that is not down has no click
+    # pending: Space clicks at once, and a key that pressed nothing has
+    # nothing left to wait for, so tests that assert no press stay exact.
+    if clicked is not None and clicked.count() == 0 and button.isDown():
+        assert clicked.wait(5000), "the pressed button never clicked"
 
 
 @pytest.mark.parametrize("key", [Qt.Key.Key_Space, Qt.Key.Key_Return])

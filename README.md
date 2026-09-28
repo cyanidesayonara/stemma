@@ -39,7 +39,8 @@ Latest stable release: **v2.6.0**. The current `main` line targets
 
 - Per-stem mute, solo, and volume.
 - A-B loop, pitch-preserving speed presets, and pitch transposition
-  (plus or minus 7 semitones). The Key readout follows the transposition.
+  (plus or minus 7 semitones). The key and chord readouts follow the
+  transposition.
 - Loop Trainer: with a loop set, speed steps up one preset on each repeat,
   from a chosen start speed up to 1.0x.
 - Automatic tempo, key, beat, and live chord detection.
@@ -48,10 +49,12 @@ Latest stable release: **v2.6.0**. The current `main` line targets
 
 ### Playing along
 
-- Record takes over the stems through your audio interface. Takes appear
-  as mixer rows and can be nudged to line up.
-- Export individual stems, a custom mix, or just the loop region, as WAV or
-  MP3, optionally with the count-in prepended.
+- Record takes over the stems through your audio interface, at 1.0x speed
+  and the original pitch. Takes appear as mixer rows and can be nudged to
+  line up.
+- Export the mix as you hear it (mute, solo, and volumes), a single stem,
+  or just the loop region, as WAV or MP3, optionally with the count-in
+  prepended.
 
 ### Everything else
 
@@ -110,7 +113,7 @@ python -m pytest -m "not slow and not hardware"
 | Up / Down | Master volume |
 | Shift+Up / Down | Speed up / down |
 | Shift+Left / Right | Transpose -/+ 1 semitone |
-| Ctrl+1-6 | Toggle mute on stem |
+| Ctrl+1-6 | Mute/unmute vocals, drums, bass, other, guitar, piano |
 | A / B | Set loop point A / B |
 | L | Toggle A-B loop |
 | M | Toggle metronome |
@@ -139,6 +142,9 @@ MIT
 
 ## Credits
 
-- **HTDemucs v4** — Meta AI Research (MIT)
+- **HTDemucs v4** — Meta AI Research (MIT); ONNX export from
+  [rysertio/Demucs-onnx](https://huggingface.co/rysertio/Demucs-onnx)
 - **MDX-Net models** — trained by the [Ultimate Vocal Remover](https://github.com/Anjok07/ultimatevocalremovergui) project and its developers (MIT); thank you to UVR for making them available
-- **beat_this** — beat/downbeat tracking model (ISMIR 2024, MIT)
+- **beat_this** — beat/downbeat tracking model by the Institute of
+  Computational Perception, JKU Linz (ISMIR 2024, MIT); ONNX export from
+  [mosynthkey/beat_this_cpp](https://github.com/mosynthkey/beat_this_cpp)

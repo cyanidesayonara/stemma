@@ -104,12 +104,17 @@ def make_icon(draw_fn, color: QColor, size: int = ICON_SIZE) -> QIcon:
 
 
 def make_toggle_icon(draw_fn, normal_color: QColor,
-                     size: int = ICON_SIZE) -> QIcon:
-    """Create an icon with distinct normal and checked pixmaps."""
+                     size: int = ICON_SIZE,
+                     checked_color: QColor | None = None) -> QIcon:
+    """Create an icon with distinct normal and checked pixmaps.
+
+    *checked_color* is the glyph colour on the accent fill: the theme's
+    ``on_accent`` (it differs between themes).
+    """
     icon = QIcon()
     for color, state in (
         (normal_color, QIcon.State.Off),
-        (_CHECKED_ICON_COLOR, QIcon.State.On),
+        (checked_color or _CHECKED_ICON_COLOR, QIcon.State.On),
     ):
         pixmap = _paint_glyph(draw_fn, color, size)
         for mode in (

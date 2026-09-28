@@ -82,7 +82,7 @@ def _settle(worker) -> None:
     """Let *worker* finish and its queued finished signal be handled."""
     worker.gate.set()
     if isValid(worker):
-        worker.wait(2000)
+        assert worker.wait(2000), "detection worker did not finish"
     end = time.monotonic() + 2.0
     while time.monotonic() < end:
         QApplication.processEvents()
