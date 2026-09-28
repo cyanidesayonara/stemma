@@ -1032,7 +1032,13 @@ class PlayerControls(QWidget):
             parts.append(f"A: {_format_time(a)}")
         if b is not None:
             parts.append(f"B: {_format_time(b)}")
-        self._loop_label.setText("  ".join(parts))
+        text = "  ".join(parts)
+        self._loop_label.setText(text)
+        # The times are drawn on the waveform; say them where assistive tech
+        # and tooltips look for them too.
+        base_tip = "Toggle A-B loop (L)"
+        self._loop_toggle_btn.setToolTip(f"{base_tip}\n{text}" if text else base_tip)
+        self._loop_toggle_btn.setAccessibleDescription(text)
 
     # -- Speed control slots --
 

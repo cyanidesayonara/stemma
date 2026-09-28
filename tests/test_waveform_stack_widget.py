@@ -377,3 +377,21 @@ def test_lane_labels_are_painted_with_lane_label(app, monkeypatch):
     w.grab()
 
     assert "recording_take1" in seen
+
+
+def test_loop_markers_are_tagged_with_their_times(app):
+    """The loop points are drawn on the markers ("A 0:12", "B 0:21")."""
+    from src.ui.waveform_stack_widget import WaveformStackWidget
+
+    widget = WaveformStackWidget()
+    widget.resize(600, 120)
+    widget.set_total_seconds(100.0)
+    assert widget.loop_tag_texts() is None
+    widget.set_loop_markers(0.21, 0.12)  # either order
+
+    assert widget.loop_tag_texts() == ("A 0:12", "B 0:21")
+    widget.set_total_seconds(4000.0)
+    assert widget.loop_tag_texts() == ("A 8:00", "B 14:00")
+    widget.set_total_seconds(20000.0)
+    assert widget.loop_tag_texts() == ("A 40:00", "B 1:10:00")
+    widget.grab()  # paints the tags without error
