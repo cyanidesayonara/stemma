@@ -10,6 +10,8 @@ store:
   url: "https://apps.microsoft.com/detail/9p2w12l8f381"
   publisher_display_name: "Santtu Nykänen"
 
+# Text blocks are wrapped here for reading; load_listing joins the lines
+# of each paragraph, so Partner Center gets one line per paragraph.
 short_description: |
   Practice any song with the band. stemma splits a track into vocals,
   drums, bass, guitar, piano, and other, so you can mute your part and play
@@ -25,8 +27,8 @@ description: |
   part you play and perform it yourself. Silence the guitar and it is your
   guitar in the mix. Solo the drums to lock in with them. Pull the vocal
   down and sing the line yourself. Choose two stems (vocals and the backing
-  track, fast, and GPU-accelerated when your PC supports it), four, or all
-  six.
+  track, fast, and GPU-accelerated when your PC supports it), four stems,
+  or all six.
 
   Everything else is built around learning a part properly. Set an A-B
   loop over the two bars that keep tripping you up and drill them. Slow

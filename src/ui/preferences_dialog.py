@@ -24,14 +24,14 @@ from PySide6.QtWidgets import (
 )
 
 from src.app_settings import (
+    SEPARATION_MODEL_TOOLTIP,
+    SEPARATION_MODELS,
     open_settings,
     input_device_indices_with_input,
     output_device_indices_with_output,
     parse_stored_input_device_index,
     parse_stored_output_device_index,
     read_default_export_format,
-    SEPARATION_MODEL_TOOLTIP,
-    SEPARATION_MODELS,
     read_default_import_model,
     read_default_mp3_bitrate,
     read_latency_offset_ms,

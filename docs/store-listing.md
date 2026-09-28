@@ -28,11 +28,7 @@ Screenshots: `assets/store_listing/screenshots/` (regenerate with
 
 ## Short description
 
-Practice any song with the band. stemma splits a track into vocals,
-drums, bass, guitar, piano, and other, so you can mute your part and play
-along. Slow it down without changing pitch, loop the hard bars, transpose
-to your key, and record your take. A stem splitter and vocal remover that
-runs entirely on your PC: no account, no subscription, no uploads.
+Practice any song with the band. stemma splits a track into vocals, drums, bass, guitar, piano, and other, so you can mute your part and play along. Slow it down without changing pitch, loop the hard bars, transpose to your key, and record your take. A stem splitter and vocal remover that runs entirely on your PC: no account, no subscription, no uploads.
 
 ---
 
@@ -40,40 +36,15 @@ runs entirely on your PC: no account, no subscription, no uploads.
 
 stemma turns any song into a practice tool.
 
-Import a track and stemma separates it into individual stems -- vocals,
-drums, bass, guitar, piano, and everything else -- so you can mute the
-part you play and perform it yourself. Silence the guitar and it is your
-guitar in the mix. Solo the drums to lock in with them. Pull the vocal
-down and sing the line yourself. Choose two stems (vocals and the backing
-track, fast, and GPU-accelerated when your PC supports it), four, or all
-six.
+Import a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, fast, and GPU-accelerated when your PC supports it), four stems, or all six.
 
-Everything else is built around learning a part properly. Set an A-B
-loop over the two bars that keep tripping you up and drill them. Slow
-the passage down without the pitch dropping, or turn on the Loop
-Trainer and let stemma step the speed up a notch on every repeat until
-you are at full tempo. Transpose the whole song into a key that suits
-your voice or instrument, up to seven semitones either way, and the key
-and chord readouts follow. Count yourself in, play along to the metronome,
-and record your take against the backing to hear how it really sat.
+Everything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.
 
-stemma reads the song as you work: tempo, musical key, and the chord
-under the playhead, updated as it plays. Every stem gets its own colored
-lane in the waveform, so you can see where each part plays and click
-anywhere to jump there. There are per-stem volume faders, and a library
-that remembers exactly where you left off -- song, position, mix, loop,
-speed, and pitch -- so practice picks up where it stopped. Browse with previous
-and next, loop a single song, shuffle the collection, or autoplay
-through it.
+stemma reads the song as you work: tempo, musical key, and the chord under the playhead, updated as it plays. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers exactly where you left off -- song, position, mix, loop, speed, and pitch -- so practice picks up where it stopped. Browse with previous and next, loop a single song, shuffle the collection, or autoplay through it.
 
-Separation runs on your own machine. Nothing is uploaded, there is no
-account, no subscription, and no internet connection needed once the
-models are downloaded. Import an MP3, WAV, or FLAC file or paste a
-YouTube link, and export your own mix, a single stem, or just the loop
-as WAV or MP3 when you want to take it elsewhere.
+Separation runs on your own machine. Nothing is uploaded, there is no account, no subscription, and no internet connection needed once the models are downloaded. Import an MP3, WAV, or FLAC file or paste a YouTube link, and export your own mix, a single stem, or just the loop as WAV or MP3 when you want to take it elsewhere.
 
-Built for Windows, with keyboard shortcuts for the whole practice loop
-that work on any keyboard layout. Dark and light themes.
+Built for Windows, with keyboard shortcuts for the whole practice loop that work on any keyboard layout. Dark and light themes.
 
 ---
 
@@ -81,22 +52,13 @@ that work on any keyboard layout. Dark and light themes.
 
 What's new in version 3.0.0
 
-A new practice cockpit: the waveform now shows every stem in its own
-colored lane, so you can see where each part plays, and a muted stem
-dims in place. The practice controls are grouped into three cards --
-Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key,
-chord, and tempo sit together in one readout under the waveform. Play,
-stop, and record stay anchored at the bottom of the window.
+A new practice cockpit: the waveform now shows every stem in its own colored lane, so you can see where each part plays, and a muted stem dims in place. The practice controls are grouped into three cards -- Loop and Trainer, Speed and Pitch, Metronome and Count-in -- and key, chord, and tempo sit together in one readout under the waveform. Play, stop, and record stay anchored at the bottom of the window.
 
-Keyboard and feedback: Space or Enter now presses the control you
-tabbed to. Transport and toggle buttons now show hover, pressed, and
-disabled states, and a muted or soloed stem is clearly marked.
+Keyboard and feedback: Space or Enter now presses the control you tabbed to. Transport and toggle buttons now show hover, pressed, and disabled states, and a muted or soloed stem is clearly marked.
 
-Pitch shift: the chord readout now follows the transposition, as the
-key already did.
+Pitch shift: the chord readout now follows the transposition, as the key already did.
 
-Stability: changing loop points quickly no longer risks a crash, and
-many smaller layout and display issues are fixed.
+Stability: changing loop points quickly no longer risks a crash, and many smaller layout and display issues are fixed.
 
 ---
 

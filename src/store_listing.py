@@ -86,6 +86,19 @@ def _load_store_identity(raw: dict) -> StoreIdentity | None:
     )
 
 
+def unwrap_paragraphs(text: str) -> str:
+    """Join the wrapped lines of each paragraph; keep blank-line breaks.
+
+    listing.yaml wraps prose at about 76 columns for review. Sent as is,
+    Partner Center would show those wraps as ragged line breaks.
+    """
+    paragraphs = re.split(r"\n[ \t]*\n", text.strip())
+    return "\n\n".join(
+        " ".join(line.strip() for line in paragraph.splitlines() if line.strip())
+        for paragraph in paragraphs
+    )
+
+
 def load_listing(path: str | Path) -> ListingData:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -95,14 +108,15 @@ def load_listing(path: str | Path) -> ListingData:
         raise ValueError("whats_new must be a mapping")
     return ListingData(
         listing_version=str(raw["listing_version"]).strip(),
-        short_description=str(raw["short_description"]).strip(),
-        description=str(raw["description"]).strip(),
+        short_description=unwrap_paragraphs(str(raw["short_description"])),
+        description=unwrap_paragraphs(str(raw["description"])),
         features=[str(item).strip() for item in raw.get("features") or []],
         search_terms=[
             str(item).strip() for item in raw.get("search_terms") or []
         ],
         whats_new={
-            str(key): str(value).strip() for key, value in whats_new.items()
+            str(key): unwrap_paragraphs(str(value))
+            for key, value in whats_new.items()
         },
         store=_load_store_identity(raw),
     )

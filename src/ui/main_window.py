@@ -625,7 +625,7 @@ class MainWindow(QMainWindow):
             + row("Shift+Up / Down", "Speed up / down")
             + row("Shift+Left / Right", "Transpose \u2212 / + 1 semitone")
             + section("Stems")
-            + row("Ctrl+1-6", "Mute vocals, drums, bass, other, guitar, piano")
+            + row("Ctrl+1-6", "Mute/unmute vocals, drums, bass, other, guitar, piano")
             + section("Loop")
             + row("A", "Set loop point A")
             + row("B", "Set loop point B")

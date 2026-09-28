@@ -113,7 +113,7 @@ python -m pytest -m "not slow and not hardware"
 | Up / Down | Master volume |
 | Shift+Up / Down | Speed up / down |
 | Shift+Left / Right | Transpose -/+ 1 semitone |
-| Ctrl+1-6 | Mute vocals, drums, bass, other, guitar, piano |
+| Ctrl+1-6 | Mute/unmute vocals, drums, bass, other, guitar, piano |
 | A / B | Set loop point A / B |
 | L | Toggle A-B loop |
 | M | Toggle metronome |

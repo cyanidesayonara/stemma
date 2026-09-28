@@ -27,7 +27,7 @@ The app can process:
 
 Third-party services are contacted only when required for app features you use:
 
-- Model file downloads, the first time a feature needs them: stem separation models from Hugging Face (huggingface.co) and GitHub (github.com), and the tempo and key detection model from GitHub (raw.githubusercontent.com).
+- Model file downloads, the first time a feature needs them: stem separation models from Hugging Face and GitHub (huggingface.co, api.github.com, and their download servers), and the beat detection model from GitHub (raw.githubusercontent.com).
 - YouTube import via `yt-dlp`, which contacts YouTube to download the audio of the link you paste.
 
 These services receive the ordinary information any download involves, such as your IP address, and handle it under their own privacy policies.
@@ -39,11 +39,12 @@ The app stores these files in a local folder, by default `%LOCALAPPDATA%\stemma`
 - Downloaded model files.
 - Song library metadata.
 - Imported audio, generated stems, and recordings.
-- An error log (`logs\stemma.log`) with technical details of problems the app runs into, such as error messages and file paths on your computer. It stays on your device and is never sent anywhere.
+
+The app also keeps an error log with technical details of problems it runs into, such as error messages and file paths on your computer. It is always at `%LOCALAPPDATA%\stemma\logs\stemma.log` (or `%TEMP%\stemma\stemma.log` if that folder cannot be written), even when you choose another data folder. It stays on your device and is never sent anywhere.
 
 Preferences and session state (window size, the last song, mixer and loop settings) are stored in the Windows registry under your user account.
 
-Uninstalling the Microsoft Store version removes its preferences and its default data folder. A data folder you chose yourself stays until you delete it. The zip version has no uninstaller: delete its data folder to remove your songs, stems, recordings, models, and logs, and its preferences are under HKEY_CURRENT_USER\Software\stemma in the registry.
+Uninstalling the Microsoft Store version removes its preferences and its default data folder. A data folder you chose yourself stays until you delete it. The zip version has no uninstaller: delete its data folder to remove your songs, stems, recordings, and models, delete `%LOCALAPPDATA%\stemma` to remove the error log, and its preferences are under HKEY_CURRENT_USER\Software\stemma in the registry.
 
 ## Security
 
