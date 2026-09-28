@@ -23,7 +23,8 @@ from src.player import (
     SPEED_PRESETS,
 )
 from src.ui.control_primitives import (
-    ICON_SIZE,
+    ROW_BUTTON,
+    ROW_ICON_SIZE,
     PitchSpinBox,
     draw_power,
     draw_repeat,
@@ -120,11 +121,11 @@ class PracticeRack(QWidget):
         self._count_in_toggle = QPushButton()
         self._count_in_toggle.setObjectName("icon-btn")
         self._count_in_toggle.setCheckable(True)
-        self._count_in_toggle.setFixedSize(36, 36)
+        self._count_in_toggle.setFixedSize(ROW_BUTTON, ROW_BUTTON)
         self._count_in_toggle.setIcon(
             make_toggle_icon(draw_power, icon_color)
         )
-        self._count_in_toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._count_in_toggle.setIconSize(QSize(ROW_ICON_SIZE, ROW_ICON_SIZE))
         self._count_in_toggle.setToolTip(
             "Toggle count-in before playback (C)"
         )
@@ -149,11 +150,13 @@ class PracticeRack(QWidget):
         self._count_in_repeats = QPushButton()
         self._count_in_repeats.setObjectName("icon-btn")
         self._count_in_repeats.setCheckable(True)
-        self._count_in_repeats.setFixedSize(36, 36)
+        self._count_in_repeats.setFixedSize(ROW_BUTTON, ROW_BUTTON)
         self._count_in_repeats.setIcon(
             make_toggle_icon(draw_repeat, icon_color)
         )
-        self._count_in_repeats.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._count_in_repeats.setIconSize(
+            QSize(ROW_ICON_SIZE, ROW_ICON_SIZE)
+        )
         self._count_in_repeats.setToolTip(
             "Also count in before each A-B loop repeat"
         )
@@ -303,11 +306,13 @@ class PracticeRack(QWidget):
         self._metronome_toggle = QPushButton()
         self._metronome_toggle.setObjectName("icon-btn")
         self._metronome_toggle.setCheckable(True)
-        self._metronome_toggle.setFixedSize(36, 36)
+        self._metronome_toggle.setFixedSize(ROW_BUTTON, ROW_BUTTON)
         self._metronome_toggle.setIcon(
             make_toggle_icon(draw_power, icon_color)
         )
-        self._metronome_toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self._metronome_toggle.setIconSize(
+            QSize(ROW_ICON_SIZE, ROW_ICON_SIZE)
+        )
         self._metronome_toggle.setToolTip("Toggle metronome (M)")
         self._metronome_toggle.setAccessibleName("Metronome")
         self._metronome_toggle.toggled.connect(

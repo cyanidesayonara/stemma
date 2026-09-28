@@ -17,6 +17,14 @@ from src.ui.styles import ON_ACCENT
 ICON_SIZE = 24
 STEM_ICON_SIZE = 18
 
+# Three button sizes, one per kind of row (#186): the transport's primary
+# buttons, controls that sit beside 30 px fields in the practice rack, and
+# the compact rows of the mixer and library.
+TRANSPORT_BUTTON = 36
+ROW_BUTTON = 30
+ROW_ICON_SIZE = 20
+COMPACT_BUTTON = 28
+
 _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
 # A disabled glyph is its normal color at this opacity, so it recedes toward
 # whatever sits behind it in either theme. Qt's generated disabled pixmap

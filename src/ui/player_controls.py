@@ -358,7 +358,7 @@ class PlayerControls(QWidget):
         self._time_label = transport.time_label
         self._master_vol_label_prefix = transport.master_volume_prefix
         self._master_volume_slider = transport.master_volume_slider
-        self._master_volume_label = transport.master_volume_label
+        self._master_volume_combo = transport.master_volume_combo
         self._waveform_frame = self._waveform_panel.frame
         self._waveform = self._waveform_panel.waveform
         self._play_icon = transport.play_icon
@@ -676,7 +676,7 @@ class PlayerControls(QWidget):
     def _on_master_volume_slider_changed(self, value: int) -> None:
         """Slider moved -- mirror the new value into the player and label."""
         self._player.set_master_volume(value / 100.0)
-        self._master_volume_label.setText(f"{value}%")
+        self._master_volume_combo.setEditText(f"{value}%")
 
     def set_master_volume(self, volume: float) -> None:
         """Set master volume from any entry point (shortcut, session load).
@@ -689,7 +689,7 @@ class PlayerControls(QWidget):
             self._master_volume_slider.blockSignals(True)
             self._master_volume_slider.setValue(value)
             self._master_volume_slider.blockSignals(False)
-        self._master_volume_label.setText(f"{value}%")
+        self._master_volume_combo.setEditText(f"{value}%")
         self._player.set_master_volume(value / 100.0)
 
     def _on_waveform_seek(self, seconds: float) -> None:
