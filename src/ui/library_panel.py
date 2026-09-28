@@ -203,7 +203,7 @@ def _draw_next(p: QPainter, s: int) -> None:
 # ---------------------------------------------------------------------------
 
 class _SongDelegate(QStyledItemDelegate):
-    """Two-line delegate: artist (bold) on top, title (subdued) below."""
+    """Two-line delegate: title (bold) on top, artist (subdued) below."""
 
     _V_PADDING = 4
     _PLAYING_BAR_WIDTH = 3
@@ -272,43 +272,49 @@ class _SongDelegate(QStyledItemDelegate):
         title = index.data(_TITLE_ROLE) or ""
         rect = option.rect.adjusted(left_inset, self._V_PADDING, -4, -self._V_PADDING)
 
-        # Artist line (bold).
+        # Title on top (bold), artist below (subdued), as most players do.
+        # Both elide rather than clip mid-glyph, and the separation progress
+        # keeps its own room on the second line instead of overlapping it.
         bold_font = QFont(option.font)
         bold_font.setBold(True)
+        top_rect = rect.adjusted(0, 0, 0, -rect.height() // 2)
+        bottom_rect = rect.adjusted(0, rect.height() // 2, 0, 0)
         painter.setFont(bold_font)
         painter.setPen(text_color)
-        artist_rect = rect.adjusted(0, 0, 0, -rect.height() // 2)
         painter.drawText(
-            artist_rect,
+            top_rect,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            artist,
+            painter.fontMetrics().elidedText(
+                title or artist, Qt.TextElideMode.ElideRight, top_rect.width(),
+            ),
         )
 
-        # Title line (normal, slightly smaller, subdued).
         normal_font = QFont(option.font)
         normal_font.setPointSizeF(option.font.pointSizeF() * 0.9)
         painter.setFont(normal_font)
-        painter.setPen(sub_color)
-        title_rect = rect.adjusted(0, rect.height() // 2, 0, 0)
-        painter.drawText(
-            title_rect,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            title,
-        )
-
-        # Background-separation progress, right-aligned in accent color
-        # (e.g. "Separating... 42%").
+        metrics = painter.fontMetrics()
         progress = index.data(_PROGRESS_ROLE)
+        artist_width = bottom_rect.width()
         if progress:
             # On a selected row the fill is the accent itself.
             painter.setPen(
                 sub_color if selected else QColor(self._accent_color)
             )
             painter.drawText(
-                title_rect,
+                bottom_rect,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 progress,
             )
+            artist_width -= metrics.horizontalAdvance(progress) + 8
+        painter.setPen(sub_color)
+        painter.drawText(
+            bottom_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            metrics.elidedText(
+                artist if title else "", Qt.TextElideMode.ElideRight,
+                max(0, artist_width),
+            ),
+        )
 
         # Separator line at the bottom of each item.
         painter.setPen(QPen(self._separator_color, 1))

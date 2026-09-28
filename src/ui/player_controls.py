@@ -162,6 +162,17 @@ class PlayerControls(QWidget):
         self._setup_ui()
         self._connect_signals()
 
+    # Below this height the footer (copyright and logo) gives its 44 px to
+    # the mixer: at a 900x600 window only one stem row was visible (#186).
+    _FOOTER_MIN_HEIGHT = 680
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        room = self.height() >= self._FOOTER_MIN_HEIGHT
+        if room != self._footer_room:
+            self._footer_room = room
+            self._footer_widget.setVisible(room)
+
     def _cleanup_peak_thread(self) -> None:
         """Wait for any pending peak computation before destruction."""
         self._peak_generation += 1
@@ -314,6 +325,7 @@ class PlayerControls(QWidget):
         self._arpeggio_label = AnimatedArpeggioWidget(self._theme)
         footer_layout.addWidget(self._arpeggio_label)
         layout.addWidget(self._footer_widget)
+        self._footer_room = True
 
         self._bind_component_aliases()
         self._connect_component_signals()

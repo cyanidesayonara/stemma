@@ -114,7 +114,10 @@ class StemRow(QWidget):
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
         self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
-        self._volume_slider.setFixedWidth(120)
+        # Grows with the card, capped so the mixer does not sprawl on a wide
+        # window; a fixed 120 px left the Stems card mostly empty (#186).
+        self._volume_slider.setMinimumWidth(120)
+        self._volume_slider.setMaximumWidth(360)
         self._volume_slider.setToolTip(
             f"{display} volume (0-200%, double-click to reset)"
         )
@@ -123,14 +126,14 @@ class StemRow(QWidget):
         self._volume_slider.mouseDoubleClickEvent = (
             lambda _: self._volume_slider.setValue(100)
         )
-        layout.addWidget(self._volume_slider)
+        layout.addWidget(self._volume_slider, 1)
 
         self._vol_combo = QComboBox()
         make_display_combo(self._vol_combo)
         for value in range(0, 201, 20):
             self._vol_combo.addItem(f"{value}%", value)
         self._vol_combo.setCurrentText("100%")
-        self._vol_combo.setFixedSize(62, 28)
+        self._vol_combo.setFixedSize(70, 28)  # room for the chevron
         self._vol_combo.setToolTip(f"{display} volume")
         self._vol_combo.setAccessibleName(f"{display} volume preset")
         self._vol_combo.activated.connect(self._on_vol_combo)

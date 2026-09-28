@@ -66,7 +66,8 @@ def fit_combo_width(combo: QComboBox, extra: int = 0) -> None:
          for index in range(combo.count())),
         default=0,
     )
-    combo.setFixedWidth(widest + 40 + extra)
+    # Padding (6 left, 18 right for the chevron) plus frame and slack.
+    combo.setFixedWidth(widest + 48 + extra)
 
 
 def _paint_glyph(draw_fn, color: QColor, size: int) -> QPixmap:

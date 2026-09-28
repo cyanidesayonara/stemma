@@ -382,7 +382,7 @@ class PracticeRack(QWidget):
         for value in range(0, 201, 20):
             self._metronome_volume_combo.addItem(f"{value}%", value)
         self._metronome_volume_combo.setCurrentText("100%")
-        self._metronome_volume_combo.setFixedWidth(62)
+        self._metronome_volume_combo.setFixedWidth(70)  # room for the chevron
         self._metronome_volume_combo.setToolTip("Metronome volume")
         self._metronome_volume_combo.setAccessibleName(
             "Metronome volume preset"
