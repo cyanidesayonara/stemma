@@ -78,6 +78,7 @@ from src.ui.player_controls import (
     shutdown_peak_pool,
 )
 from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
+from src.ui.waveform_stack_widget import lane_label
 from src.version import __version__
 
 logger = logging.getLogger("stemma")
@@ -1802,7 +1803,8 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "Delete Recording",
-            f"Delete {stem_name}? This cannot be undone.",
+            # "Take 1", as the mixer row and lane name it, not the file stem.
+            f"Delete {lane_label(stem_name)}? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

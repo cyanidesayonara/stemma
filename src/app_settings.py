@@ -87,12 +87,12 @@ def read_default_export_format(settings: QSettings) -> str:
 SEPARATION_MODELS: tuple[tuple[str, str], ...] = (
     ("htdemucs", "4-stem (vocals, drums, bass, other)"),
     ("htdemucs_6s", "6-stem (+ guitar, piano)"),
-    ("mdx_inst_hq3", "2-stem fast (vocals + backing, GPU when available)"),
+    ("mdx_inst_hq3", "2-stem fast (vocals + other, GPU when available)"),
 )
 SEPARATION_MODEL_TOOLTIP = (
     "4 and 6 stems separate every instrument on the CPU, which is slower. "
-    "2 stems splits the vocals from the backing track and uses the GPU "
-    "when one is available."
+    "2 stems splits the vocals from everything else (the Other stem) and "
+    "uses the GPU when one is available."
 )
 
 

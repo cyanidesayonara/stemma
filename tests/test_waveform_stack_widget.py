@@ -344,12 +344,12 @@ def test_solo_vocals_snapshot(app):
 
 
 @pytest.mark.parametrize("name, label", [
-    ("vocals", "vocals"),
-    ("guitar", "guitar"),
-    ("recording_take1", "take 1"),
-    ("recording_take2", "take 2"),
-    ("recording_take01", "take 1"),
-    ("recording_take", "record"),
+    ("vocals", "Vocals"),
+    ("guitar", "Guitar"),
+    ("recording_take1", "Take 1"),
+    ("recording_take2", "Take 2"),
+    ("recording_take01", "Take 1"),
+    ("recording_take", "Record"),
 ])
 def test_lane_labels_name_takes_like_the_mixer(name, label):
     """Take lanes showed the first six letters of the internal stem name,
@@ -440,3 +440,28 @@ def test_a_lone_tag_sits_beside_its_marker(app):
     (tag,) = widget.loop_tag_rects([x], 700)
     assert tag.left() > x
     widget.grab()
+
+
+def test_model_labels_name_the_stems_the_app_shows():
+    """The 2-stem option said "backing" for the stem the app calls Other."""
+    from src.app_settings import SEPARATION_MODELS
+
+    assert not any("backing" in label for _key, label in SEPARATION_MODELS)
+
+
+def test_delete_take_prompt_names_the_take_like_the_mixer(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from src.ui.main_window import MainWindow
+
+    stub = MagicMock()
+    stub._current_song_id = "s1"
+    stub._library.get_song.return_value.stems_path = str(tmp_path)
+    with patch(
+        "src.ui.main_window.QMessageBox.question",
+        return_value=QMessageBox.StandardButton.No,
+    ) as ask:
+        MainWindow._on_delete_recording(stub, "recording_take1")
+    assert ask.call_args.args[2].startswith("Delete Take 1?")
