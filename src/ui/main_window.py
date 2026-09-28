@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -635,74 +636,87 @@ class MainWindow(QMainWindow):
         self.apply_theme(self._theme, colors)
         self._update_theme_btn()
 
+    # (section, [(key, description), ...]) per column of the shortcuts
+    # dialog. Two columns: in one the dialog was about 880 px tall, which
+    # put OK off-screen on a 768 px laptop display (#186).
+    _SHORTCUT_COLUMNS = (
+        (
+            ("Playback", (
+                ("Space", "Play / Pause (presses a focused button)"),
+                ("Enter", "Press the focused button"),
+                ("Tab", "Move keyboard focus between controls"),
+                ("S", "Stop"),
+            )),
+            ("Navigation", (
+                ("0-9", "Jump to 0%\u201390% position"),
+                ("Left / Right", "Seek \u22125s / +5s"),
+                ("Home / End", "Jump to start / end"),
+            )),
+            ("Volume, Speed & Pitch", (
+                ("Up / Down", "Master volume"),
+                ("Shift+Up / Down", "Speed up / down"),
+                ("Shift+Left / Right", "Transpose \u2212 / + 1 semitone"),
+            )),
+            ("Stems", (
+                ("Ctrl+1-6", "Mute/unmute vocals, drums, bass,\n"
+                             "other, guitar, piano"),
+            )),
+        ),
+        (
+            ("Loop", (
+                ("A", "Set loop point A"),
+                ("B", "Set loop point B"),
+                ("L", "Toggle A-B loop"),
+            )),
+            ("Metronome & Recording", (
+                ("M", "Toggle metronome"),
+                ("C", "Toggle count-in"),
+                ("R", "Arm/disarm recording"),
+            )),
+            ("Library", (
+                ("N", "Next song"),
+                ("P", "Previous song"),
+            )),
+            ("Help", (
+                ("F1", "This dialog"),
+            )),
+        ),
+    )
+
     def _on_keyboard_shortcuts(self) -> None:
         """Show a dialog listing all keyboard shortcuts."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Keyboard Shortcuts")
-        dlg.setMinimumWidth(400)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(20, 20, 20, 20)
+        accent = get_colors(self._theme)["accent"]
 
-        colors = get_colors(self._theme)
-        accent = colors["accent"]
-        surface1 = colors["surface1"]
-
-        def section(title: str, first: bool = False) -> str:
-            spacer = "" if first else (
-                f"<tr><td colspan='2' style='padding-top:10px;"
-                f"border-top:1px solid {surface1};'></td></tr>"
-            )
-            return (
-                spacer
-                + f"<tr><td colspan='2' style='padding-top:4px;padding-bottom:2px;'>"
-                f"<span style='color:{accent};font-weight:600;'>{title}</span>"
-                f"</td></tr>"
-            )
-
-        def row(key: str, desc: str) -> str:
-            return (
-                f"<tr>"
-                f"<td style='padding:2px 16px 2px 8px;white-space:nowrap;'><b>{key}</b></td>"
-                f"<td style='padding:2px 8px 2px 0;'>{desc}</td>"
-                f"</tr>"
-            )
-
-        shortcuts_text = (
-            "<table cellspacing='0' cellpadding='0'>"
-            + section("Playback", first=True)
-            + row("Space", "Play / Pause (presses a focused button)")
-            + row("Enter", "Press the focused button")
-            + row("Tab", "Move keyboard focus between controls")
-            + row("S", "Stop")
-            + section("Navigation")
-            + row("0-9", "Jump to 0%–90% position")
-            + row("Left / Right", "Seek −5s / +5s")
-            + row("Home / End", "Jump to start / end")
-            + section("Volume, Speed &amp; Pitch")
-            + row("Up / Down", "Master volume")
-            + row("Shift+Up / Down", "Speed up / down")
-            + row("Shift+Left / Right", "Transpose \u2212 / + 1 semitone")
-            + section("Stems")
-            + row("Ctrl+1-6", "Mute/unmute vocals, drums, bass, other, guitar, piano")
-            + section("Loop")
-            + row("A", "Set loop point A")
-            + row("B", "Set loop point B")
-            + row("L", "Toggle A-B loop")
-            + section("Metronome &amp; Recording")
-            + row("M", "Toggle metronome")
-            + row("C", "Toggle count-in")
-            + row("R", "Arm/disarm recording")
-            + section("Library")
-            + row("N", "Next song")
-            + row("P", "Previous song")
-            + section("Help")
-            + row("F1", "This dialog")
-            + "</table>"
-        )
-        label = QLabel(shortcuts_text)
-        label.setWordWrap(False)
-        layout.addWidget(label)
+        # Plain widgets rather than an HTML table: a rich-text table's size
+        # hint is narrower than its text, so its columns clipped.
+        columns = QHBoxLayout()
+        columns.setSpacing(32)
+        for sections in self._SHORTCUT_COLUMNS:
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(3)
+            row = 0
+            for index, (title, rows) in enumerate(sections):
+                heading = QLabel(title)
+                heading.setStyleSheet(f"color: {accent}; font-weight: 600;")
+                if index:
+                    heading.setContentsMargins(0, 10, 0, 0)
+                grid.addWidget(heading, row, 0, 1, 2)
+                row += 1
+                for key, desc in rows:
+                    key_label = QLabel(key)
+                    key_label.setStyleSheet("font-weight: bold;")
+                    grid.addWidget(key_label, row, 0, Qt.AlignmentFlag.AlignTop)
+                    grid.addWidget(QLabel(desc), row, 1)
+                    row += 1
+            grid.setRowStretch(row, 1)
+            columns.addLayout(grid)
+        layout.addLayout(columns)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(dlg.accept)

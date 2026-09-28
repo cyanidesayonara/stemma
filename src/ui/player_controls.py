@@ -162,6 +162,17 @@ class PlayerControls(QWidget):
         self._setup_ui()
         self._connect_signals()
 
+    # Below this height the footer (copyright and logo) gives its 44 px to
+    # the mixer: at a 900x600 window only one stem row was visible (#186).
+    _FOOTER_MIN_HEIGHT = 680
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        room = self.height() >= self._FOOTER_MIN_HEIGHT
+        if room != self._footer_room:
+            self._footer_room = room
+            self._footer_widget.setVisible(room)
+
     def _cleanup_peak_thread(self) -> None:
         """Wait for any pending peak computation before destruction."""
         self._peak_generation += 1
@@ -314,6 +325,7 @@ class PlayerControls(QWidget):
         self._arpeggio_label = AnimatedArpeggioWidget(self._theme)
         footer_layout.addWidget(self._arpeggio_label)
         layout.addWidget(self._footer_widget)
+        self._footer_room = True
 
         self._bind_component_aliases()
         self._connect_component_signals()
@@ -1032,7 +1044,13 @@ class PlayerControls(QWidget):
             parts.append(f"A: {_format_time(a)}")
         if b is not None:
             parts.append(f"B: {_format_time(b)}")
-        self._loop_label.setText("  ".join(parts))
+        text = "  ".join(parts)
+        self._loop_label.setText(text)
+        # The times are drawn on the waveform; say them where assistive tech
+        # and tooltips look for them too.
+        base_tip = "Toggle A-B loop (L)"
+        self._loop_toggle_btn.setToolTip(f"{base_tip}\n{text}" if text else base_tip)
+        self._loop_toggle_btn.setAccessibleDescription(text)
 
     # -- Speed control slots --
 

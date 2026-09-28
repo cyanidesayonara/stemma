@@ -114,7 +114,10 @@ class StemRow(QWidget):
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
         self._volume_slider.setRange(0, 200)
         self._volume_slider.setValue(100)
-        self._volume_slider.setFixedWidth(120)
+        # Grows with the card, capped so the mixer does not sprawl on a wide
+        # window; a fixed 120 px left the Stems card mostly empty (#186).
+        self._volume_slider.setMinimumWidth(120)
+        self._volume_slider.setMaximumWidth(360)
         self._volume_slider.setToolTip(
             f"{display} volume (0-200%, double-click to reset)"
         )
@@ -123,18 +126,31 @@ class StemRow(QWidget):
         self._volume_slider.mouseDoubleClickEvent = (
             lambda _: self._volume_slider.setValue(100)
         )
-        layout.addWidget(self._volume_slider)
+        layout.addWidget(self._volume_slider, 1)
 
         self._vol_combo = QComboBox()
         make_display_combo(self._vol_combo)
         for value in range(0, 201, 20):
             self._vol_combo.addItem(f"{value}%", value)
         self._vol_combo.setCurrentText("100%")
-        self._vol_combo.setFixedSize(62, 28)
+        self._vol_combo.setFixedSize(70, 28)  # room for the chevron
         self._vol_combo.setToolTip(f"{display} volume")
         self._vol_combo.setAccessibleName(f"{display} volume preset")
         self._vol_combo.activated.connect(self._on_vol_combo)
         layout.addWidget(self._vol_combo)
+
+        # Take rows add a nudge spinbox and a delete button. Every row keeps
+        # that slot, empty on stem rows, so the stretching sliders and the
+        # preset combos line up down the mixer at any width (#201 review).
+        self._take_slot = QWidget()
+        # An empty slot must not paint the app's widget background as a box.
+        self._take_slot.setObjectName("take-slot")
+        self._take_slot.setStyleSheet("#take-slot { background: transparent; }")
+        slot = QHBoxLayout(self._take_slot)
+        slot.setContentsMargins(0, 0, 0, 0)
+        slot.setSpacing(layout.spacing())
+        self._take_slot.setFixedWidth(_take_controls_width(layout.spacing()))
+        layout.addWidget(self._take_slot)
 
         # Every control in this row is fixed width, so without a stretch the
         # layout spreads the slack between them: at 1366px that left roughly
@@ -143,9 +159,8 @@ class StemRow(QWidget):
         layout.addStretch()
 
     def _append_control(self, widget: QWidget) -> None:
-        """Add a control at the end of the row, before the packing stretch."""
-        layout = self.layout()
-        layout.insertWidget(layout.count() - 1, widget)
+        """Add a take control to the row's reserved slot."""
+        self._take_slot.layout().addWidget(widget)
 
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
@@ -194,6 +209,15 @@ class StemRow(QWidget):
         self._solo_btn.setIcon(make_toggle_icon(
             draw_solo, icon_color, STEM_ICON_SIZE, checked_color=on_accent,
         ))
+
+
+def _take_controls_width(spacing: int) -> int:
+    """Width of a take row's nudge spinbox and delete button."""
+    spin = QSpinBox()
+    spin.setRange(-200, 200)
+    spin.setSuffix(" ms")
+    fit_spinbox_width(spin, sample="-200 ms")
+    return spin.width() + spacing + 28
 
 
 class RecordingStemRow(StemRow):
