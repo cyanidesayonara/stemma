@@ -262,7 +262,6 @@ Fields map to Partner Center as follows:
 | Search terms | [Search terms](#search-terms) |
 
 Assets: `assets/store_listing/` (regenerate with
-`python scripts/generate_brand.py` then
 `python scripts/generate_store_listing_assets.py`).
 Screenshots: `assets/store_listing/screenshots/` (regenerate with
 `python scripts/generate_screenshots.py`).
