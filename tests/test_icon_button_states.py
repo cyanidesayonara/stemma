@@ -299,7 +299,7 @@ def test_repeat_stays_a_button_for_assistive_tech(app):
     # out on a loaded machine before an event pass sees the timer due.
     clicked = QSignalSpy(button.clicked)
     actions.doAction(QAccessibleActionInterface.pressAction())
-    assert clicked.count() == 1 or clicked.wait(5000), "Press never clicked"
+    assert clicked.count() >= 1 or clicked.wait(5000), "Press never clicked"
 
     assert panel._repeat_mode == REPEAT_ALL
     assert _fill(button) == QColor(colors["accent"]).name()

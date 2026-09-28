@@ -413,7 +413,7 @@ class TestDetectionWorker:
         worker = DetectionWorker(stems, 44100)
         worker.completed.connect(results.append)
         worker.start()
-        worker.wait(30_000)
+        assert worker.wait(30_000), "detection worker did not finish"
         QCoreApplication.processEvents()
 
         assert len(results) == 1
@@ -426,7 +426,7 @@ class TestDetectionWorker:
         worker.completed.connect(results.append)
         worker.error.connect(errors.append)
         worker.start()
-        worker.wait(10_000)
+        assert worker.wait(10_000), "detection worker did not finish"
         QCoreApplication.processEvents()
 
         # Empty stems should return an empty result, not an error.
