@@ -241,6 +241,14 @@ class MainWindow(QMainWindow):
         """Show a dialog when the player cannot open an output stream."""
         QMessageBox.warning(self, "Playback", message)
 
+    def _on_recording_unavailable(self, message: str) -> None:
+        """Recording could not start; the player disarmed it and played on."""
+        record_btn = self._player_controls._record_btn
+        record_btn.blockSignals(True)
+        record_btn.setChecked(False)
+        record_btn.blockSignals(False)
+        QMessageBox.warning(self, "Recording", message)
+
     def _setup_ui(self) -> None:
         """Build the main window layout."""
         self._library_panel = LibraryPanel(self._library)
@@ -1164,8 +1172,32 @@ class MainWindow(QMainWindow):
             self._intro_pending = False
             QTimer.singleShot(300, self._player_controls.play_intro_animation)
 
+    def _confirm_quit(self) -> bool:
+        """Ask before quitting discards a separation; True to quit."""
+        pending = self._separation_queue.pending_count
+        if pending == 0:
+            return True
+        if pending == 1:
+            text = "A song is still separating. Quit and discard it?"
+        else:
+            text = (
+                f"{pending} songs are still separating or waiting. "
+                "Quit and discard them?"
+            )
+        reply = QMessageBox.question(
+            self,
+            "Quit stemma",
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
+        if not self._confirm_quit():
+            event.ignore()
+            return
         try:
             self._save_session()
         except Exception:
@@ -1239,6 +1271,9 @@ class MainWindow(QMainWindow):
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.playback_failed.connect(self._on_playback_failed)
+        self._player.recording_unavailable.connect(
+            self._on_recording_unavailable
+        )
         self._player.recording_saved.connect(self._on_recording_saved)
 
     # ------------------------------------------------------------------

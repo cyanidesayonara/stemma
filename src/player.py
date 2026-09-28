@@ -398,6 +398,9 @@ class MultiTrackPlayer(QObject):
     stretch_progress = Signal(int, int)  # (current_stem, total_stems)
     stretch_finished = Signal()  # render completed (success or error)
     playback_failed = Signal(str)
+    # Recording was armed but no input could be opened; recording is
+    # disarmed and playback continues without it.
+    recording_unavailable = Signal(str)
     recording_saved = Signal(str)  # emitted with the saved WAV path
     loop_wrapped = Signal()  # A-B loop repeated (wrapped back to A)
 
@@ -1041,6 +1044,50 @@ class MultiTrackPlayer(QObject):
             self.pause()
             self.play()
 
+    def _open_recording_stream(self):
+        """Open the full-duplex stream for recording, or return None.
+
+        None means there is no usable input: no default input device, a
+        device with no input channels, or PortAudio refused the stream.
+        A failure to *query* the device is not treated as missing input.
+        """
+        in_dev = self._input_device
+        out_dev = self._output_device
+        try:
+            defaults = sd.default.device
+            in_resolved = in_dev if in_dev is not None else defaults[0]
+            out_resolved = out_dev if out_dev is not None else defaults[1]
+        except (TypeError, IndexError):
+            in_resolved = in_dev
+            out_resolved = out_dev
+        # PortAudio reports "no default input" as -1.
+        if in_resolved is None or (
+            isinstance(in_resolved, int) and in_resolved < 0
+        ):
+            return None
+        input_ch = 1
+        try:
+            info = sd.query_devices(in_resolved)
+            max_in = int(info.get("max_input_channels", 1))
+            if max_in <= 0:
+                return None
+            input_ch = max(1, min(max_in, 2))
+        except (sd.PortAudioError, ValueError, TypeError, OSError):
+            pass
+        try:
+            stream = sd.Stream(
+                samplerate=self._sample_rate,
+                channels=(input_ch, 2),
+                callback=self._full_duplex_callback,
+                device=(in_resolved, out_resolved),
+            )
+        except (sd.PortAudioError, ValueError, OSError):
+            return None
+        if self._recording_buffer is None:
+            self._allocate_recording_buffer()
+        self._recording = True
+        return stream
+
     def play(self) -> None:
         """Start or resume playback."""
         if not self._stems or self._is_playing:
@@ -1050,44 +1097,28 @@ class MultiTrackPlayer(QObject):
             self._current_frame = 0
 
         try:
-            if self._stream is None:
-                if self._recording_armed:
-                    if self._recording_buffer is None:
-                        self._allocate_recording_buffer()
-                    in_dev = self._input_device
-                    out_dev = self._output_device
-                    try:
-                        defaults = sd.default.device
-                        in_resolved = in_dev if in_dev is not None else defaults[0]
-                        out_resolved = out_dev if out_dev is not None else defaults[1]
-                    except (TypeError, IndexError):
-                        in_resolved = in_dev
-                        out_resolved = out_dev
-                    input_ch = 1
-                    try:
-                        if in_resolved is not None:
-                            info = sd.query_devices(in_resolved)
-                            input_ch = max(
-                                1, min(int(info.get("max_input_channels", 1)), 2)
-                            )
-                    except (sd.PortAudioError, ValueError, TypeError, OSError):
-                        pass
-                    self._stream = sd.Stream(
-                        samplerate=self._sample_rate,
-                        channels=(input_ch, 2),
-                        callback=self._full_duplex_callback,
-                        device=(in_resolved, out_resolved),
+            if self._stream is None and self._recording_armed:
+                self._stream = self._open_recording_stream()
+                if self._stream is None:
+                    # No usable input: recording is off, playback goes on,
+                    # and the next Play does not fail the same way again.
+                    self._recording_armed = False
+                    self._recording_buffer = None
+                    self.recording_unavailable.emit(
+                        "No microphone or other input device could be "
+                        "opened, so recording was turned off. Connect one "
+                        "or choose it in Edit > Preferences, then arm "
+                        "recording again."
                     )
-                    self._recording = True
-                else:
-                    kwargs: dict[str, Any] = {
-                        "samplerate": self._sample_rate,
-                        "channels": 2,
-                        "callback": self._audio_callback,
-                    }
-                    if self._output_device is not None:
-                        kwargs["device"] = self._output_device
-                    self._stream = sd.OutputStream(**kwargs)
+            if self._stream is None:
+                kwargs: dict[str, Any] = {
+                    "samplerate": self._sample_rate,
+                    "channels": 2,
+                    "callback": self._audio_callback,
+                }
+                if self._output_device is not None:
+                    kwargs["device"] = self._output_device
+                self._stream = sd.OutputStream(**kwargs)
             self._stream.start()
         except (sd.PortAudioError, OSError):
             if self._stream is not None:

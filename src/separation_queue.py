@@ -111,14 +111,20 @@ class SeparationQueue(QObject):
         Interrupted songs keep the pending marker their import wrote and
         get no completion marker, so the startup prune removes them on the
         next launch.
+
+        The worker is held until its thread has stopped, even past
+        *wait_ms*: dropping the last reference to a running QThread
+        destroys it mid-run and crashes the process on exit. Every stage
+        checks the cancel flag, so the wait is at most one inference
+        segment or one stem write.
         """
         self._pending.clear()
         worker = self._active_worker
         if worker is not None:
             worker.cancel()
             self._detach_active()
-            if worker.isRunning():
-                worker.wait(wait_ms)
+            if worker.isRunning() and not worker.wait(wait_ms):
+                worker.wait()
 
     # ------------------------------------------------------------------
     # Internals

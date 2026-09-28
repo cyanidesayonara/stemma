@@ -457,9 +457,17 @@ class SeparatorWorker(QThread):
         """
         from src.post_processing import wiener_filter, soft_gate
 
-        stems = wiener_filter(stems)
-        stems = soft_gate(stems)
+        def cancelled() -> bool:
+            return self._is_cancelled
+
+        stems = wiener_filter(stems, should_cancel=cancelled)
+        stems = soft_gate(stems, should_cancel=cancelled)
         return stems
+
+    def _raise_if_cancelled(self) -> None:
+        """Stop between steps that take a while (filters, stem writes)."""
+        if self._is_cancelled:
+            raise InterruptedError("Separation cancelled by user.")
 
     def _save_stems(self, separated: np.ndarray) -> dict[str, str]:
         """Write separated stems to WAV files.
@@ -475,6 +483,9 @@ class SeparatorWorker(QThread):
         result_files = {}
 
         for i, stem_name in enumerate(self.stems):
+            # No completion marker is written after a cancel, so the
+            # interrupted import is rolled back rather than kept half-done.
+            self._raise_if_cancelled()
             out_path = os.path.join(self.output_dir, f"{stem_name}.wav")
             # Transpose to (samples, channels) for soundfile.
             stem_audio = separated[i].T

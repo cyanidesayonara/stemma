@@ -299,6 +299,9 @@ class MdxSeparatorWorker(QThread):
         ]
         result = {}
         for name, data in ((primary_file, primary), (secondary_file, secondary)):
+            # Stop before each write; no marker means the import rolls back.
+            if self._is_cancelled:
+                raise InterruptedError("Separation cancelled by user.")
             path = os.path.join(self.output_dir, f"{name}.wav")
             sf.write(path, data.T, SAMPLE_RATE, subtype="PCM_16")
             result[name] = path
