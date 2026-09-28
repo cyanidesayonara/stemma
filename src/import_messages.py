@@ -61,6 +61,13 @@ MSG_UNREADABLE_AUDIO = (
     "stemma can't read this audio file. It may be damaged or in an "
     "unsupported format. Supported: MP3, WAV, FLAC."
 )
+# libsndfile reports a file it cannot open for writing (read-only, or held
+# by another program) as "System error", the same exception type it uses
+# for unreadable audio.
+MSG_CANNOT_OPEN_FILE = (
+    "stemma couldn't open the file. Check that it isn't open in another "
+    "program and that you can write to its folder."
+)
 MSG_DOWNLOAD_DAMAGED = (
     "The download was incomplete or damaged. Try again."
 )
@@ -85,6 +92,11 @@ MSG_YT_BOT_CHECK = (
     "Wait a while and try again."
 )
 MSG_YT_LIVE = "Live streams can't be imported. Try again after it ends."
+MSG_YT_UPCOMING = "This video hasn't premiered yet. Try again after it does."
+MSG_YT_FORMAT = (
+    "YouTube changed how this video is served. Try again later, or update "
+    "stemma."
+)
 
 _READABLE = frozenset(
     value for name, value in globals().items()
@@ -170,8 +182,9 @@ def _exception_chain(exc: BaseException) -> list[BaseException]:
         if isinstance(exc_info, tuple) and len(exc_info) >= 2:
             if isinstance(exc_info[1], BaseException):
                 pending.append(exc_info[1])
+        # Explicit causes only: an unrelated error raised while another was
+        # being handled (__context__) must not take on that one's meaning.
         pending.append(current.__cause__)
-        pending.append(current.__context__)
     return chain
 
 
@@ -186,6 +199,8 @@ def _typed_message(exc: BaseException) -> str | None:
     if isinstance(exc, urllib.error.HTTPError):
         return MSG_HTTP_404 if exc.code == 404 else MSG_HTTP
     if isinstance(exc, sf.SoundFileError):
+        if "system error" in str(exc).lower():
+            return MSG_CANNOT_OPEN_FILE
         return MSG_UNREADABLE_AUDIO
     if isinstance(exc, socket.gaierror):
         return MSG_OFFLINE
@@ -222,14 +237,19 @@ def _youtube_message(low: str) -> str | None:
         or "sign in to confirm" in low
     ):
         return MSG_YT_BOT_CHECK
-    if "live event" in low or "is live" in low or "premieres in" in low:
+    if "premieres in" in low or "premiere will begin" in low:
+        return MSG_YT_UPCOMING
+    if "live event" in low or "is live" in low:
         return MSG_YT_LIVE
+    if "requested format is not available" in low:
+        return MSG_YT_FORMAT
     if (
         "video unavailable" in low
         or "has been removed" in low
         or "no longer available" in low
         or "account associated with this video has been terminated" in low
         or "not available in your country" in low
+        or "not made this video available in your country" in low
         or "is not available" in low
     ):
         return MSG_YT_UNAVAILABLE

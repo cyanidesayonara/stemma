@@ -5,6 +5,8 @@ import logging
 import socket
 import urllib.error
 
+import pytest
+
 import soundfile as sf
 
 from src.import_messages import (
@@ -266,3 +268,56 @@ class TestDescribeError:
         assert READABLE
         for message in READABLE:
             assert format_import_error(message) == message
+
+
+# -- #199 review follow-ups ------------------------------------------------
+
+def test_a_failed_write_is_not_called_unreadable_audio(tmp_path):
+    """libsndfile raises the same SoundFileError for a file it cannot open
+    for writing; exporting over a read-only or locked file said the audio
+    was unreadable."""
+    import os
+    import stat
+
+    import numpy as np
+    import soundfile as sf
+
+    from src.import_messages import MSG_CANNOT_OPEN_FILE, describe_error
+
+    target = tmp_path / "mix.wav"
+    target.write_bytes(b"")
+    os.chmod(target, stat.S_IREAD)
+    try:
+        with pytest.raises(sf.SoundFileError) as caught:
+            sf.write(str(target), np.zeros((10, 2)), 44100)
+    finally:
+        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+
+    assert describe_error(caught.value, "export") == MSG_CANNOT_OPEN_FILE
+
+
+@pytest.mark.parametrize("text, expected_name", [
+    ("ERROR: [youtube] abc: Requested format is not available. Use "
+     "--list-formats for a list of available formats", "MSG_YT_FORMAT"),
+    ("ERROR: [youtube] abc: The uploader has not made this video "
+     "available in your country", "MSG_YT_UNAVAILABLE"),
+    ("ERROR: [youtube] abc: Premieres in 2 days", "MSG_YT_UPCOMING"),
+])
+def test_youtube_texts(text, expected_name):
+    import src.import_messages as messages
+
+    assert format_import_error(text) == getattr(messages, expected_name)
+
+
+def test_an_implicit_context_does_not_decide_the_message():
+    """An unrelated error raised while handling another one used to take
+    that one's meaning ("File not found", or even a silent "cancelled")."""
+    from src.import_messages import MSG_CANCELLED, describe_error
+
+    try:
+        try:
+            raise InterruptedError("cancelled")
+        except InterruptedError:
+            raise ValueError("Unsupported sample rate")
+    except ValueError as exc:
+        assert describe_error(exc, "import") != MSG_CANCELLED
