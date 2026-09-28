@@ -78,9 +78,12 @@ python scripts/generate_screenshots.py --song-dir "C:\path\to\separated\song" --
   replacing the old set: two composed shots (headline beside the window)
   and three full-window shots. The shot list, headlines, and captions live
   in `SHOTS` in the script; the plan behind them is issue #146.
+- The committed v3.0 set shows "Makes-Shift Salvation" by HoliznaCC0
+  (Free Music Archive, CC0 1.0), separated into six stems. Regenerate
+  with the same song so the set stays consistent.
 - `captions.txt` in the same folder holds the Partner Center caption for
   each image, in upload order.
-- Release validation checks the count and minimum size. Upload stays
+- Release validation checks the count (at least five) and minimum size. Upload stays
   manual: in Partner Center, replace the screenshots in file-name order and
   paste each caption.
 
