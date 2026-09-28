@@ -87,21 +87,19 @@ def audible_stems(
     muted_stems: set[str] | None = None,
     soloed_stems: set[str] | None = None,
     volumes: dict[str, float] | None = None,
-    master_volume: float = 1.0,
 ) -> list[str]:
     """Return the stems the user actually hears, in *stem_names* order.
 
     Mirrors the player's audio callback: when any stem is soloed, only
     soloed stems play (mute is ignored for them); otherwise every
-    unmuted stem plays. A stem whose effective gain (stem volume times
-    master volume) is zero is silent and left out.
+    unmuted stem plays. A stem whose volume is zero is silent and left
+    out. Master volume is the listening level and not part of the mix.
 
     Args:
         stem_names: Candidate stem names.
         muted_stems: Muted stem names.
         soloed_stems: Soloed stem names.
         volumes: Per-stem gain levels. Missing stems default to 1.0.
-        master_volume: Master gain applied to every stem.
     """
     muted = muted_stems or set()
     soloed = soloed_stems or set()
@@ -111,7 +109,7 @@ def audible_stems(
     else:
         active = [s for s in stem_names if s not in muted]
     return [
-        s for s in active if volumes.get(s, 1.0) * master_volume > 0.0
+        s for s in active if volumes.get(s, 1.0) > 0.0
     ]
 
 
@@ -180,15 +178,15 @@ class StemExporter:
         count_in_bpm: float = 120.0,
         count_in_volume: float = 0.5,
         soloed_stems: set[str] | None = None,
-        master_volume: float = 1.0,
         nudge_offsets: dict[str, float] | None = None,
     ) -> None:
         """Export a mix of selected stems to a WAV or MP3 file.
 
         The mix follows playback: mute/solo decide which stems are heard
-        (see :func:`audible_stems`), each stem is scaled by its volume
-        and the master volume, nudged stems are shifted in time, and the
-        mix runs to the end of the longest stem.
+        (see :func:`audible_stems`), each stem is scaled by its volume,
+        nudged stems are shifted in time, and the mix runs to the end of
+        the longest stem. The master volume is the listening level and is
+        not applied.
 
         Args:
             output_path: Destination file path (.wav or .mp3).
@@ -205,7 +203,6 @@ class StemExporter:
             count_in_bpm: Tempo for the prepended count-in (default 120).
             count_in_volume: Volume for count-in clicks (0.0--2.0).
             soloed_stems: Soloed stems. When non-empty, only these play.
-            master_volume: Master gain applied to every stem.
             nudge_offsets: Per-stem time offsets in milliseconds
                 (positive = later), as set by ``AudioPlayer.nudge_stem``.
 
@@ -221,7 +218,7 @@ class StemExporter:
             nudge_offsets = {}
 
         stem_names = audible_stems(
-            stem_names, muted_stems, soloed_stems, volumes, master_volume
+            stem_names, muted_stems, soloed_stems, volumes,
         )
         if not stem_names:
             raise ValueError("No stems selected for export")
@@ -236,7 +233,7 @@ class StemExporter:
                 sf_start = start_frame if start_frame is not None else 0
                 sf_end = end_frame if end_frame is not None else audio.shape[0]
                 audio = audio[sf_start:sf_end]
-            tracks.append(audio * (volumes.get(name, 1.0) * master_volume))
+            tracks.append(audio * volumes.get(name, 1.0))
 
         # Playback runs to the end of the longest stem, so shorter stems
         # simply fall silent rather than truncating the mix.
@@ -295,7 +292,6 @@ class ExportWorker(QThread):
         count_in_bpm: float = 120.0,
         count_in_volume: float = 0.5,
         soloed_stems: set[str] | None = None,
-        master_volume: float = 1.0,
         nudge_offsets: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
@@ -303,7 +299,6 @@ class ExportWorker(QThread):
         self.output_path = output_path
         self.muted_stems = muted_stems
         self.soloed_stems = soloed_stems or set()
-        self.master_volume = master_volume
         self.nudge_offsets = nudge_offsets or {}
         self.volumes = volumes
         self.mp3_bitrate = mp3_bitrate
@@ -320,7 +315,6 @@ class ExportWorker(QThread):
                 muted_stems=self.muted_stems,
                 soloed_stems=self.soloed_stems,
                 volumes=self.volumes,
-                master_volume=self.master_volume,
                 nudge_offsets=self.nudge_offsets,
                 mp3_bitrate=self.mp3_bitrate,
                 start_frame=self.start_frame,

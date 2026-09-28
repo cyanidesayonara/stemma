@@ -1866,14 +1866,13 @@ class MainWindow(QMainWindow):
             name: self._player.get_volume(name)
             for name in stem_paths
         }
-        master_volume = self._player.master_volume
         nudge_offsets = {
             name: ms for name, ms in self._player.nudge_offsets.items()
             if name in stem_paths
         }
-        if not audible_stems(
-            list(stem_paths), muted, soloed, volumes, master_volume
-        ):
+        # Master volume is the listening level (saved per session, with its
+        # own shortcuts), so it is not part of the exported mix.
+        if not audible_stems(list(stem_paths), muted, soloed, volumes):
             QMessageBox.information(
                 self, "Export",
                 "Nothing to export: every stem is muted, silenced by "
@@ -1931,7 +1930,6 @@ class MainWindow(QMainWindow):
                 muted_stems=muted,
                 soloed_stems=soloed,
                 volumes=volumes,
-                master_volume=master_volume,
                 nudge_offsets=nudge_offsets,
                 mp3_bitrate=bitrate,
                 start_frame=start_frame,

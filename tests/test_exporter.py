@@ -192,15 +192,12 @@ class TestAudibleStems:
             ["a", "b"], set(), set(), volumes={"a": 0.0}
         ) == ["b"]
 
-    def test_zero_master_volume_silences_everything(self):
-        assert audible_stems(["a"], set(), set(), master_volume=0.0) == []
-
     def test_all_muted_is_empty(self):
         assert audible_stems(["a", "b"], {"a", "b"}, set()) == []
 
 
 class TestExportMixMatchesPlayback:
-    """Export applies solo, volumes, master volume and nudge (#183)."""
+    """Export applies solo, volumes and nudge (#183)."""
 
     def test_solo_exports_only_soloed_stem(self, tmp_path):
         paths = _impulse_dir(tmp_path, {"a": 1000, "b": 1000, "c": 1000})
@@ -216,15 +213,13 @@ class TestExportMixMatchesPlayback:
                 str(tmp_path / "x.wav"), muted_stems={"a"}
             )
 
-    def test_master_volume_scales_mix(self, tmp_path):
+    def test_stem_volumes_scale_mix(self, tmp_path):
         paths = _impulse_dir(tmp_path, {"a": 1000, "b": 1000})
-        out = str(tmp_path / "master.wav")
-        StemExporter(paths).export_mix(
-            out, volumes={"a": 1.0, "b": 0.5}, master_volume=0.5
-        )
+        out = str(tmp_path / "volumes.wav")
+        StemExporter(paths).export_mix(out, volumes={"a": 1.0, "b": 0.5})
         audio, _ = sf.read(out, dtype="float32")
-        # (0.1 * 1.0 + 0.1 * 0.5) * 0.5
-        assert np.allclose(audio, 0.075, atol=1e-4)
+        # 0.1 * 1.0 + 0.1 * 0.5; the master volume is not applied.
+        assert np.allclose(audio, 0.15, atol=1e-4)
 
     def test_nudge_shifts_take_later(self, tmp_path):
         paths = _impulse_dir(tmp_path, {"take": SAMPLE_RATE})
@@ -271,7 +266,7 @@ class TestExportMixMatchesPlayback:
 
 class TestExportWorkerForwardsState:
 
-    def test_worker_passes_solo_master_and_nudge(self):
+    def test_worker_passes_solo_and_nudge(self):
         exporter = MagicMock()
         worker = ExportWorker(
             exporter=exporter,
@@ -279,14 +274,13 @@ class TestExportWorkerForwardsState:
             muted_stems={"a"},
             volumes={"b": 0.5},
             soloed_stems={"b"},
-            master_volume=0.8,
             nudge_offsets={"recording_take1": 20.0},
         )
         worker.run()
         kwargs = exporter.export_mix.call_args.kwargs
         assert kwargs["soloed_stems"] == {"b"}
         assert kwargs["muted_stems"] == {"a"}
-        assert kwargs["master_volume"] == 0.8
+        assert "master_volume" not in kwargs
         assert kwargs["nudge_offsets"] == {"recording_take1": 20.0}
 
 

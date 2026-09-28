@@ -556,7 +556,8 @@ class TestExportUsesAudibleMix:
         save.assert_called_once()
         kwargs = worker_cls.call_args.kwargs
         assert kwargs["soloed_stems"] == {"drums"}
-        assert kwargs["master_volume"] == 0.7
+        # The master volume is the listening level, not part of the mix.
+        assert "master_volume" not in kwargs
         assert kwargs["nudge_offsets"] == {"recording_take1": 30.0}
 
     def test_only_loaded_takes_are_exported(self, app, tmp_path):
@@ -576,10 +577,9 @@ class TestExportUsesAudibleMix:
         save.assert_not_called()
         worker_cls.assert_not_called()
 
-    def test_zero_master_volume_warns_before_save_dialog(
-        self, app, tmp_path
-    ):
+    def test_zero_master_volume_still_exports(self, app, tmp_path):
+        """Master volume 0 silences the speakers, not the export."""
         stub = self._stub(tmp_path, master=0.0)
-        info, save, _ = self._run(stub)
-        info.assert_called_once()
-        save.assert_not_called()
+        info, save, worker_cls = self._run(stub)
+        info.assert_not_called()
+        save.assert_called_once()
