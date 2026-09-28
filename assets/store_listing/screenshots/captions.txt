@@ -1,0 +1,5 @@
+01_practice.png: Mute your part and play along with the band
+02_loop_trainer.png: Slow down, transpose, and loop the hard bars
+03_detected.png: Key, chords, and tempo detected for you
+04_import.png: Split into 2, 4, or 6 stems; two-stem mode can use your GPU
+05_takes.png: Record takes over the stems and line them up

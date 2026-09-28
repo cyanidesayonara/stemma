@@ -1771,6 +1771,10 @@ class MultiTrackPlayer(QObject):
             self._loop_a_frame = int(self._loop_a_frame * ratio)
         if self._loop_b_frame is not None:
             self._loop_b_frame = int(self._loop_b_frame * ratio)
+        # The position and length are now in the new time base; tell the UI
+        # even while paused, or the time readout keeps the old values.
+        if self._sample_rate:
+            self.position_changed.emit(self._current_frame / self._sample_rate)
 
     # ------------------------------------------------------------------
     # Internal Callbacks

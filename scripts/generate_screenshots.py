@@ -107,7 +107,7 @@ class Shot:
 # the detected tempo, including shot 3 ("loaded"), which never enters
 # the practice staging path.
 SYNC_METRONOME_STATES = frozenset(
-    ("practice", "loop_trainer", "takes", "loaded"),
+    ("practice", "loop_trainer", "takes", "loaded", "import"),
 )
 
 SHOTS = (
@@ -273,6 +273,15 @@ def stage(app, window, shot, song_id) -> None:
         _wait_for_renders(app, renders)
     show_current_chord(window)
     pump(app, 0.2)
+    clear_focus(app)
+
+
+def clear_focus(app) -> None:
+    """Drop keyboard focus, so no caret or focus ring draws the eye."""
+    focused = app.focusWidget()
+    if focused is not None:
+        focused.clearFocus()
+    pump(app, 0.1)
 
 
 def sync_metronome(window) -> None:
@@ -320,20 +329,50 @@ def grab_import_over(app, window, library, stemma_dir):
     index = dialog._model_combo.findData(MODEL_KEYS[2])
     if index >= 0:
         dialog._model_combo.setCurrentIndex(index)
+    sync_metronome(window)
+    show_current_chord(window)
     dialog.show()
     pump(app, 0.5)
+    clear_focus(app)
     base = window.grab().toImage()
     top = dialog.grab().toImage()
     painter = QPainter(base)
     painter.fillRect(base.rect(), _rgba(0, 0, 0, 90))
+    # Offscreen windows have no frame; without a title bar the dialog read
+    # as a floating panel (#211 review).
+    bar_h = 32
+    height = top.height() + bar_h
+    # Over the waveform, clear of the card edges below it.
     origin = QPoint((base.width() - top.width()) // 2,
-                    (base.height() - top.height()) // 2)
-    _shadow(painter, origin.x(), origin.y(), top.width(), top.height())
-    painter.drawImage(origin, top)
+                    max(60, (base.height() - height) // 2 - 180))
+    _shadow(painter, origin.x(), origin.y(), top.width(), height)
+    _draw_title_bar(painter, origin, top.width(), bar_h,
+                    dialog.windowTitle(), window.palette())
+    painter.drawImage(QPoint(origin.x(), origin.y() + bar_h), top)
     painter.end()
     dialog.close()
     pump(app, 0.2)
     return base
+
+
+def _draw_title_bar(painter, origin, width, height, title, palette) -> None:
+    """A plain Windows-style title bar: the dialog title and a close X."""
+    window_color = palette.window().color().darker(115)
+    text_color = palette.windowText().color()
+    painter.fillRect(origin.x(), origin.y(), width, height, window_color)
+    font = QFont(painter.font())
+    font.setPixelSize(12)
+    painter.setFont(font)
+    painter.setPen(text_color)
+    painter.drawText(
+        QRectF(origin.x() + 12, origin.y(), width - 60, height),
+        int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+        title,
+    )
+    cx = origin.x() + width - 23
+    cy = origin.y() + height / 2
+    painter.drawLine(QPointF(cx - 5, cy - 5), QPointF(cx + 5, cy + 5))
+    painter.drawLine(QPointF(cx - 5, cy + 5), QPointF(cx + 5, cy - 5))
 
 
 def _rgba(r, g, b, a):

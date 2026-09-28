@@ -158,6 +158,20 @@ class TestFrameMapping:
         expected_pos = int(old_pos / old_total * new_frames)
         assert player._current_frame == expected_pos
 
+    def test_apply_stretched_reports_the_new_position(self, player):
+        """A paused player kept showing the old time and length after a
+        speed change, because only playback ticks emitted the position."""
+        self._load_fake_stems(player)
+        positions = []
+        player.position_changed.connect(positions.append)
+        new_frames = player._total_frames * 2
+        player._apply_stretched_stems({
+            "vocals": np.zeros((new_frames, 2), dtype=np.float32),
+        })
+        assert positions == [
+            pytest.approx(player._current_frame / player._sample_rate)
+        ]
+
     def test_apply_stretched_adjusts_loop_points(self, player):
         """Loop A and B frames are proportionally adjusted."""
         self._load_fake_stems(player)
