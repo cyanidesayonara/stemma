@@ -71,7 +71,7 @@ def _align_form_labels(forms) -> None:
     for label in labels:
         label.setMinimumWidth(width)
     for form in forms:
-        form.setVerticalSpacing(8)
+        form.setVerticalSpacing(6)
 
 
 class PreferencesDialog(QDialog):

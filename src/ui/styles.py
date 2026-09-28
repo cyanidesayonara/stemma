@@ -100,13 +100,17 @@ def badge_html(theme: str, label: str, value: str,
     return value_html
 
 
-def _chevron_path(theme: str) -> str:
-    """Absolute, forward-slashed path of the combo chevron for *theme*."""
-    path = os.path.join(app_root(), "assets", "icons", f"chevron_down_{theme}.svg")
+def _chevron_path(theme: str, direction: str = "down") -> str:
+    """Absolute, forward-slashed path of a chevron icon for *theme*."""
+    path = os.path.join(
+        app_root(), "assets", "icons", f"chevron_{direction}_{theme}.svg"
+    )
     return path.replace("\\", "/")
 
 
-def _generate_stylesheet(c: dict[str, str], chevron: str = "") -> str:
+def _generate_stylesheet(
+    c: dict[str, str], chevron: str = "", chevron_up: str = "",
+) -> str:
     """Generate a QSS stylesheet from a color token dict."""
     return f"""
 QMainWindow, QDialog {{
@@ -488,14 +492,28 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
     width: 16px;
 }}
 
+/* Styling the buttons drops the native arrows; spin boxes that show
+   buttons (latency, BPM) need them drawn back. */
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{chevron_up}");
+    width: 8px;
+    height: 5px;
+}}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{chevron}");
+    width: 8px;
+    height: 5px;
+}}
+
 /* Dialog groups look like the cockpit's cards; without a rule they drew
    native frames, and labels in them painted bands in the light theme. */
 QGroupBox {{
     background-color: {c["mantle"]};
     border: 1px solid {c["surface0"]};
     border-radius: 6px;
-    margin-top: 22px;
-    padding: 8px 6px 6px 6px;
+    margin-top: 16px;
+    padding: 6px 6px 4px 6px;
     color: {c["text"]};
 }}
 
@@ -503,16 +521,17 @@ QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 2px;
-    padding: 0 2px 4px 2px;
+    padding: 0 2px 2px 2px;
 }}
 
 QGroupBox QLabel, QGroupBox QCheckBox {{
     background-color: transparent;
 }}
 
-/* About 20 px tall without this, which clipped descenders ("Svstem"). */
-QComboBox {{
-    min-height: 24px;
+/* Dialog combos drew about 20 px tall, which clipped descenders
+   ("Svstem"). Scoped to dialogs so the cockpit keeps its rows. */
+QDialog QComboBox {{
+    min-height: 20px;
 }}
 
 QWidget#footer {{
@@ -534,8 +553,12 @@ QLabel#copyright {{
 """
 
 
-DARK_STYLESHEET = _generate_stylesheet(DARK_COLORS, _chevron_path("dark"))
-LIGHT_STYLESHEET = _generate_stylesheet(LIGHT_COLORS, _chevron_path("light"))
+DARK_STYLESHEET = _generate_stylesheet(
+    DARK_COLORS, _chevron_path("dark"), _chevron_path("dark", "up"),
+)
+LIGHT_STYLESHEET = _generate_stylesheet(
+    LIGHT_COLORS, _chevron_path("light"), _chevron_path("light", "up"),
+)
 
 THEMES = {
     "dark": {"colors": DARK_COLORS, "stylesheet": DARK_STYLESHEET},

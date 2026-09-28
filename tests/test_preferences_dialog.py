@@ -121,3 +121,37 @@ def test_preferences_accept_persists_exposed_settings(
         settings_ini.value("playback/sync_recording_pitch", type=bool)
         is True
     )
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_preferences_fits_a_1366x768_screen(
+    app, monkeypatch, settings_ini, audio_devices, theme,
+):
+    """About 728 px of a 768 px screen is left after the taskbar; the
+    dialog's title bar needs some of it too, or OK and Cancel go off-screen."""
+    from tests.widget_visual import deterministic_render_state
+    from src.ui.styles import get_stylesheet
+
+    with deterministic_render_state():
+        app.setStyleSheet(get_stylesheet(theme))
+        dialog = _dialog(monkeypatch, settings_ini)
+        assert dialog.minimumSizeHint().height() <= 690
+        dialog.deleteLater()
+
+
+def test_dialog_combo_rule_leaves_cockpit_combos_alone(app):
+    from PySide6.QtWidgets import QComboBox, QDialog, QWidget
+
+    from tests.widget_visual import deterministic_render_state
+
+    with deterministic_render_state():
+        cockpit, dialog = QWidget(), QDialog()
+        heights = []
+        for parent in (cockpit, dialog):
+            combo = QComboBox(parent)
+            combo.addItem("System default")
+            combo.ensurePolished()
+            heights.append(combo.sizeHint().height())
+        assert heights[0] < heights[1]
+        cockpit.deleteLater()
+        dialog.deleteLater()
