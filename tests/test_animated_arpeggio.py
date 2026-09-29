@@ -1,10 +1,13 @@
 """Tests for the animated footer arpeggio logo widget."""
 
+import os
+
 import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent, QPointingDevice
 from PySide6.QtWidgets import QApplication
 
+import src.ui.animated_arpeggio as arpeggio_module
 from src.ui.animated_arpeggio import (
     AnimatedArpeggioWidget,
     _ANIM_END_MS,
@@ -18,6 +21,7 @@ from src.ui.animated_arpeggio import (
     _glow,
     _load_base_svg,
 )
+from src.ui.svg_source import local_name, read_svg
 
 
 def _left_mouse_press(local_x: float, local_y: float) -> QMouseEvent:
@@ -66,6 +70,40 @@ class TestLoadBaseSvg:
     def test_clef_path_preserved(self):
         svg = _load_base_svg("dark")
         assert "<path" in svg
+
+    def test_reformatted_text_is_still_removed(self, tmp_path, monkeypatch):
+        # A text element split across lines (or several on one line) used
+        # to survive the line-based filter and draw under the animation.
+        icons = tmp_path / "assets" / "icons"
+        icons.mkdir(parents=True)
+        (icons / "logo_arpeggio_dark.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 8 420 75">'
+            '<line x1="12" y1="20" x2="408" y2="20"/><g>\n'
+            '  <text x="95"\n        y="80">s</text></g>'
+            '<text x="155" y="65">t</text>\n</svg>\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(arpeggio_module, "_ROOT", str(tmp_path))
+        svg = _load_base_svg("dark")
+        assert "text" not in svg
+        assert "<line" in svg
+
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_letters_match_the_svg(self, theme):
+        path = os.path.join(
+            arpeggio_module._ROOT, "assets", "icons",
+            f"logo_arpeggio_{theme}.svg",
+        )
+        texts = [
+            e for e in read_svg(path).iter() if local_name(e) == "text"
+        ]
+        column = 3 if theme == "dark" else 4
+        assert [(e.text, float(e.get("x"))) for e in texts] == [
+            (letter[0], float(letter[1])) for letter in _LETTERS
+        ]
+        assert [e.get("fill").lower() for e in texts] == [
+            letter[column].lower() for letter in _LETTERS
+        ]
 
 
 class TestBrightness:
