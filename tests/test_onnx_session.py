@@ -112,3 +112,24 @@ def test_selected_provider_and_user_label_are_reported():
     assert session_provider_label(dml_session) == "DirectML GPU"
     assert selected_session_provider(cpu_session) == "CPUExecutionProvider"
     assert session_provider_label(cpu_session) == "CPU fallback"
+
+
+def test_cpu_only_session_never_tries_directml(monkeypatch, tmp_path):
+    """HTDemucs cannot compile on DirectML; trying cost time and printed an
+    ONNX Runtime error on every 4/6-stem import (#159)."""
+    from src.onnx_session import create_onnx_session
+
+    ort, calls, _ = _fake_ort(
+        ["DmlExecutionProvider", "CPUExecutionProvider"],
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", ort)
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"model")
+
+    session = create_onnx_session(str(model_path), use_gpu=False)
+
+    assert session.get_providers() == ["CPUExecutionProvider"]
+    assert [kwargs["providers"] for _, kwargs in calls] == [
+        ["CPUExecutionProvider"],
+    ]
+
