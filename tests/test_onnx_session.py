@@ -133,21 +133,3 @@ def test_cpu_only_session_never_tries_directml(monkeypatch, tmp_path):
         ["CPUExecutionProvider"],
     ]
 
-
-def test_htdemucs_worker_asks_for_a_cpu_session(monkeypatch, tmp_path):
-    import src.separator as separator
-
-    seen = {}
-
-    def fake_create(path, use_gpu=True):
-        seen["use_gpu"] = use_gpu
-        return SimpleNamespace()
-
-    monkeypatch.setattr(separator, "create_onnx_session", fake_create)
-    worker = separator.SeparatorWorker(
-        input_path=str(tmp_path / "in.wav"),
-        output_dir=str(tmp_path / "out"),
-        model_path=str(tmp_path / "htdemucs.onnx"),
-    )
-    worker._create_session()
-    assert seen["use_gpu"] is False

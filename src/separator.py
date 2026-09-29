@@ -1,4 +1,4 @@
-"""Stem separation engine using ONNX Runtime with DirectML acceleration.
+"""Stem separation engine using ONNX Runtime on the CPU.
 
 Loads an HTDemucs v4 ONNX model and separates an audio file into individual
 stems (vocals, drums, bass, other, and optionally guitar + piano for the
@@ -174,7 +174,8 @@ class SeparatorWorker(QThread):
         Steps:
             1. Load and validate the input audio file.
             2. Resample to 44100Hz if necessary.
-            3. Create an ONNX Runtime session (DirectML -> CPU fallback).
+            3. Create a CPU ONNX Runtime session (HTDemucs does not
+               compile on DirectML, issue #125).
             4. Process audio in overlapping segments.
             5. For each segment: compute STFT, run inference, apply iSTFT.
             6. Write each stem to a WAV file.
