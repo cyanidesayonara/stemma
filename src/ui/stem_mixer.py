@@ -349,6 +349,10 @@ class StemMixer(QWidget):
     def max_recordings_reached(self) -> bool:
         return len(self._recording_rows) >= MAX_RECORDING_TAKES
 
+    def source_stem_names(self) -> list[str]:
+        """Return the song's stem row names, without recording takes."""
+        return list(self._stem_rows)
+
     def stem_names(self) -> list[str]:
         """Return stem row names in display order (source stems, then recordings)."""
         return list(self._stem_rows) + list(self._recording_rows)

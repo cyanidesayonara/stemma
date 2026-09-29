@@ -23,8 +23,8 @@ STEM_ICON_SIZE = 18
 # buttons, controls that sit beside 30 px fields in the practice rack, and
 # the compact rows of the mixer and library.
 TRANSPORT_BUTTON = 36
-ROW_BUTTON = 30
-ROW_ICON_SIZE = 20
+ROW_BUTTON = 28
+ROW_ICON_SIZE = 18
 COMPACT_BUTTON = 28
 
 _CHECKED_ICON_COLOR = QColor(ON_ACCENT)
