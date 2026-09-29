@@ -253,7 +253,11 @@ def _ramp_spec(n_frames: int) -> np.ndarray:
 
 
 class TestBtChunkedInference:
-    @pytest.mark.parametrize("n_frames", [150, 1488, 1500, 2977, 4000])
+    @pytest.mark.parametrize(
+        "n_frames",
+        # 1489-1494: the moved-back last chunk starts before the song.
+        [150, 1488, 1489, 1490, 1491, 1492, 1493, 1494, 1500, 2977, 4000],
+    )
     def test_each_frame_gets_its_own_prediction(self, n_frames):
         session = _EchoSession()
         beat, downbeat = _bt_chunked_inference(_ramp_spec(n_frames), session)
@@ -261,13 +265,19 @@ class TestBtChunkedInference:
         np.testing.assert_array_equal(beat, expected)
         np.testing.assert_array_equal(downbeat, -expected)
 
-    @pytest.mark.parametrize("n_frames", [150, 4000])
-    def test_chunks_have_the_model_size(self, n_frames):
+    def test_long_input_runs_in_30_second_chunks(self):
         session = _EchoSession()
-        _bt_chunked_inference(_ramp_spec(n_frames), session)
+        _bt_chunked_inference(_ramp_spec(4000), session)
         assert all(c.shape == (1, 1500, 128) for c in session.chunks)
 
-    @pytest.mark.parametrize("n_frames", [1488, 2977, 4000])
+    def test_short_input_is_padded_only_at_the_borders(self):
+        """An A-B loop shorter than one chunk runs at its own length plus
+        the 6-frame borders, as in beat_this, not padded to 30 s."""
+        session = _EchoSession()
+        _bt_chunked_inference(_ramp_spec(150), session)
+        assert [c.shape for c in session.chunks] == [(1, 150 + 12, 128)]
+
+    @pytest.mark.parametrize("n_frames", [150, 1488, 2977, 4000])
     def test_last_chunk_is_moved_back_instead_of_padded(self, n_frames):
         """Like beat_this, no chunk is mostly silence: the last one ends
         at the end of the song and only the 6-frame borders are padded."""

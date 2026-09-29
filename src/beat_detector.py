@@ -60,7 +60,8 @@ _BT_FMIN = 30.0
 _BT_FMAX = 11000.0     # official: 11 kHz upper band
 _BT_LOG_MUL = 1000.0   # ln(1 + 1000 * mel)
 
-# Chunked inference — rotary embeddings require fixed-size chunks.
+# Chunked inference, as beat_this runs it: the model takes any length, but
+# was trained on 30 s excerpts.
 _BT_CHUNK_SIZE = 1500   # frames (30 s at 50 fps)
 _BT_BORDER = 6          # overlap frames discarded at chunk boundaries
 
@@ -110,8 +111,14 @@ def _bt_chunked_inference(
     ``_BT_BORDER`` frames before the song and step by the chunk size less
     both borders, the last chunk is moved back to end with the song rather
     than being mostly padding, each chunk's borders are discarded, and
-    where two chunks overlap the earlier one wins. Every chunk is padded
-    to exactly ``_BT_CHUNK_SIZE`` frames for the fixed-size model.
+    where two chunks overlap the earlier one wins. Only the borders are
+    zero padded, so an input shorter than one chunk (an A-B loop, a short
+    song) runs at its own length. Padding it to 1500 frames instead cost
+    more missed and extra beats over 80 loops of two real songs.
+
+    For 1489 to 1494 frames the moved-back last chunk starts 1 to 5
+    frames before the song, as upstream's does; the first chunk still
+    covers those frames.
 
     Returns ``(beat_logits, downbeat_logits)`` arrays covering the full
     spectrogram, or ``(beat_logits, None)`` if the model has only one
@@ -132,7 +139,7 @@ def _bt_chunked_inference(
     for start in reversed(starts):
         chunk = spec[max(start, 0):min(start + _BT_CHUNK_SIZE, n_frames)]
         left = max(0, -start)
-        right = _BT_CHUNK_SIZE - left - chunk.shape[0]
+        right = max(0, min(_BT_BORDER, start + _BT_CHUNK_SIZE - n_frames))
         chunk = np.pad(chunk, ((left, right), (0, 0)))
 
         outputs = session.run(
