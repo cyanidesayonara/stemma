@@ -22,6 +22,10 @@ class DownloadError(Exception):
     """Raised when a download or metadata extraction fails."""
 
 
+class DownloadCancelled(DownloadError):
+    """Raised when the caller cancelled before a retry could start."""
+
+
 # YouTube often refuses the first media URL it hands out (HTTP 403) while a
 # fresh extraction a moment later works, so a download is tried up to this
 # many times, waiting _BACKOFF_S[n] seconds before retry n + 1.
@@ -32,17 +36,21 @@ _CANCEL_POLL_S = 0.1
 _sleep = time.sleep
 
 # Worth a fresh extraction: a refused or expired media URL, a server
-# hiccup, or a connection dropped mid-stream.
+# hiccup, or a connection dropped mid-stream. Windows words socket
+# failures its own way ("forcibly closed", WinError 10053/10054/10060).
 _TRANSIENT = re.compile(
     r"http error (?:403|408|500|502|503|504)\b"
-    r"|timed out|connection reset|connection aborted"
+    r"|timed out|connection reset|connection (?:was )?aborted"
+    r"|forcibly closed|did not properly respond"
+    r"|winerror 100(?:53|54|60)\b"
     r"|incomplete ?read|remote end closed",
     re.IGNORECASE,
 )
 # Never worth retrying, even when a 403 appears alongside: the video is
 # private, removed, blocked, gated behind a sign-in, or not a video.
 _PERMANENT = re.compile(
-    r"private video|video is private|video unavailable|has been removed"
+    r"private video|video is private|video (?:is )?unavailable"
+    r"|has been removed"
     r"|no longer available|not available|unsupported url|sign in"
     r"|not a bot|confirm your age|age-restricted|members-only|copyright"
     r"|premieres in|live event",
@@ -59,6 +67,26 @@ def is_transient_error(message: str) -> bool:
 def _clean_message(exc: BaseException) -> str:
     """A yt-dlp failure's text without colour codes, for log and UI."""
     return strip_ansi(str(exc)).strip()
+
+
+def _remove_leftovers(stem: str) -> None:
+    """Delete what a failed attempt left at *stem* (``.part``, ``.ytdl``).
+
+    A retry may pick a different format; resuming the old partial file
+    would append its bytes to the wrong stream.
+    """
+    folder = os.path.dirname(stem) or "."
+    prefix = os.path.basename(stem)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name == prefix or name.startswith(prefix + "."):
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError:
+                logger.warning("could not remove download leftover %s", name)
 
 
 def _wait_unless_cancelled(
@@ -170,6 +198,9 @@ def _download_options(
         "noplaylist": True,
         # Plain text: the message ends up in the log and the import dialog.
         "no_color": True,
+        # Never resume a failed attempt's partial file: a retry may pick
+        # a different format (leftovers are also removed before retrying).
+        "continuedl": False,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -194,6 +225,7 @@ def download_audio(
     output_path: str,
     progress_callback: Callable[[dict], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_retry: Callable[[int, float], None] | None = None,
 ) -> str:
     """Download the audio from *url* and save it to *output_path*.
 
@@ -212,12 +244,15 @@ def download_audio(
         should_cancel: Optional callable polled before each retry and
             during the backoff; when it returns True, no further attempt
             is made.
+        on_retry: Optional callable invoked with the number of the next
+            attempt and the backoff in seconds, before each retry waits.
 
     Returns:
         The *output_path* on success.
 
     Raises:
-        DownloadError: If the download fails or is cancelled.
+        DownloadError: If the download fails.
+        DownloadCancelled: If *should_cancel* stopped a retry.
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
@@ -245,10 +280,13 @@ def download_audio(
                 "retrying in %.1f s",
                 attempt, _MAX_ATTEMPTS, message, delay,
             )
+            if on_retry is not None:
+                on_retry(attempt + 1, delay)
             if not _wait_unless_cancelled(delay, should_cancel):
-                raise DownloadError(
+                raise DownloadCancelled(
                     f"Download cancelled after: {message}"
                 ) from exc
+            _remove_leftovers(stem)
 
     if not os.path.isfile(output_path):
         raise DownloadError(
@@ -256,5 +294,3 @@ def download_audio(
         )
 
     return output_path
-
-

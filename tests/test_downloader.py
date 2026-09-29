@@ -12,6 +12,7 @@ from src.downloader import (
     extract_metadata,
     download_audio,
     check_ffmpeg,
+    DownloadCancelled,
     DownloadError,
     is_transient_error,
 )
@@ -403,6 +404,12 @@ class TestTransientErrors:
         "Connection reset by peer",
         "IncompleteRead(1024 bytes read, 2048 more expected)",
         "Remote end closed connection without response",
+        "[WinError 10054] An existing connection was forcibly closed by the "
+        "remote host",
+        "[WinError 10060] A connection attempt failed because the connected "
+        "party did not properly respond after a period of time",
+        "[WinError 10053] An established connection was aborted by the "
+        "software in your host machine",
     ])
     def test_transient(self, message):
         assert is_transient_error(message)
@@ -413,6 +420,8 @@ class TestTransientErrors:
         "ERROR: [youtube] abc: Video unavailable. This video has been "
         "removed by the uploader",
         "ERROR: Unsupported URL: https://example.com/",
+        "ERROR: [youtube] aaaaaaaaaaa: This video is unavailable. "
+        "HTTP Error 403: Forbidden",
         "ERROR: [youtube] abc: Sign in to confirm you're not a bot",
         "ERROR: [youtube] abc: Sign in to confirm your age. HTTP Error 403",
         "ERROR: [youtube] abc: This video is not available in your country",
@@ -505,9 +514,64 @@ class TestDownloadRetry:
             yt_dlp.utils.DownloadError(RAW_403), None,
         ])
 
-        with pytest.raises(DownloadError, match="cancelled"):
+        with pytest.raises(DownloadCancelled, match="cancelled"):
             download_audio(self.URL, output_path, should_cancel=lambda: True)
         assert len(built) == 1
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_retry_starts_clean(self, mock_ydl_class, tmp_path):
+        """A failed attempt's partial file is never resumed by a retry."""
+        output_path = str(tmp_path / "audio.mp3")
+        stem = str(tmp_path / "audio")
+        other = tmp_path / "keep.txt"
+        other.write_text("unrelated")
+        seen_at_start = []
+        built = []
+
+        def make(opts):
+            built.append(opts)
+            ydl = MagicMock()
+            attempt = len(built)
+
+            def fake_download(urls):
+                seen_at_start.append(sorted(os.listdir(tmp_path)))
+                if attempt == 1:
+                    # Partway through, then the stream is refused.
+                    with open(stem + ".part", "wb") as f:
+                        f.write(b"40 percent of another format")
+                    with open(stem + ".ytdl", "w") as f:
+                        f.write("{}")
+                    raise yt_dlp.utils.DownloadError(RAW_403)
+                with open(output_path, "wb") as f:
+                    f.write(b"fake mp3 data")
+
+            ydl.download.side_effect = fake_download
+            context = MagicMock()
+            context.__enter__ = MagicMock(return_value=ydl)
+            context.__exit__ = MagicMock(return_value=False)
+            return context
+
+        mock_ydl_class.side_effect = make
+
+        download_audio(self.URL, output_path)
+        assert seen_at_start[1] == ["keep.txt"]
+        assert other.exists()
+        assert all(opts["continuedl"] is False for opts in built)
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_on_retry_reports_the_next_attempt(self, mock_ydl_class,
+                                               tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+        retries = []
+
+        download_audio(
+            self.URL, output_path,
+            on_retry=lambda attempt, delay: retries.append((attempt, delay)),
+        )
+        assert retries == [(2, downloader._BACKOFF_S[0])]
 
     @patch("src.downloader.yt_dlp.YoutubeDL")
     def test_cancel_during_backoff_stops(self, mock_ydl_class, tmp_path,

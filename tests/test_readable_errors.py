@@ -140,6 +140,55 @@ class TestWorkersEmitReadableText:
             assert worker.wait(5000)
         assert seen == [False, True]
 
+    def test_youtube_progress_never_moves_backwards(self, tmp_path):
+        from src.ui import import_dialog
+
+        def fail_then_succeed(*_args, progress_callback, on_retry,
+                              **_kwargs):
+            def at(done):
+                progress_callback({
+                    "status": "downloading", "downloaded_bytes": done,
+                    "total_bytes": 100,
+                })
+
+            at(60)
+            on_retry(2, 1.5)  # the stream was refused at 60 %
+            at(10)
+            at(75)
+
+        worker = import_dialog._DownloadWorker(
+            "https://youtu.be/abc", str(tmp_path / "a.mp3"),
+        )
+        shown = []
+        worker.progress.connect(lambda pct, text: shown.append((pct, text)))
+        with patch.object(
+            import_dialog, "download_audio", side_effect=fail_then_succeed,
+        ):
+            worker.run()
+        percents = [pct for pct, _ in shown]
+        assert percents == sorted(percents)
+        assert (60, "Retrying download (attempt 2)...") in shown
+        assert percents[-2:] == [75, 100]
+
+    def test_youtube_cancel_is_logged_quietly(self, tmp_path, caplog):
+        from src.downloader import DownloadCancelled
+        from src.ui import import_dialog
+
+        worker = import_dialog._DownloadWorker(
+            "https://youtu.be/abc", str(tmp_path / "a.mp3"),
+        )
+        errors = []
+        worker.error.connect(errors.append)
+        with caplog.at_level(logging.INFO, logger="stemma"), patch.object(
+            import_dialog, "download_audio",
+            side_effect=DownloadCancelled("Download cancelled after: 403"),
+        ):
+            worker.run()
+        assert errors == []
+        records = [r for r in caplog.records if "cancelled" in r.getMessage()]
+        assert [r.levelno for r in records] == [logging.INFO]
+        assert records[0].exc_info is None
+
 
 class TestDialogsFormatMessages:
     """Dialogs receiving a raw string still show readable text."""
