@@ -155,6 +155,10 @@ class MainWindow(QMainWindow):
         self._player = player
         self._model_manager = model_manager
         self._current_song_id: str | None = None
+        # The import whose separation the empty player is showing.
+        self._watched_separation: str | None = None
+        # The latest (song id, percent) report of the running separation.
+        self._separation_percent: tuple[str | None, int] = (None, 0)
         self._export_worker: ExportWorker | None = None
         self._shuffle_queue: list[str] = []
         self._volume_toast: QLabel | None = None
@@ -1297,14 +1301,10 @@ class MainWindow(QMainWindow):
             self._separation_queue.cancel_song
         )
         self._separation_queue.job_queued.connect(
-            lambda sid: self._library_panel.set_song_separating(
-                sid, "Queued..."
-            )
+            self._on_separation_queued
         )
         self._separation_queue.job_started.connect(
-            lambda sid: self._library_panel.set_song_separating(
-                sid, "Separating..."
-            )
+            self._on_separation_started
         )
         self._separation_queue.job_progress.connect(
             self._on_separation_progress
@@ -1376,6 +1376,9 @@ class MainWindow(QMainWindow):
             self._suppress_recording_reload = False
         self._current_song_id = None
         self._loading_song_id = song_id
+        # The load owns the empty player now; a separation that finishes
+        # meanwhile stays in the library.
+        self._watch_separation(None)
         self._library_panel.set_playing_song(None)
         self._player_controls.show_loading(song.title)
         self.setWindowTitle(f"Loading {song.title} \u2014 stemma")
@@ -1516,6 +1519,7 @@ class MainWindow(QMainWindow):
         self._player.unload()
         self._current_song_id = None
         self._player_controls.clear_song()
+        self._watch_separation(self._separation_queue.active_song_id)
         self._library_panel.set_playing_song(None)
         self._library_panel.clear_selection()
         self.setWindowTitle("stemma")
@@ -1600,6 +1604,7 @@ class MainWindow(QMainWindow):
         self._player.unload()
         self._current_song_id = None
         self._player_controls.clear_song()
+        self._watch_separation(self._separation_queue.active_song_id)
         self._library_panel.set_playing_song(None)
         self._library_panel.clear_selection()
         self.setWindowTitle("stemma")
@@ -1836,6 +1841,7 @@ class MainWindow(QMainWindow):
             self._suppress_recording_reload = False
         self._player.set_recording_song_dir(None)
         self._player_controls.clear_song()
+        self._watch_separation(self._separation_queue.active_song_id)
         self._library_panel.set_playing_song(None)
         self._library_panel.clear_selection()
         self._current_song_id = None
@@ -1895,25 +1901,83 @@ class MainWindow(QMainWindow):
                 except KeyError:
                     pass
 
+    def _on_separation_queued(self, song_id: str) -> None:
+        self._library_panel.set_song_separating(song_id, "Queued...")
+        self._refresh_separation_queued()
+
+    def _on_separation_started(self, song_id: str) -> None:
+        self._library_panel.set_song_separating(song_id, "Separating...")
+        self._separation_percent = (song_id, 0)
+        self._watch_separation(song_id)
+
+    def _watch_separation(self, song_id: str | None) -> None:
+        """Show *song_id*'s separation in the player, if nothing is loaded.
+
+        With a song open or loading, the library row carries the progress
+        alone; the player is not taken away from what the user chose.
+        Passing None stops watching.
+        """
+        song = self._library.get_song(song_id) if song_id else None
+        if (song is None or self._player.has_stems
+                or self._loading_song_id is not None):
+            self._watched_separation = None
+            self._player_controls.hide_separation()
+            return
+        self._watched_separation = song_id
+        self._player_controls.show_separation(song.title, song.artist)
+        # Re-watching a running job (a song was closed mid-job): pick up
+        # where it is rather than restarting at 0 %.
+        last_id, percent = self._separation_percent
+        if last_id == song_id and percent > 0:
+            self._player_controls.update_separation(percent)
+        self._refresh_separation_queued()
+
+    def _refresh_separation_queued(self) -> None:
+        """Update the watched view's count of imports still waiting."""
+        if self._watched_separation is None:
+            return
+        self._player_controls.separation_view.set_queued(
+            max(0, self._separation_queue.pending_count - 1)
+        )
+
     def _on_separation_progress(
         self, song_id: str, percent: int, _message: str,
     ) -> None:
         self._library_panel.set_song_separating(
             song_id, f"Separating... {percent}%"
         )
+        self._separation_percent = (song_id, percent)
+        if song_id == self._watched_separation:
+            self._player_controls.update_separation(percent)
 
     def _on_separation_finished(self, song_id: str, model_key: str) -> None:
-        """Job done: record the model and make the row selectable."""
+        """Job done: record the model and make the row selectable.
+
+        A song whose separation the player was showing opens right away,
+        unless a song is open or loading by then.
+        """
         try:
             self._library.update_song(song_id, model_used=model_key)
         except KeyError:
             pass  # Row removed while the job was finishing.
         self._library_panel.clear_song_separating(song_id)
         self._library_panel.refresh()
+        if song_id == self._watched_separation:
+            self._watched_separation = None
+            self._player_controls.hide_separation()
+            if (self._current_song_id is None
+                    and self._loading_song_id is None):
+                self._library_panel.select_song(song_id)
 
     def _on_separation_failed(self, song_id: str, message: str) -> None:
         """Job failed or was cancelled: roll the library row back."""
         self._library_panel.clear_song_separating(song_id)
+        if song_id == self._watched_separation:
+            self._watched_separation = None
+            self._player_controls.hide_separation()
+        else:
+            # A queued job was cancelled: one fewer waits.
+            self._refresh_separation_queued()
         if self._library.get_song(song_id) is not None:
             try:
                 self._library.remove_song(song_id)
