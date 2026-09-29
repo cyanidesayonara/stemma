@@ -19,15 +19,18 @@ _LOCAL_HALF_WINDOW = 4
 # previous tempo is kept.
 _MIN_STEADY_SHARE = 0.5
 
-# A local tempo this close to 2x or 4x (or 1/2, 1/4) of a reference tempo
-# is the beat model following eighth notes or every other beat, not a
-# real tempo change, and is folded back onto the reference.
+# A local tempo this close to 2x or 4x (or 1/2, 1/4) of the tempo before
+# it is an octave jump; one further than _MAX_TEMPO_RATIO from it, a leap.
 _OCTAVE_TOLERANCE = 0.15
 _MAX_OCTAVES = 2
-
-# A local tempo further than this factor from the song tempo after
-# folding is not trusted, and the previous tempo is kept.
 _MAX_TEMPO_RATIO = 1.6
+
+# A jump or leap that lasts at most this many beats (of the tempo before
+# it) is the beat model briefly following eighth notes, every other beat,
+# or noise: an octave jump is folded back and a leap shows the tempo
+# before it. Anything longer is a section really played at that tempo (a
+# slow intro, a double-time or half-time part) and is shown as detected.
+_MAX_BRIEF_BEATS = 16
 
 
 def tap_tempo(tap_times: list[float], max_taps: int = 8) -> float:
@@ -86,6 +89,14 @@ def _fold_octave(interval: float, reference: float) -> float:
     return interval
 
 
+def _departs(interval: float, reference: float) -> bool:
+    """True if *interval* is an octave jump or a leap from *reference*."""
+    if _fold_octave(interval, reference) != interval:
+        return True
+    ratio = interval / reference
+    return not 1.0 / _MAX_TEMPO_RATIO <= ratio <= _MAX_TEMPO_RATIO
+
+
 def _windowed_intervals(intervals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Robust interval and steadiness for the window around each gap.
 
@@ -121,11 +132,15 @@ def local_beat_tempi(positions, units_per_minute: float) -> np.ndarray:
     beat, or one extra beat turns a single gap into 2x or 0.5x the song
     tempo. Each gap instead takes the robust interval of the gaps around
     it (``_LOCAL_HALF_WINDOW`` on each side), so a real tempo change shows
-    within a few beats while stray beats do not. A local tempo near an
-    octave of the song tempo, or of the tempo just before it, is folded
-    back onto it. Where the beats are too scattered to agree, or the
-    tempo lands implausibly far from the song tempo, the previous tempo
-    is kept.
+    within a few beats while stray beats do not. Where the beats are too
+    scattered to agree, the previous tempo is kept.
+
+    A jump to about 2x or 0.5x the tempo before it (or a leap beyond
+    ``_MAX_TEMPO_RATIO``) that lasts at most ``_MAX_BRIEF_BEATS`` beats is
+    the model briefly following eighth notes or every other beat: it is
+    folded back, or the tempo before it is kept. A longer one is a section
+    played at that tempo, such as a slow intro or a half-time part, and
+    reads as detected. The first tempo before any beat is the song's.
     """
     beats = np.asarray(positions, dtype=np.float64)
     if beats.size < 2:
@@ -136,16 +151,40 @@ def local_beat_tempi(positions, units_per_minute: float) -> np.ndarray:
         return np.zeros(intervals.size, dtype=np.float64)
 
     local, steady = _windowed_intervals(intervals)
-    result = np.empty(intervals.size, dtype=np.float64)
+    count = intervals.size
+    result = np.empty(count, dtype=np.float64)
     previous = song_interval
-    for i in range(intervals.size):
-        value = previous
-        if steady[i]:
-            candidate = _fold_octave(float(local[i]), song_interval)
-            candidate = _fold_octave(candidate, previous)
-            ratio = candidate / song_interval
-            if 1.0 / _MAX_TEMPO_RATIO <= ratio <= _MAX_TEMPO_RATIO:
-                value = candidate
-        result[i] = value
-        previous = value
+    i = 0
+    while i < count:
+        if not steady[i]:
+            result[i] = previous
+            i += 1
+            continue
+        if not _departs(float(local[i]), previous):
+            previous = result[i] = float(local[i])
+            i += 1
+            continue
+        # A departure: find how long it lasts (scattered gaps inside it
+        # do not end it), measured in beats of the tempo before it.
+        end = i
+        while end + 1 < count and (
+            not steady[end + 1] or _departs(float(local[end + 1]), previous)
+        ):
+            end += 1
+        while not steady[end]:
+            end -= 1
+        span = beats[end + 1] - beats[i]
+        if span <= _MAX_BRIEF_BEATS * previous:
+            for j in range(i, end + 1):
+                result[j] = previous
+                if steady[j]:
+                    folded = _fold_octave(float(local[j]), previous)
+                    if folded != float(local[j]):
+                        result[j] = folded
+        else:
+            for j in range(i, end + 1):
+                if steady[j]:
+                    previous = float(local[j])
+                result[j] = previous
+        i = end + 1
     return units_per_minute / result

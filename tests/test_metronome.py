@@ -432,6 +432,40 @@ class TestLocalBeatTempi:
         assert np.all(np.abs(tempi[-24:] - 105) < 6)
         assert tempi.max() < 140
 
+    def test_slow_intro_reads_its_own_tempo(self):
+        """A long 80 BPM intro before a 140 BPM song (0.57x) is played at
+        80, not an octave error to fold to 160."""
+        intro = _beats(80, 64)
+        beats = intro + _beats(140, 128, start=intro[-1] + 60 / 140)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[:58] - 80) < 1)
+        assert np.all(np.abs(tempi[-120:] - 140) < 1)
+
+    def test_real_double_time_change_is_followed(self):
+        first = _beats(90, 48)
+        beats = first + _beats(180, 96, start=first[-1] + 60 / 180)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[:42] - 90) < 1)
+        assert np.all(np.abs(tempi[-88:] - 180) < 1)
+
+    def test_long_half_time_section_reads_what_is_played(self):
+        """32 bars of a 60 BPM half-time feel in a 120 BPM song."""
+        first = _beats(120, 64)
+        half = _beats(60, 32, start=first[-1] + 1.0)
+        beats = first + half + _beats(120, 64, start=half[-1] + 0.5)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[70:88] - 60) < 1)
+        assert np.all(np.abs(tempi[:58] - 120) < 1)
+        assert np.all(np.abs(tempi[-58:] - 120) < 1)
+
+    def test_long_double_time_section_reads_what_is_played(self):
+        first = _beats(120, 64)
+        double = _beats(240, 96, start=first[-1] + 0.25)
+        beats = first + double + _beats(120, 64, start=double[-1] + 0.5)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[70:150] - 240) < 1)
+        assert np.all(np.abs(tempi[-58:] - 120) < 1)
+
     def test_gap_without_beats_keeps_the_tempo_around_it(self):
         first = _beats(120, 16)
         beats = first + _beats(120, 16, start=first[-1] + 10.0)
