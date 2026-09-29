@@ -122,7 +122,13 @@ class _DownloadWorker(QThread):
                         pct = int(downloaded / total * 100)
                         self.progress.emit(min(pct, 99), "Downloading audio...")
 
-            download_audio(self._url, self._output_path, progress_callback=on_progress)
+            download_audio(
+                self._url,
+                self._output_path,
+                progress_callback=on_progress,
+                # Closing the dialog stops any automatic retry.
+                should_cancel=self.isInterruptionRequested,
+            )
             self.progress.emit(100, "Download complete.")
             self.completed.emit(self._output_path)
         except DownloadError as exc:
@@ -803,6 +809,8 @@ class ImportDialog(QDialog):
         if self._metadata_worker is not None and self._metadata_worker.isRunning():
             self._metadata_worker.wait(5000)
         if self._download_worker is not None and self._download_worker.isRunning():
+            # yt-dlp cannot stop mid-attempt, but no retry starts after this.
+            self._download_worker.requestInterruption()
             self._download_worker.setParent(None)
             self._download_worker.wait(5000)
             if self._download_worker.isRunning():

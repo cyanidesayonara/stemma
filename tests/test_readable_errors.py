@@ -7,6 +7,8 @@ message box.
 
 import logging
 import socket
+import threading
+import time
 import urllib.error
 from unittest.mock import MagicMock, patch
 
@@ -109,6 +111,34 @@ class TestWorkersEmitReadableText:
         with patch.object(import_dialog, "download_audio", side_effect=fail):
             worker.run()
         assert errors == [MSG_RESET]
+
+    def test_youtube_download_retries_stop_on_interruption(self, tmp_path):
+        from src.ui import import_dialog
+
+        started = threading.Event()
+        seen = []
+
+        def backing_off(*_args, should_cancel, **_kwargs):
+            # Stands in for download_audio waiting out a retry backoff.
+            seen.append(should_cancel())
+            started.set()
+            deadline = time.monotonic() + 5.0
+            while not should_cancel() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            seen.append(should_cancel())
+            raise DownloadError("Download cancelled")
+
+        worker = import_dialog._DownloadWorker(
+            "https://youtu.be/abc", str(tmp_path / "a.mp3"),
+        )
+        with patch.object(
+            import_dialog, "download_audio", side_effect=backing_off,
+        ):
+            worker.start()
+            assert started.wait(5.0)
+            worker.requestInterruption()  # what the dialog's reject() does
+            assert worker.wait(5000)
+        assert seen == [False, True]
 
 
 class TestDialogsFormatMessages:

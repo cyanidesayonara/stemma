@@ -8,14 +8,71 @@ import os
 import re
 import shutil
 import sys
+import time
 from typing import Callable
 
 import imageio_ffmpeg
 import yt_dlp
 
+from src.crash_log import logger
+from src.import_messages import strip_ansi
+
 
 class DownloadError(Exception):
     """Raised when a download or metadata extraction fails."""
+
+
+# YouTube often refuses the first media URL it hands out (HTTP 403) while a
+# fresh extraction a moment later works, so a download is tried up to this
+# many times, waiting _BACKOFF_S[n] seconds before retry n + 1.
+_MAX_ATTEMPTS = 3
+_BACKOFF_S = (1.5, 3.0)
+_CANCEL_POLL_S = 0.1
+# Indirection so tests can record the backoff instead of sleeping.
+_sleep = time.sleep
+
+# Worth a fresh extraction: a refused or expired media URL, a server
+# hiccup, or a connection dropped mid-stream.
+_TRANSIENT = re.compile(
+    r"http error (?:403|408|500|502|503|504)\b"
+    r"|timed out|connection reset|connection aborted"
+    r"|incomplete ?read|remote end closed",
+    re.IGNORECASE,
+)
+# Never worth retrying, even when a 403 appears alongside: the video is
+# private, removed, blocked, gated behind a sign-in, or not a video.
+_PERMANENT = re.compile(
+    r"private video|video is private|video unavailable|has been removed"
+    r"|no longer available|not available|unsupported url|sign in"
+    r"|not a bot|confirm your age|age-restricted|members-only|copyright"
+    r"|premieres in|live event",
+    re.IGNORECASE,
+)
+
+
+def is_transient_error(message: str) -> bool:
+    """Return True if a yt-dlp failure *message* may pass on a fresh try."""
+    text = strip_ansi(message)
+    return bool(_TRANSIENT.search(text)) and not _PERMANENT.search(text)
+
+
+def _clean_message(exc: BaseException) -> str:
+    """A yt-dlp failure's text without colour codes, for log and UI."""
+    return strip_ansi(str(exc)).strip()
+
+
+def _wait_unless_cancelled(
+    seconds: float, should_cancel: Callable[[], bool] | None,
+) -> bool:
+    """Sleep up to *seconds*; return False early if cancelled."""
+    remaining = seconds
+    while remaining > 0:
+        if should_cancel is not None and should_cancel():
+            return False
+        step = min(_CANCEL_POLL_S, remaining)
+        _sleep(step)
+        remaining -= step
+    return not (should_cancel is not None and should_cancel())
 
 
 _YOUTUBE_PATTERN = re.compile(
@@ -85,12 +142,13 @@ def extract_metadata(url: str) -> tuple[str, str]:
         "extract_flat": False,
         "skip_download": True,
         "noplaylist": True,
+        "no_color": True,
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:
-        raise DownloadError(str(exc)) from exc
+        raise DownloadError(_clean_message(exc)) from exc
 
     if info is None:
         raise DownloadError("Could not retrieve video metadata")
@@ -100,39 +158,18 @@ def extract_metadata(url: str) -> tuple[str, str]:
     return title, artist
 
 
-def download_audio(
-    url: str,
-    output_path: str,
-    progress_callback: Callable[[dict], None] | None = None,
-) -> str:
-    """Download the audio from *url* and save it to *output_path*.
-
-    Args:
-        url: YouTube video URL.
-        output_path: Destination file path (e.g. ``/tmp/audio.mp3``).
-        progress_callback: Optional callable invoked with yt-dlp progress
-            dictionaries (keys: ``status``, ``downloaded_bytes``,
-            ``total_bytes``, etc.).
-
-    Returns:
-        The *output_path* on success.
-
-    Raises:
-        DownloadError: If the download fails.
-    """
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
-    # Strip extension from outtmpl because FFmpegExtractAudio appends the
-    # codec extension itself (e.g. ".mp3"). Passing "audio.mp3" would
-    # produce "audio.mp3.mp3".
-    stem = os.path.splitext(output_path)[0]
-
+def _download_options(
+    stem: str, progress_callback: Callable[[dict], None] | None,
+) -> dict:
+    """Fresh yt-dlp options for one download attempt."""
     opts = {
         "format": "bestaudio/best",
         "outtmpl": stem,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        # Plain text: the message ends up in the log and the import dialog.
+        "no_color": True,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -149,12 +186,69 @@ def download_audio(
 
     if progress_callback is not None:
         opts["progress_hooks"].append(progress_callback)
+    return opts
 
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-    except Exception as exc:
-        raise DownloadError(str(exc)) from exc
+
+def download_audio(
+    url: str,
+    output_path: str,
+    progress_callback: Callable[[dict], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> str:
+    """Download the audio from *url* and save it to *output_path*.
+
+    A transient failure (see ``is_transient_error``), typically YouTube
+    refusing the first media URL with HTTP 403, is retried with a fresh
+    extraction after a short backoff, up to ``_MAX_ATTEMPTS`` in all.
+    Permanent failures (private or removed video, unsupported URL) are
+    raised at once.
+
+    Args:
+        url: YouTube video URL.
+        output_path: Destination file path (e.g. ``/tmp/audio.mp3``).
+        progress_callback: Optional callable invoked with yt-dlp progress
+            dictionaries (keys: ``status``, ``downloaded_bytes``,
+            ``total_bytes``, etc.). It receives every attempt's progress.
+        should_cancel: Optional callable polled before each retry and
+            during the backoff; when it returns True, no further attempt
+            is made.
+
+    Returns:
+        The *output_path* on success.
+
+    Raises:
+        DownloadError: If the download fails or is cancelled.
+    """
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    # Strip extension from outtmpl because FFmpegExtractAudio appends the
+    # codec extension itself (e.g. ".mp3"). Passing "audio.mp3" would
+    # produce "audio.mp3.mp3".
+    stem = os.path.splitext(output_path)[0]
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            # A new YoutubeDL per attempt re-extracts the video, so a
+            # retry gets a fresh media URL instead of the refused one.
+            with yt_dlp.YoutubeDL(
+                _download_options(stem, progress_callback)
+            ) as ydl:
+                ydl.download([url])
+            break
+        except Exception as exc:
+            message = _clean_message(exc)
+            if attempt == _MAX_ATTEMPTS or not is_transient_error(message):
+                raise DownloadError(message) from exc
+            delay = _BACKOFF_S[min(attempt, len(_BACKOFF_S)) - 1]
+            logger.info(
+                "YouTube download attempt %d of %d failed (%s); "
+                "retrying in %.1f s",
+                attempt, _MAX_ATTEMPTS, message, delay,
+            )
+            if not _wait_unless_cancelled(delay, should_cancel):
+                raise DownloadError(
+                    f"Download cancelled after: {message}"
+                ) from exc
 
     if not os.path.isfile(output_path):
         raise DownloadError(
@@ -162,3 +256,5 @@ def download_audio(
         )
 
     return output_path
+
+
