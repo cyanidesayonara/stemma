@@ -1,5 +1,7 @@
 """Tests for src/beat_detector.py — BPM/key detection and confidence scoring."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from PySide6.QtCore import QCoreApplication
@@ -9,14 +11,17 @@ from src.beat_detector import (
     DetectionResult,
     DetectionWorker,
     _bpm_confidence,
+    _bt_chunked_inference,
+    _bt_peaks,
+    _bt_spectrogram,
     _build_chord_templates,
     _detect_beats_librosa,
+    _detect_beats_onnx,
     _detect_chords,
     _detect_key,
     _detect_time_signature,
     _key_confidence,
-    _peak_pick,
-    _sigmoid,
+    _snap_to_beats,
     _viterbi_smooth,
     detect_bpm_and_key,
     transpose_chord,
@@ -133,43 +138,226 @@ class TestDetectTimeSignature:
 
 
 # ---------------------------------------------------------------------------
-# Sigmoid
+# beat_this input spectrogram
 # ---------------------------------------------------------------------------
 
-class TestSigmoid:
-    def test_zero(self):
-        assert abs(_sigmoid(np.array([0.0]))[0] - 0.5) < 1e-6
+def _hz_to_slaney_mel(freq: np.ndarray) -> np.ndarray:
+    """Slaney mel scale: linear below 1 kHz, logarithmic above."""
+    freq = np.asarray(freq, dtype=np.float64)
+    f_sp = 200.0 / 3
+    min_log_mel = 1000.0 / f_sp
+    logstep = np.log(6.4) / 27.0
+    log_part = min_log_mel + np.log(np.maximum(freq, 1e-10) / 1000.0) / logstep
+    return np.where(freq >= 1000.0, log_part, freq / f_sp)
 
-    def test_large_positive(self):
-        assert _sigmoid(np.array([100.0]))[0] > 0.99
 
-    def test_large_negative(self):
-        assert _sigmoid(np.array([-100.0]))[0] < 0.01
+def _slaney_mel_to_hz(mels: np.ndarray) -> np.ndarray:
+    mels = np.asarray(mels, dtype=np.float64)
+    f_sp = 200.0 / 3
+    min_log_mel = 1000.0 / f_sp
+    logstep = np.log(6.4) / 27.0
+    log_part = 1000.0 * np.exp(logstep * (mels - min_log_mel))
+    return np.where(mels >= min_log_mel, log_part, mels * f_sp)
+
+
+def _reference_log_mel(audio: np.ndarray) -> np.ndarray:
+    """NumPy port of beat_this ``LogMelSpect`` (CPJKU/beat_this).
+
+    That is torchaudio ``MelSpectrogram(sample_rate=22050, n_fft=1024,
+    hop_length=441, f_min=30, f_max=11000, n_mels=128, mel_scale="slaney",
+    normalized="frame_length", power=1)`` followed by ``log1p(1000 * x)``.
+    torchaudio's defaults fill in the rest: a periodic Hann window,
+    centred frames with reflect padding, and triangular filters with no
+    area normalisation (``norm=None``).
+    """
+    sr, n_fft, hop, n_mels = 22050, 1024, 441, 128
+    padded = np.pad(audio.astype(np.float64), n_fft // 2, mode="reflect")
+    n_frames = 1 + (len(padded) - n_fft) // hop
+    index = np.arange(n_fft)[None, :] + hop * np.arange(n_frames)[:, None]
+    window = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(n_fft) / n_fft)
+    magnitude = np.abs(np.fft.rfft(padded[index] * window, axis=1))
+    magnitude /= np.sqrt(n_fft)  # normalized="frame_length"
+
+    f_pts = _slaney_mel_to_hz(np.linspace(
+        _hz_to_slaney_mel(30.0), _hz_to_slaney_mel(11000.0), n_mels + 2,
+    ))
+    all_freqs = np.linspace(0, sr // 2, n_fft // 2 + 1)
+    f_diff = np.diff(f_pts)
+    slopes = f_pts[None, :] - all_freqs[:, None]
+    down = -slopes[:, :-2] / f_diff[:-1]
+    up = slopes[:, 2:] / f_diff[1:]
+    filters = np.maximum(0.0, np.minimum(down, up))  # (freqs, mels)
+    return np.log1p(1000.0 * (magnitude @ filters))
+
+
+def _test_signal(seconds: float = 1.5, sr: int = 22050) -> np.ndarray:
+    """Deterministic test audio: two tones, a chirp, and clicks."""
+    t = np.arange(int(seconds * sr)) / sr
+    audio = 0.4 * np.sin(2 * np.pi * 220.0 * t)
+    audio += 0.2 * np.sin(2 * np.pi * 3150.0 * t)
+    audio += 0.1 * np.sin(2 * np.pi * (100.0 * t + 1500.0 * t ** 2))
+    for start in np.arange(0.1, seconds, 0.25):
+        tail = t[t >= start] - start
+        audio[t >= start] += 0.5 * np.sin(2 * np.pi * 1000.0 * tail) * np.exp(
+            -tail * 60.0,
+        )
+    return audio.astype(np.float32)
+
+
+class TestBtSpectrogram:
+    """The model only tracks beats well on the input it was trained on."""
+
+    def test_matches_the_beat_this_preprocessing(self):
+        audio = _test_signal()
+        spec = _bt_spectrogram(audio)
+        assert spec.dtype == np.float32
+        assert spec.shape == (1 + len(audio) // 441, 128)
+        np.testing.assert_allclose(
+            spec, _reference_log_mel(audio), rtol=0, atol=1e-4,
+        )
+
+    def test_edges_use_reflect_padding(self):
+        """torchaudio pads centred frames by reflection, not with zeros."""
+        audio = _test_signal()
+        ref = _reference_log_mel(audio)
+        spec = _bt_spectrogram(audio)
+        np.testing.assert_allclose(spec[0], ref[0], rtol=0, atol=1e-4)
+        np.testing.assert_allclose(spec[-1], ref[-1], rtol=0, atol=1e-4)
 
 
 # ---------------------------------------------------------------------------
-# Peak picker
+# beat_this chunked inference
 # ---------------------------------------------------------------------------
 
-class TestPeakPick:
-    def test_simple_peaks(self):
-        logits = np.array([0.0, 0.1, 0.8, 0.1, 0.0, 0.1, 0.9, 0.1, 0.0])
-        peaks = _peak_pick(logits, threshold=0.5, min_distance=2)
-        assert peaks == [2, 6]
+class _EchoSession:
+    """Fake ONNX session: beat logits echo mel bin 0, downbeats bin 1."""
 
-    def test_min_distance(self):
-        logits = np.array([0.0, 0.8, 0.1, 0.9, 0.0])
-        peaks = _peak_pick(logits, threshold=0.5, min_distance=4)
-        assert len(peaks) == 1
+    def __init__(self):
+        self.chunks: list[np.ndarray] = []
 
-    def test_below_threshold(self):
-        logits = np.array([0.0, 0.2, 0.3, 0.2, 0.0])
-        peaks = _peak_pick(logits, threshold=0.5, min_distance=1)
-        assert peaks == []
+    def get_inputs(self):
+        return [SimpleNamespace(name="spect")]
+
+    def run(self, _output_names, feeds):
+        chunk = feeds["spect"]
+        self.chunks.append(chunk)
+        return [chunk[:, :, 0].copy(), chunk[:, :, 1].copy()]
+
+
+def _ramp_spec(n_frames: int) -> np.ndarray:
+    """Spectrogram whose first two bins number the frames (0 = padding)."""
+    spec = np.zeros((n_frames, 128), dtype=np.float32)
+    spec[:, 0] = np.arange(1, n_frames + 1)
+    spec[:, 1] = -np.arange(1, n_frames + 1)
+    return spec
+
+
+class TestBtChunkedInference:
+    @pytest.mark.parametrize(
+        "n_frames",
+        # 1489-1494: the moved-back last chunk starts before the song.
+        [150, 1488, 1489, 1490, 1491, 1492, 1493, 1494, 1500, 2977, 4000],
+    )
+    def test_each_frame_gets_its_own_prediction(self, n_frames):
+        session = _EchoSession()
+        beat, downbeat = _bt_chunked_inference(_ramp_spec(n_frames), session)
+        expected = np.arange(1, n_frames + 1)
+        np.testing.assert_array_equal(beat, expected)
+        np.testing.assert_array_equal(downbeat, -expected)
+
+    def test_long_input_runs_in_30_second_chunks(self):
+        session = _EchoSession()
+        _bt_chunked_inference(_ramp_spec(4000), session)
+        assert all(c.shape == (1, 1500, 128) for c in session.chunks)
+
+    def test_short_input_is_padded_only_at_the_borders(self):
+        """An A-B loop shorter than one chunk runs at its own length plus
+        the 6-frame borders, as in beat_this, not padded to 30 s."""
+        session = _EchoSession()
+        _bt_chunked_inference(_ramp_spec(150), session)
+        assert [c.shape for c in session.chunks] == [(1, 150 + 12, 128)]
+
+    @pytest.mark.parametrize("n_frames", [150, 1488, 2977, 4000])
+    def test_last_chunk_is_moved_back_instead_of_padded(self, n_frames):
+        """Like beat_this, no chunk is mostly silence: the last one ends
+        at the end of the song and only the 6-frame borders are padded."""
+        session = _EchoSession()
+        _bt_chunked_inference(_ramp_spec(n_frames), session)
+        for chunk in session.chunks:
+            padding = int(np.sum(chunk[0, :, 0] == 0))
+            assert padding <= 2 * 6
+
+
+# ---------------------------------------------------------------------------
+# beat_this peak picking
+# ---------------------------------------------------------------------------
+
+def _logits(n_frames: int, peaks: dict[int, float]) -> np.ndarray:
+    logits = np.full(n_frames, -5.0, dtype=np.float32)
+    for frame, value in peaks.items():
+        logits[frame] = value
+    return logits
+
+
+class TestBtPeaks:
+    """beat_this's minimal postprocessing: logit above 0 (probability
+    above 0.5) and the highest within +-3 frames (70 ms)."""
+
+    def test_positive_local_maxima_are_beats(self):
+        peaks = _bt_peaks(_logits(40, {5: 2.0, 15: 0.5, 30: 3.0}))
+        assert peaks.tolist() == [5, 15, 30]
+
+    def test_probability_half_or_below_is_not_a_beat(self):
+        # -0.4 is probability 0.4, which the old 0.3 threshold accepted.
+        assert _bt_peaks(_logits(20, {5: 0.0, 12: -0.4})).size == 0
+
+    def test_only_the_highest_peak_within_three_frames(self):
+        peaks = _bt_peaks(_logits(40, {10: 2.0, 13: 1.0, 20: 1.0, 24: 2.0}))
+        assert peaks.tolist() == [10, 20, 24]
+
+    def test_adjacent_equal_peaks_merge(self):
+        peaks = _bt_peaks(_logits(20, {10: 2.0, 11: 2.0}))
+        assert peaks.tolist() == [10.5]
 
     def test_empty(self):
-        peaks = _peak_pick(np.array([]), threshold=0.5, min_distance=1)
-        assert peaks == []
+        assert _bt_peaks(np.array([], dtype=np.float32)).size == 0
+
+
+class TestSnapToBeats:
+    def test_downbeats_move_to_the_nearest_beat(self):
+        beats = [0.5, 1.0, 1.5, 2.0, 2.5]
+        assert _snap_to_beats([0.52, 2.46], beats) == [0.5, 2.5]
+
+    def test_two_downbeats_on_one_beat_are_kept_once(self):
+        assert _snap_to_beats([0.98, 1.02], [0.5, 1.0, 1.5]) == [1.0]
+
+    def test_no_beats_leaves_downbeats(self):
+        assert _snap_to_beats([1.0, 3.0], []) == [1.0, 3.0]
+
+
+class TestDetectBeatsOnnx:
+    def test_tempo_is_finer_than_the_frame_grid(self, monkeypatch):
+        """133 BPM on 20 ms frames alternates 22 and 23 frame gaps. The
+        median gap read 136.4 BPM; the mean of the steady gaps is 133.3."""
+        n_frames = 1000
+        beat_frames = [round(i * 22.5) for i in range(40)]
+        down_frames = [f + 1 for f in beat_frames[::4]]
+        monkeypatch.setattr(
+            "src.beat_detector.create_onnx_session", lambda _path: object(),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._bt_chunked_inference",
+            lambda _spec, _session: (
+                _logits(n_frames, {f: 3.0 for f in beat_frames}),
+                _logits(n_frames, {f: 3.0 for f in down_frames}),
+            ),
+        )
+        audio = np.zeros(22050 * 20, dtype=np.float32)
+        beats, downbeats, bpm = _detect_beats_onnx(audio, 22050, "model")
+
+        assert beats == pytest.approx([f / 50 for f in beat_frames])
+        assert downbeats == pytest.approx(beats[::4])
+        assert bpm == pytest.approx(133.33, abs=0.3)
 
 
 # ---------------------------------------------------------------------------

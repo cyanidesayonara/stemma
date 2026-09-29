@@ -25,6 +25,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
 from src.click_utils import generate_click
 from src.import_messages import describe_error
+from src.metronome import local_beat_tempi
 from src.qt_signal_utils import safe_disconnect as _safe_disconnect
 
 
@@ -479,6 +480,8 @@ class MultiTrackPlayer(QObject):
         self._beat_sync_enabled: bool = False
         self._beat_sync_nudge_ms: float = 0.0
         self._beat_frames: np.ndarray = np.array([], dtype=np.int64)
+        # Local tempo per gap in _beat_frames, for the synced BPM readout.
+        self._beat_tempi: np.ndarray = np.array([], dtype=np.float64)
 
         # Chord sequence: list of (onset_seconds, chord_label).
         self._chord_sequence: list[tuple[float, str]] = []
@@ -707,6 +710,7 @@ class MultiTrackPlayer(QObject):
         """
         if not self._beat_times or self._sample_rate == 0:
             self._beat_frames = np.array([], dtype=np.int64)
+            self._beat_tempi = np.array([], dtype=np.float64)
             return
         speed = self._playback_speed if self._playback_speed > 0 else 1.0
         sr = self._sample_rate
@@ -715,22 +719,25 @@ class MultiTrackPlayer(QObject):
             [max(0, int((t + offset_sec) / speed * sr)) for t in self._beat_times],
             dtype=np.int64,
         )
+        self._beat_tempi = local_beat_tempi(self._beat_frames, 60.0 * sr)
 
     def instantaneous_bpm_at(self, frame: int) -> float:
-        """Return the local BPM at *frame* based on neighbouring beat positions.
+        """Return the local BPM at *frame*, as the synced metronome shows it.
 
-        Returns 0.0 when fewer than 2 beats are available.
+        Uses the tempo of the beats around *frame* (see
+        ``local_beat_tempi``) rather than the one gap it falls in, so a
+        stray or missed beat does not flash double or half the tempo.
+        Follows playback speed, like the synced clicks. Returns 0.0 when
+        fewer than 2 beats are available.
         """
         bf = self._beat_frames
-        if len(bf) < 2:
+        tempi = self._beat_tempi
+        if len(bf) < 2 or len(tempi) != len(bf) - 1:
             return 0.0
         idx = int(np.searchsorted(bf, frame, side="right"))
-        # Clamp so we always have two adjacent beats.
+        # Clamp to the first or last gap before and after the beats.
         idx = max(1, min(idx, len(bf) - 1))
-        interval_frames = int(bf[idx] - bf[idx - 1])
-        if interval_frames <= 0:
-            return 0.0
-        return 60.0 * self._sample_rate / interval_frames
+        return float(tempi[idx - 1])
 
     # -- Count-in API -------------------------------------------------------
 
@@ -997,6 +1004,7 @@ class MultiTrackPlayer(QObject):
         self._beat_sync_enabled = False
         self._beat_sync_nudge_ms = 0.0
         self._beat_frames = np.array([], dtype=np.int64)
+        self._beat_tempi = np.array([], dtype=np.float64)
         self._chord_sequence.clear()
         self._chord_times = np.array([], dtype=np.float64)
         self._loop_a_frame = None

@@ -1,6 +1,7 @@
 """Tests for generation-safe asynchronous song loading."""
 
 from concurrent.futures import Future
+import json
 import os
 import time
 from unittest.mock import MagicMock, patch
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import QApplication
 
 from src import player as player_module
 from src.app_settings import open_settings
-from src.beat_detector import DetectionResult
+from src.beat_detector import DETECTION_VERSION, DetectionResult
 from src.library import Song
 from src.ui import main_window as main_window_module
 from src.ui import player_controls as player_controls_module
@@ -1014,3 +1015,31 @@ class TestDetectionGeneration:
         restart.assert_called_once_with(
             3.0, 4.0, _model_ready=True,
         )
+
+
+class TestSavedDetection:
+    """Beat grids saved by an older detector are detected again."""
+
+    @staticmethod
+    def _save_grid(window, version: int) -> None:
+        prefix = "detection/a"
+        window._settings.setValue(
+            f"{prefix}/beat_times", json.dumps([0.5, 1.0, 1.5]),
+        )
+        window._settings.setValue(
+            f"{prefix}/downbeat_times", json.dumps([0.5]),
+        )
+        window._settings.setValue(f"{prefix}/det_ver", version)
+
+    def test_current_grid_is_restored(self, window):
+        self._save_grid(window, DETECTION_VERSION)
+        window._restore_song_detection("a")
+        assert window._player.beat_times == [0.5, 1.0, 1.5]
+
+    def test_grid_from_the_mismatched_beat_model_input_is_redetected(
+        self, window,
+    ):
+        """Version 4 grids came from the wrong beat model input (#159)."""
+        self._save_grid(window, 4)
+        window._restore_song_detection("a")
+        assert window._player.beat_times == []
