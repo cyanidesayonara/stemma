@@ -15,6 +15,12 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from src.paths import app_root
 from src.ui.audio_sync import LOGO_AUDIO_VISUAL_LAG_MS
+from src.ui.svg_source import (
+    local_name,
+    read_svg,
+    remove_elements,
+    to_svg_text,
+)
 from src.ui.wav_playback import play_wav_async
 
 _ROOT = app_root()
@@ -53,9 +59,11 @@ def _load_base_svg(theme: str) -> str:
     path = os.path.join(
         _ROOT, "assets", "icons", f"logo_arpeggio_{variant}.svg"
     )
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.readlines()
-    return "".join(ln for ln in lines if not ln.strip().startswith("<text"))
+    # Removed by element, not by matching lines of text, so a regenerated
+    # or reformatted SVG cannot leave a static copy under the animation.
+    root = read_svg(path)
+    remove_elements(root, lambda element: local_name(element) == "text")
+    return to_svg_text(root)
 
 
 def _brightness(elapsed: int, onset: int) -> float:

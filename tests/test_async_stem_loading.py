@@ -4,6 +4,7 @@ from concurrent.futures import Future
 import json
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -1010,6 +1011,66 @@ class TestDetectionGeneration:
         restart.assert_called_once_with(
             3.0, 4.0, _model_ready=True,
         )
+
+
+class TestSeparationInTheEmptyPlayer:
+    """The empty player's separation view against the real window (#159)."""
+
+    def test_a_load_started_during_a_separation_is_left_alone(self, window):
+        controls = window._player_controls
+        view = controls.separation_view
+        queue = window._separation_queue
+        workers = []
+
+        def make_worker(paths):
+            worker = _FakeStemLoadWorker(paths)
+            workers.append(worker)
+            return worker
+
+        queue.job_started.emit("a")
+        assert window._watched_separation == "a"
+        assert not view.isHidden()
+
+        with patch.object(
+            main_window_module, "StemLoadWorker",
+            side_effect=make_worker, create=True,
+        ):
+            window._on_song_selected("b")
+
+        # The load shows, not the separation it replaced.
+        assert window._watched_separation is None
+        assert view.isHidden()
+        assert not controls._hint_label.isHidden()
+        assert controls._hint_label.text() == "Loading Song B..."
+
+        # A finishes while B's stems are still being read.
+        queue.job_finished.emit("a", "htdemucs")
+        assert window._loading_song_id == "b"
+        arrays, sample_rate = player_module.read_stem_files(
+            workers[0].stem_paths,
+        )
+        workers[0].completed.emit(arrays, sample_rate)
+        assert window._current_song_id == "b"
+
+    def test_closing_a_song_mid_job_resumes_the_view(self, window):
+        controls = window._player_controls
+        view = controls.separation_view
+        queue = window._separation_queue
+        window._player._stems = {
+            "vocals": np.zeros((64, 2), dtype=np.float32),
+        }
+        window._current_song_id = "b"
+        queue._active_job = SimpleNamespace(song_id="a")
+        try:
+            queue.job_started.emit("a")
+            assert view.isHidden()  # A song is open.
+            queue.job_progress.emit("a", 57, "Processing segment 57/150...")
+            window._on_close_song()
+            assert not view.isHidden()
+            assert view.percent == 57
+            assert view.stage == "Separating stems…"
+        finally:
+            queue._active_job = None
 
 
 class TestSavedDetection:

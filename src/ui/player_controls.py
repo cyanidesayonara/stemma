@@ -39,6 +39,7 @@ from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.control_primitives import format_time as _format_time
 from src.ui.control_primitives import show_preset_value
 from src.ui.practice_rack import PracticeRack
+from src.ui.separation_view import SeparationView
 from src.ui.song_info_bar import SongInfoBar
 from src.ui.stem_mixer import RecordingStemRow, StemMixer, StemRow
 from src.ui.styles import (
@@ -266,6 +267,10 @@ class PlayerControls(QWidget):
             self._hint_label,
             alignment=Qt.AlignmentFlag.AlignHCenter,
         )
+        # Takes the hint's place while an import separates (#159).
+        self._separation_view = SeparationView()
+        self._separation_view.setVisible(False)
+        empty_layout.addWidget(self._separation_view)
         empty_layout.addStretch(1)
         layout.addWidget(self._empty_widget, 1)
 
@@ -513,6 +518,25 @@ class PlayerControls(QWidget):
         self._stem_mixer.apply_theme(theme)
         if self._cached_stem_peaks is not None:
             self._apply_stem_lanes_to_waveform(self._cached_stem_peaks)
+
+    @property
+    def separation_view(self) -> SeparationView:
+        return self._separation_view
+
+    def show_separation(self, title: str, artist: str) -> None:
+        """Show a separating import in the empty player."""
+        self._separation_view.start(title, artist)
+        self._separation_view.setVisible(True)
+        self._hint_label.setVisible(False)
+
+    def update_separation(self, percent: int) -> None:
+        """Pass a separation progress report to the empty player's view."""
+        self._separation_view.update_progress(percent)
+
+    def hide_separation(self) -> None:
+        """Return the empty player to its drop hint."""
+        self._separation_view.setVisible(False)
+        self._hint_label.setVisible(True)
 
     def play_intro_animation(self, with_sound: bool = False) -> None:
         """Trigger the main logo's intro animation (notes + waves)."""
