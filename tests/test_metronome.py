@@ -6,7 +6,7 @@ import sounddevice as sd
 
 from PySide6.QtWidgets import QApplication
 
-from src.metronome import tap_tempo
+from src.metronome import local_beat_tempi, robust_beat_interval, tap_tempo
 from src.player import MultiTrackPlayer
 
 
@@ -23,6 +23,22 @@ def app():
 def player(app):
     """A MultiTrackPlayer with no stems loaded."""
     return MultiTrackPlayer()
+
+
+def _beats(bpm: float, count: int, start: float = 0.0) -> list[float]:
+    """A steady beat grid in seconds."""
+    return [start + i * 60.0 / bpm for i in range(count)]
+
+
+def _with_double_time(
+    beats: list[float], first: int = 16, last: int = 24,
+) -> list[float]:
+    """Add a beat halfway through each interval from *first* to *last*,
+    as when the beat model follows a busy riff in eighth notes."""
+    extra = [
+        (beats[i] + beats[i + 1]) / 2 for i in range(first, last)
+    ]
+    return sorted(beats + extra)
 
 
 # -----------------------------------------------------------------------
@@ -322,6 +338,155 @@ class TestTapTempo:
 
 
 # -----------------------------------------------------------------------
+# Tempo from a detected beat grid
+# -----------------------------------------------------------------------
+
+def _on_frame_grid(beats: list[float], fps: float = 50.0) -> list[float]:
+    """Snap beat times to the beat model's 20 ms frames."""
+    return [round(t * fps) / fps for t in beats]
+
+
+class TestRobustBeatInterval:
+    """The typical beat interval of a grid, as used for the song tempo."""
+
+    def test_no_intervals(self):
+        assert robust_beat_interval([]) == 0.0
+
+    def test_steady(self):
+        assert robust_beat_interval([0.5] * 8) == pytest.approx(0.5)
+
+    def test_keeps_tempo_finer_than_the_frame_grid(self):
+        """133 BPM on 20 ms frames alternates 0.44 s and 0.46 s gaps. The
+        median lands on one of them (136.4 or 130.4 BPM)."""
+        beats = _on_frame_grid(_beats(133.33, 64))
+        intervals = np.diff(beats)
+        assert abs(60 / np.median(intervals) - 133.33) > 2
+        assert 60 / robust_beat_interval(intervals) == pytest.approx(
+            133.33, abs=0.3,
+        )
+
+    def test_ignores_missing_and_extra_beats(self):
+        intervals = [0.5] * 20 + [1.0] + [0.12, 0.38]
+        assert robust_beat_interval(intervals) == pytest.approx(0.5)
+
+
+class TestLocalBeatTempi:
+    """Per-interval tempo that the synced metronome shows."""
+
+    def test_needs_two_beats(self):
+        assert len(local_beat_tempi([], 60.0)) == 0
+        assert len(local_beat_tempi([1.0], 60.0)) == 0
+
+    def test_one_tempo_per_interval(self):
+        assert len(local_beat_tempi(_beats(120, 10), 60.0)) == 9
+
+    def test_steady(self):
+        tempi = local_beat_tempi(_beats(120, 32), 60.0)
+        assert np.allclose(tempi, 120.0)
+
+    def test_frame_grid_does_not_flicker(self):
+        tempi = local_beat_tempi(_on_frame_grid(_beats(133.33, 64)), 60.0)
+        assert np.all(np.abs(tempi - 133.33) < 1.0)
+
+    def test_double_time_burst_is_folded(self):
+        tempi = local_beat_tempi(_with_double_time(_beats(120, 48)), 60.0)
+        assert np.all(np.abs(tempi - 120) < 6)
+
+    def test_half_time_stretch_is_folded(self):
+        """Every other beat missed for a few bars."""
+        beats = _beats(120, 48)
+        beats = beats[:16] + beats[16:32:2] + beats[32:]
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi - 120) < 6)
+
+    def test_extra_beat_is_ignored(self):
+        beats = _beats(120, 32)
+        beats.insert(11, beats[10] + 0.12)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi - 120) < 6)
+
+    def test_missing_beat_is_ignored(self):
+        beats = _beats(120, 32)
+        del beats[10]
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi - 120) < 6)
+
+    def test_scattered_beats_keep_the_previous_tempo(self):
+        """A free-time passage gives no tempo; the last one is held."""
+        first = _beats(120, 24)
+        scattered = [0.08, 0.44, 0.36, 0.12, 0.36, 0.18, 0.26, 0.24, 0.38,
+                     0.34, 0.14, 0.36]
+        middle = list(first[-1] + np.cumsum(scattered))
+        beats = first + middle + _beats(120, 24, start=middle[-1] + 0.5)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi - 120) < 6)
+
+    def test_double_time_of_a_slower_section_is_folded(self):
+        """A 134 BPM song with a 105 BPM outro that the model then
+        follows at 210: not an octave of the song tempo, but of the
+        tempo just before it."""
+        song = _beats(134, 64)
+        outro = _beats(105, 16, start=song[-1] + 60 / 105)
+        doubled = _beats(210, 16, start=outro[-1] + 60 / 210)
+        tempi = local_beat_tempi(song + outro + doubled, 60.0)
+        assert np.all(np.abs(tempi[-24:] - 105) < 6)
+        assert tempi.max() < 140
+
+    def test_slow_intro_reads_its_own_tempo(self):
+        """A long 80 BPM intro before a 140 BPM song (0.57x) is played at
+        80, not an octave error to fold to 160."""
+        intro = _beats(80, 64)
+        beats = intro + _beats(140, 128, start=intro[-1] + 60 / 140)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[:58] - 80) < 1)
+        assert np.all(np.abs(tempi[-120:] - 140) < 1)
+
+    def test_real_double_time_change_is_followed(self):
+        first = _beats(90, 48)
+        beats = first + _beats(180, 96, start=first[-1] + 60 / 180)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[:42] - 90) < 1)
+        assert np.all(np.abs(tempi[-88:] - 180) < 1)
+
+    def test_long_half_time_section_reads_what_is_played(self):
+        """32 bars of a 60 BPM half-time feel in a 120 BPM song."""
+        first = _beats(120, 64)
+        half = _beats(60, 32, start=first[-1] + 1.0)
+        beats = first + half + _beats(120, 64, start=half[-1] + 0.5)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[70:88] - 60) < 1)
+        assert np.all(np.abs(tempi[:58] - 120) < 1)
+        assert np.all(np.abs(tempi[-58:] - 120) < 1)
+
+    def test_long_double_time_section_reads_what_is_played(self):
+        first = _beats(120, 64)
+        double = _beats(240, 96, start=first[-1] + 0.25)
+        beats = first + double + _beats(120, 64, start=double[-1] + 0.5)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[70:150] - 240) < 1)
+        assert np.all(np.abs(tempi[-58:] - 120) < 1)
+
+    def test_gap_without_beats_keeps_the_tempo_around_it(self):
+        first = _beats(120, 16)
+        beats = first + _beats(120, 16, start=first[-1] + 10.0)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi - 120) < 1)
+
+    def test_follows_a_real_tempo_change_within_a_few_beats(self):
+        first = _beats(120, 24)
+        beats = first + _beats(140, 24, start=first[-1] + 60 / 140)
+        tempi = local_beat_tempi(beats, 60.0)
+        assert np.all(np.abs(tempi[:19] - 120) < 1)
+        assert np.all(np.abs(tempi[28:] - 140) < 1)
+
+    def test_units_follow_the_positions(self):
+        """Sample frames at 44.1 kHz give the same tempo as seconds."""
+        frames = [int(t * 44100) for t in _beats(120, 16)]
+        tempi = local_beat_tempi(frames, 60.0 * 44100)
+        assert np.allclose(tempi, 120.0, atol=0.01)
+
+
+# -----------------------------------------------------------------------
 # Beat-synced metronome
 # -----------------------------------------------------------------------
 
@@ -378,6 +543,51 @@ class TestBeatSyncAPI:
         player.set_beat_times([0.0, 0.5, 1.0], [])
         bpm = player.instantaneous_bpm_at(55000)  # past 1.0s
         assert abs(bpm - 120.0) < 0.1
+
+    @staticmethod
+    def _synced_bpms(player, beats, speed=1.0):
+        """Synced tempo sampled every 50 ms, as the BPM box polls it."""
+        player._sample_rate = 44100
+        player._playback_speed = speed
+        player.set_beat_times(beats, [])
+        end = beats[-1] / speed + 1.0
+        return np.array([
+            player.instantaneous_bpm_at(int(t * 44100))
+            for t in np.arange(0.0, end, 0.05)
+        ])
+
+    def test_synced_tempo_ignores_a_double_time_burst(self, player):
+        """A riff tracked in eighth notes for a few bars stays at the
+        song tempo; one interval used to read 240 (300 on screen)."""
+        bpms = self._synced_bpms(player, _with_double_time(_beats(120, 48)))
+        assert bpms.max() < 126
+        assert bpms.min() > 114
+
+    def test_synced_tempo_ignores_an_extra_beat(self, player):
+        beats = _beats(120, 32)
+        beats.insert(11, beats[10] + 0.12)
+        bpms = self._synced_bpms(player, beats)
+        assert np.all(np.abs(bpms - 120) < 6)
+
+    def test_synced_tempo_ignores_a_missing_beat(self, player):
+        beats = _beats(120, 32)
+        del beats[10]
+        bpms = self._synced_bpms(player, beats)
+        assert np.all(np.abs(bpms - 120) < 6)
+
+    def test_synced_tempo_follows_a_real_tempo_change(self, player):
+        first = _beats(120, 24)
+        beats = first + _beats(140, 24, start=first[-1] + 60 / 140)
+        bpms = self._synced_bpms(player, beats)
+        times = np.arange(0.0, beats[-1] + 1.0, 0.05)
+        change = first[-1]
+        assert np.all(np.abs(bpms[times < change - 2.5] - 120) < 1)
+        assert np.all(np.abs(bpms[times > change + 2.5] - 140) < 1)
+
+    def test_synced_tempo_follows_playback_speed(self, player):
+        """At half speed the clicks, and so the shown tempo, halve."""
+        bpms = self._synced_bpms(player, _beats(120, 16), speed=0.5)
+        assert np.all(np.abs(bpms - 60) < 0.5)
 
 
 class TestBeatSyncCallback:

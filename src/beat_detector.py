@@ -17,8 +17,16 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from src.import_messages import ModelDamagedError
+from src.metronome import robust_beat_interval
 from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session
+
+
+# Version of the saved beat, downbeat, and chord data. A song whose saved
+# detection is older is analysed again when it is opened.
+#   4: major/minor-only chords (no false 7ths).
+#   5: beat_this input and peak picking match the model's own pipeline.
+DETECTION_VERSION = 5
 
 
 # ---------------------------------------------------------------------------
@@ -52,50 +60,41 @@ _BT_FMIN = 30.0
 _BT_FMAX = 11000.0     # official: 11 kHz upper band
 _BT_LOG_MUL = 1000.0   # ln(1 + 1000 * mel)
 
-# Chunked inference — rotary embeddings require fixed-size chunks.
+# Chunked inference, as beat_this runs it: the model takes any length, but
+# was trained on 30 s excerpts.
 _BT_CHUNK_SIZE = 1500   # frames (30 s at 50 fps)
 _BT_BORDER = 6          # overlap frames discarded at chunk boundaries
 
-# Peak-picking parameters.
-_BEAT_THRESHOLD = 0.3
-_DOWNBEAT_THRESHOLD = 0.15  # Lower: downbeat activations are weaker
-_BEAT_MIN_DIST = 6          # ~120 ms at 50 fps
-
-
-def _peak_pick(logits: np.ndarray, threshold: float,
-               min_distance: int) -> list[int]:
-    """Simple peak picker — no scipy dependency.
-
-    Returns frame indices where *logits* exceed *threshold* and are local
-    maxima with at least *min_distance* frames between peaks.
-    """
-    peaks: list[int] = []
-    last = -min_distance
-    n = len(logits)
-    for i in range(1, n - 1):
-        if logits[i] < threshold:
-            continue
-        if logits[i] <= logits[i - 1] or logits[i] <= logits[i + 1]:
-            continue
-        if i - last < min_distance:
-            continue
-        peaks.append(i)
-        last = i
-    return peaks
+# Peak picking, as beat_this's "minimal" postprocessing: a beat is a logit
+# above 0 (probability above 0.5) that is the highest within +-3 frames.
+_BT_PEAK_RADIUS = 3
 
 
 def _bt_spectrogram(audio_mono: np.ndarray) -> np.ndarray:
     """Compute the log-mel spectrogram expected by beat_this.
 
-    Returns array of shape ``(frames, 128)`` in float32.  Matches the
-    official ``LogMelSpect`` preprocessing: magnitude mel spectrogram
-    (power=1), frame-length normalisation, and ``ln(1 + 1000 * x)``.
+    Returns array of shape ``(frames, 128)`` in float32. Reproduces the
+    official ``LogMelSpect``, which is torchaudio's ``MelSpectrogram`` with
+    ``power=1`` and ``normalized="frame_length"``, then
+    ``ln(1 + 1000 * x)``. Every setting is passed explicitly: librosa's
+    defaults differ from torchaudio's in two places, and the model tracks
+    busy passages in double time on the wrong input.
+
+    - ``norm=None``: torchaudio's triangular mel filters are not area
+      normalised. librosa's default (``"slaney"``) scales each filter by
+      2 / bandwidth, which made the input about 30 to 400 times quieter,
+      and more so in the treble.
+    - ``pad_mode="reflect"``: torchaudio pads the centred edge frames by
+      reflection; librosa's default pads with zeros.
     """
     mel = librosa.feature.melspectrogram(
         y=audio_mono, sr=_BT_SR,
-        n_fft=_BT_N_FFT, hop_length=_BT_HOP,
-        n_mels=_BT_N_MELS, fmin=_BT_FMIN, fmax=_BT_FMAX,
+        n_fft=_BT_N_FFT, hop_length=_BT_HOP, win_length=_BT_N_FFT,
+        window="hann", center=True, pad_mode="reflect",
         power=1.0,           # magnitude, not power
+        n_mels=_BT_N_MELS, fmin=_BT_FMIN, fmax=_BT_FMAX,
+        htk=False,           # Slaney mel scale (torchaudio mel_scale="slaney")
+        norm=None,           # no filter area normalisation
     )
     # Frame-length normalisation (torchaudio normalized="frame_length").
     mel = mel / math.sqrt(_BT_N_FFT)
@@ -108,6 +107,19 @@ def _bt_chunked_inference(
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Run beat_this on *spec* in 1500-frame chunks with border overlap.
 
+    Follows beat_this's ``split_predict_aggregate``: chunks start
+    ``_BT_BORDER`` frames before the song and step by the chunk size less
+    both borders, the last chunk is moved back to end with the song rather
+    than being mostly padding, each chunk's borders are discarded, and
+    where two chunks overlap the earlier one wins. Only the borders are
+    zero padded, so an input shorter than one chunk (an A-B loop, a short
+    song) runs at its own length. Padding it to 1500 frames instead cost
+    more missed and extra beats over 80 loops of two real songs.
+
+    For 1489 to 1494 frames the moved-back last chunk starts 1 to 5
+    frames before the song, as upstream's does; the first chunk still
+    covers those frames.
+
     Returns ``(beat_logits, downbeat_logits)`` arrays covering the full
     spectrogram, or ``(beat_logits, None)`` if the model has only one
     output.
@@ -116,38 +128,80 @@ def _bt_chunked_inference(
     input_name = session.get_inputs()[0].name
     stride = _BT_CHUNK_SIZE - 2 * _BT_BORDER
 
-    beat_parts: list[np.ndarray] = []
-    db_parts: list[np.ndarray] = []
+    starts = list(range(-_BT_BORDER, n_frames - _BT_BORDER, stride))
+    if n_frames > stride:
+        starts[-1] = n_frames - (_BT_CHUNK_SIZE - _BT_BORDER)
 
-    offset = 0
-    while offset < n_frames:
-        end = min(offset + _BT_CHUNK_SIZE, n_frames)
-        chunk = spec[offset:end]
+    beat_logits = np.full(n_frames, -1000.0, dtype=np.float32)
+    db_logits: np.ndarray | None = None
 
-        # Pad to exactly _BT_CHUNK_SIZE frames.
-        if chunk.shape[0] < _BT_CHUNK_SIZE:
-            pad_width = _BT_CHUNK_SIZE - chunk.shape[0]
-            chunk = np.pad(chunk, ((0, pad_width), (0, 0)))
+    # Later chunks first, so an earlier chunk overwrites any overlap.
+    for start in reversed(starts):
+        chunk = spec[max(start, 0):min(start + _BT_CHUNK_SIZE, n_frames)]
+        left = max(0, -start)
+        right = max(0, min(_BT_BORDER, start + _BT_CHUNK_SIZE - n_frames))
+        chunk = np.pad(chunk, ((left, right), (0, 0)))
 
         outputs = session.run(
             None, {input_name: chunk[np.newaxis, :, :]},
         )
-        beat_out = outputs[0][0]  # (chunk_size,)
-        db_out = outputs[1][0] if len(outputs) > 1 else None
+        lo = start + _BT_BORDER
+        hi = min(start + _BT_CHUNK_SIZE - _BT_BORDER, n_frames)
+        keep = slice(_BT_BORDER, _BT_BORDER + hi - lo)
+        beat_logits[lo:hi] = outputs[0][0][keep]
+        if len(outputs) > 1:
+            if db_logits is None:
+                db_logits = np.full(n_frames, -1000.0, dtype=np.float32)
+            db_logits[lo:hi] = outputs[1][0][keep]
 
-        # Trim borders (keep full extent at first/last chunk).
-        actual_len = min(end - offset, _BT_CHUNK_SIZE)
-        lo = 0 if offset == 0 else _BT_BORDER
-        hi = actual_len if end >= n_frames else actual_len - _BT_BORDER
-        beat_parts.append(beat_out[lo:hi])
-        if db_out is not None:
-            db_parts.append(db_out[lo:hi])
-
-        offset += stride
-
-    beat_logits = np.concatenate(beat_parts)[:n_frames]
-    db_logits = np.concatenate(db_parts)[:n_frames] if db_parts else None
     return beat_logits, db_logits
+
+
+def _bt_peaks(logits: np.ndarray) -> np.ndarray:
+    """Return beat frames from beat_this logits (``postp_minimal``).
+
+    A frame is a beat when its logit is above 0 and is the maximum within
+    ``_BT_PEAK_RADIUS`` frames on either side. Runs of adjacent peak
+    frames (equal maxima) collapse to their mean, so a result can fall
+    between frames.
+    """
+    logits = np.asarray(logits, dtype=np.float32)
+    n_frames = logits.size
+    if n_frames == 0:
+        return np.zeros(0, dtype=np.float64)
+    width = 2 * _BT_PEAK_RADIUS + 1
+    padded = np.pad(logits, _BT_PEAK_RADIUS, constant_values=-np.inf)
+    pooled = np.lib.stride_tricks.sliding_window_view(padded, width).max(1)
+    frames = np.flatnonzero((logits == pooled) & (logits > 0))
+
+    # beat_this deduplicate_peaks(width=1): a running mean over each run
+    # of peaks no more than one frame apart.
+    peaks: list[float] = []
+    count = 0
+    for frame in frames:
+        if peaks and frame - peaks[-1] <= 1:
+            count += 1
+            peaks[-1] += (frame - peaks[-1]) / count
+        else:
+            peaks.append(float(frame))
+            count = 1
+    return np.asarray(peaks, dtype=np.float64)
+
+
+def _snap_to_beats(
+    downbeat_times: list[float], beat_times: list[float],
+) -> list[float]:
+    """Move each downbeat to its nearest beat, dropping duplicates.
+
+    As beat_this does, so every downbeat is also on the beat grid.
+    """
+    if not beat_times:
+        return list(downbeat_times)
+    beats = np.asarray(beat_times, dtype=np.float64)
+    snapped = {
+        float(beats[np.argmin(np.abs(beats - t))]) for t in downbeat_times
+    }
+    return sorted(snapped)
 
 
 def _detect_beats_onnx(
@@ -167,32 +221,22 @@ def _detect_beats_onnx(
     session = create_onnx_session(model_path)
     beat_logits, db_logits = _bt_chunked_inference(spec, session)
 
-    beat_probs = _sigmoid(beat_logits)
-    beat_frames = _peak_pick(beat_probs, _BEAT_THRESHOLD, _BEAT_MIN_DIST)
     fps = _BT_SR / _BT_HOP
-    beat_times = [f / fps for f in beat_frames]
+    beat_times = [float(f) / fps for f in _bt_peaks(beat_logits)]
 
     downbeat_times: list[float] = []
     if db_logits is not None:
-        db_probs = _sigmoid(db_logits)
-        db_frames = _peak_pick(db_probs, _DOWNBEAT_THRESHOLD, _BEAT_MIN_DIST)
-        downbeat_times = [f / fps for f in db_frames]
+        downbeat_times = _snap_to_beats(
+            [float(f) / fps for f in _bt_peaks(db_logits)], beat_times,
+        )
 
     bpm = 0.0
     if len(beat_times) >= 2:
-        intervals = np.diff(beat_times)
-        bpm = 60.0 / float(np.median(intervals))
+        interval = robust_beat_interval(np.diff(beat_times))
+        if interval > 0:
+            bpm = 60.0 / interval
 
     return beat_times, downbeat_times, bpm
-
-
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    """Numerically stable sigmoid."""
-    return np.where(
-        x >= 0,
-        1.0 / (1.0 + np.exp(-x)),
-        np.exp(x) / (1.0 + np.exp(x)),
-    )
 
 
 # ---------------------------------------------------------------------------

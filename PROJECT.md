@@ -114,6 +114,8 @@ stemma/
 - Keeps the heavy ONNX Runtime import deferred until inference/diagnostics
 - Configures DirectML for sequential execution with memory patterns disabled
 - Retries with CPU when DirectML session creation fails
+- Callers pass `use_gpu=False` to go straight to the CPU; HTDemucs does,
+  because its export never compiles on DirectML
 - Supplies a stable user-facing provider label
 
 ### `beat_detector.py` — Musical Analysis

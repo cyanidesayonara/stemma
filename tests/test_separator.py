@@ -257,9 +257,11 @@ class TestSeparatorCreateSession:
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
-    def test_cpu_fallback_when_dml_init_fails(
+    def test_goes_straight_to_cpu_with_dml_available(
         self, mock_infer, mock_providers, tmp_dir, sample_audio_path
     ):
+        """HTDemucs never compiles on DirectML (#125), so it is not tried;
+        the DML-then-CPU fallback is covered in test_onnx_session.py."""
         model_path = os.path.join(tmp_dir, "model.onnx")
         with open(model_path, "wb") as f:
             f.write(b"x")
@@ -286,9 +288,9 @@ class TestSeparatorCreateSession:
         )
         sess = worker._create_session()
         assert sess is cpu_session
-        assert mock_infer.call_count == 2
-        second_kw = mock_infer.call_args_list[1][1]
-        assert second_kw["providers"] == ["CPUExecutionProvider"]
+        assert mock_infer.call_count == 1
+        only_kw = mock_infer.call_args_list[0][1]
+        assert only_kw["providers"] == ["CPUExecutionProvider"]
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
@@ -510,3 +512,23 @@ class TestMemoryEstimation:
     def test_available_memory_bytes_returns_int_or_none(self):
         result = available_memory_bytes()
         assert result is None or (isinstance(result, int) and result > 0)
+
+
+def test_htdemucs_worker_asks_for_a_cpu_session(monkeypatch, tmp_path):
+    """HTDemucs never compiles on DirectML (#125), so it asks for the CPU."""
+    import src.separator as separator
+
+    seen = {}
+
+    def fake_create(path, use_gpu=True):
+        seen["use_gpu"] = use_gpu
+        return object()
+
+    monkeypatch.setattr(separator, "create_onnx_session", fake_create)
+    worker = separator.SeparatorWorker(
+        input_path=str(tmp_path / "in.wav"),
+        output_dir=str(tmp_path / "out"),
+        model_path=str(tmp_path / "htdemucs.onnx"),
+    )
+    worker._create_session()
+    assert seen["use_gpu"] is False
