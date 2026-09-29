@@ -26,6 +26,10 @@ class SongInfoBar(QWidget):
         # download runs; kept so a theme switch can redraw it.
         self._key_status: str | None = None
         self._bpm_status: str | None = None
+        # The unrounded tempo behind the "~91 BPM" badge, for the tooltip;
+        # kept across a theme switch, which re-renders from the text.
+        self._precise_bpm: float | None = None
+        self._shown_bpm = ""
 
         self._key_label = QLabel("")
         self._key_label.setTextFormat(Qt.TextFormat.RichText)
@@ -153,10 +157,20 @@ class SongInfoBar(QWidget):
         ])
         self._key_label.setToolTip("\n".join(tooltip))
 
-    def set_bpm(self, text: str, confidence: str = "") -> None:
-        """Store and render detected tempo state."""
+    def set_bpm(
+        self, text: str, confidence: str = "", precise: float | None = None,
+    ) -> None:
+        """Store and render detected tempo state.
+
+        *precise* is the unrounded tempo, shown in the tooltip when known.
+        """
         self._bpm_status = None
         self._detected_bpm = text
+        if precise is not None:
+            self._precise_bpm = precise
+        elif text != self._shown_bpm:
+            self._precise_bpm = None
+        self._shown_bpm = text
         self._bpm_confidence = confidence if text else ""
         if not text:
             self._detected_bpm_label.setText("")
@@ -170,7 +184,11 @@ class SongInfoBar(QWidget):
         self._detected_bpm_label.setText(
             self.badge_html("Tempo:", text, confidence)
         )
-        tooltip = [f"Detected tempo: {text}"]
+        detail = (
+            f"{self._precise_bpm:.1f} BPM"
+            if self._precise_bpm is not None else text
+        )
+        tooltip = [f"Detected tempo: {detail}"]
         if confidence:
             tooltip.append(f"Confidence: {confidence}")
         tooltip.append("Double-click to re-detect")

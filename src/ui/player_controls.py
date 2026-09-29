@@ -1495,6 +1495,7 @@ class PlayerControls(QWidget):
             self._detected_bpm_raw = f"~{round(result.bpm)} BPM"
             self._song_info_bar.set_bpm(
                 self._detected_bpm_raw, result.bpm_confidence,
+                precise=result.bpm,
             )
         else:
             self._song_info_bar.set_bpm("")
@@ -1525,12 +1526,15 @@ class PlayerControls(QWidget):
     def _on_detect_error(self, msg: str) -> None:
         if not self._is_active_detection_sender():
             return
-        for lbl in (self._key_label, self._detected_bpm_label,
-                     self._chord_label):
-            lbl.setText("")
-            lbl.setStyleSheet("")
+        # Through the info bar, so its "detecting..." status is cleared
+        # too: styling the labels here left that status stored, and the
+        # next theme switch brought it back (#212 review).
+        self._song_info_bar.clear()
+        self._player.set_chord_sequence([])
         self._detected_key_raw = ""
         self._detected_bpm_raw = ""
+        self._key_conf = ""
+        self._bpm_conf = ""
         self._chord_timer.stop()
 
     def _on_detect_finished(self) -> None:
@@ -1624,6 +1628,7 @@ class PlayerControls(QWidget):
             self._detected_bpm_raw = f"~{round(result.bpm)} BPM"
             self._song_info_bar.set_bpm(
                 self._detected_bpm_raw, result.bpm_confidence,
+                precise=result.bpm,
             )
         else:
             self._song_info_bar.set_bpm("")

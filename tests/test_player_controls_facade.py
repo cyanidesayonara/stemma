@@ -662,15 +662,52 @@ def test_key_and_tempo_badges_follow_a_theme_switch(controls, restored):
     assert "B major" in bar.key_label.text()
 
 
-def test_detecting_status_follows_a_theme_switch(controls):
+def test_key_only_detecting_status_follows_a_theme_switch(controls):
+    """Drives the real re-detect path, with the worker stubbed out."""
     controls.apply_theme("dark", DARK_COLORS)
-    controls.song_info_bar.show_detection_status(
-        "Key: detecting...", "Tempo: detecting...",
-    )
+    controls.set_detected_bpm_text("~91 BPM", "low")
+    with patch("src.ui.player_controls.DetectionWorker"):
+        controls._redetect_key_only()
 
     controls.apply_theme("light", LIGHT_COLORS)
 
     bar = controls.song_info_bar
     assert bar.key_label.text() == "Key: detecting..."
-    assert bar.detected_bpm_label.text() == "Tempo: detecting..."
     assert LIGHT_COLORS["surface0"] in bar.key_label.styleSheet()
+    # The tempo badge keeps its value while only the key re-detects.
+    assert "~91 BPM" in bar.detected_bpm_label.text()
+
+
+def test_failed_detection_does_not_come_back_on_a_theme_switch(controls):
+    """The error path styled the labels itself, so the stored
+    "detecting..." status reappeared at the next theme switch."""
+    controls.apply_theme("dark", DARK_COLORS)
+    controls.set_detected_key("C major", "medium")
+    controls.song_info_bar.show_detection_status(
+        "Key: detecting...", "Tempo: detecting...",
+    )
+    with patch.object(
+        controls, "_is_active_detection_sender", return_value=True,
+    ):
+        controls._on_detect_error("boom")
+
+    controls.apply_theme("light", LIGHT_COLORS)
+
+    bar = controls.song_info_bar
+    assert bar.key_label.text() == ""
+    assert bar.detected_bpm_label.text() == ""
+
+
+def test_tempo_tooltip_keeps_the_precise_value(controls):
+    result = MagicMock()
+    result.bpm, result.bpm_confidence = 91.4, "low"
+    result.key, result.key_confidence = "", ""
+    result.beat_times, result.downbeat_times = [], []
+    result.chord_sequence = []
+    with patch.object(
+        controls, "_is_active_detection_sender", return_value=True,
+    ):
+        controls._on_detect_completed(result)
+    controls.apply_theme("light", LIGHT_COLORS)
+
+    assert "91.4 BPM" in controls.song_info_bar.detected_bpm_label.toolTip()
