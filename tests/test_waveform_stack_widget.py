@@ -465,3 +465,17 @@ def test_delete_take_prompt_names_the_take_like_the_mixer(tmp_path):
     ) as ask:
         MainWindow._on_delete_recording(stub, "recording_take1")
     assert ask.call_args.args[2].startswith("Delete Take 1?")
+
+
+def test_every_lane_keeps_a_readable_height(app):
+    """Six stems at the 120 px stack floor were 20 px lanes (#159)."""
+    from src.ui.waveform_stack_widget import LANE_MIN_HEIGHT, STACK_MIN_HEIGHT
+
+    widget = WaveformStackWidget()
+    widget.set_lane_capacity(6)
+    assert widget.minimumHeight() == 6 * LANE_MIN_HEIGHT
+    widget.set_lane_capacity(2)
+    assert widget.minimumHeight() == STACK_MIN_HEIGHT
+    # Recording takes don't raise the floor.
+    widget.set_lane_capacity(8, readable_lanes=6)
+    assert widget.minimumHeight() == 6 * LANE_MIN_HEIGHT

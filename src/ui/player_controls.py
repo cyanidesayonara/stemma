@@ -1881,7 +1881,10 @@ class PlayerControls(QWidget):
 
     def _sync_waveform_lane_capacity(self) -> None:
         """Size the waveform's height cap to one lane per mixer row."""
-        self._waveform.set_lane_capacity(len(self._stem_mixer.stem_names()))
+        self._waveform.set_lane_capacity(
+            len(self._stem_mixer.stem_names()),
+            readable_lanes=len(self._stem_mixer.source_stem_names()),
+        )
 
     @property
     def recording_count(self) -> int:
