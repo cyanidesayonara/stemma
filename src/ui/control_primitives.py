@@ -369,7 +369,9 @@ def format_time(seconds: float) -> str:
 class PitchSpinBox(QSpinBox):
     """Stable-width spinbox with human-readable semitone values."""
 
-    _WIDEST_TEXT = "+7 semi (10/10)"
+    # Wide enough for the longest value; no render progress is shown in
+    # it any more (speed and pitch apply live).
+    _WIDEST_TEXT = "original"
 
     def _compute_fixed_hint(self) -> QSize:
         metrics = self.fontMetrics()

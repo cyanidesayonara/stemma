@@ -45,7 +45,7 @@ future scope lives in `docs/ROADMAP.md`.
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
 | **Packaging** | PyInstaller | One-folder (COLLECT) build shipped as `stemma.zip` + `stemma.msix` |
-| **Time/pitch processing** | `librosa` | Offline render from original buffers avoids compounding transformations |
+| **Time/pitch processing** | `src/stretch.py` (numpy phase vocoder + `soxr`) | Real-time on the mix, like DAWs and practice apps: changes apply within a frame, nothing is pre-rendered; same vocoder as librosa, speed and pitch in one pass |
 
 ### Why HTDemucs v4?
 
@@ -77,6 +77,7 @@ stemma/
 │   ├── onnx_session.py     # shared DirectML-first session policy
 │   ├── separation_queue.py # serialized background jobs
 │   ├── player.py           # multi-track audio engine
+│   ├── stretch.py          # real-time speed and pitch (phase vocoder)
 │   ├── library.py          # persistent song index and recovery
 │   ├── beat_detector.py    # beat, tempo, key, and chord analysis
 │   └── ui/                 # Qt presentation and interaction
@@ -137,6 +138,7 @@ stemma/
 - `sounddevice.OutputStream` callback: reads buffers per stem, applies gain, sums to output; optional metronome click mix; optional count-in pre-roll before advancing `_current_frame`
 - API: `play()`, `pause()`, `stop()`, `seek()`, `set_mute()`, `set_solo()`, `set_volume()`
 - Per-stem volume control (0.0-2.0)
+- Speed and pitch are applied live in the callback: `StreamingStretcher` paths (src/stretch.py) stretch the mix as it plays, primed off the audio thread when built or seeked. Positions, loop points, beats, and chords stay in song frames at any speed; clicks are mixed after stretching. Recording takes get their own unpitched path unless they follow the pitch
 - A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`. While looping is on and the region is valid (`B > A`), **Stop** seeks to loop A (not track start); **seek** clamps into `[A, B)` (outside snaps to A)
 - Metronome and count-in settings (BPM, volume, beats, loop-repeat count-in)
 - Recording: full-duplex `sd.Stream` captures input at the playback frame position; position-indexed buffer auto-handles loop wraps; saves as `recording_takeN.wav` with optional latency offset via `np.roll`; `recording_saved` signal

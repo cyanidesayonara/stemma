@@ -336,7 +336,7 @@ class PlayerControls(QWidget):
 
         self._pitch_debounce = QTimer(self)
         self._pitch_debounce.setSingleShot(True)
-        self._pitch_debounce.setInterval(200)
+        self._pitch_debounce.setInterval(100)
         self._pitch_debounce.timeout.connect(self._flush_pending_pitch)
         self._pending_pitch: int | None = None
 
@@ -527,9 +527,6 @@ class PlayerControls(QWidget):
         self._player.play_finished.connect(self._on_play_finished)
         self._player.speed_changed.connect(self._on_speed_applied)
         self._player.pitch_changed.connect(self._on_pitch_applied)
-        self._player.stretch_started.connect(self._on_stretch_started)
-        self._player.stretch_progress.connect(self._on_stretch_progress)
-        self._player.stretch_finished.connect(self._on_stretch_finished)
         self._player.loop_wrapped.connect(self._on_loop_wrapped)
 
     def set_stem_names(self, stem_names: list[str]) -> None:
@@ -1056,16 +1053,14 @@ class PlayerControls(QWidget):
     def _on_speed_changed(self, index: int) -> None:
         """User selected a speed preset from the combo box.
 
-        Debounced so burst input (Shift+Up/Down cycling) coalesces into
-        a single render; any in-flight render is cancelled immediately
-        to free CPU while the user is still choosing.
+        Briefly debounced so Shift+Up/Down cycling lands on the last
+        preset; the player applies it live.
         """
         speed = self._speed_combo.currentData()
         if speed is None:
             return
         self._pending_speed = float(speed)
         self._speed_debounce.start()
-        self._player.cancel_stretch()
 
     def _flush_pending_speed(self) -> None:
         """Apply the latest speed value after the debounce window expires."""
@@ -1086,14 +1081,11 @@ class PlayerControls(QWidget):
         self._refresh_after_render()
 
     def _refresh_after_render(self) -> None:
-        """Refresh everything that depends on the applied speed or pitch.
+        """Refresh everything that depends on the speed or pitch.
 
-        A render that supersedes another emits only its own signal
-        (speed_changed or pitch_changed) even though it applies both
-        values, so both slots must refresh the same set of widgets.
+        The waveform stays as it is: positions are in song time at any
+        speed, so the stems and their peaks never change.
         """
-        # Buffers may have new lengths after a combined render.
-        self._do_recompute_peaks()
         self._refresh_key_label()
         self.update_record_button_state()
         self._update_trainer_status()
@@ -1113,20 +1105,11 @@ class PlayerControls(QWidget):
     def _on_pitch_changed(self, semitones: int) -> None:
         """User adjusted the pitch spinbox.
 
-        We don't call ``player.set_pitch`` immediately; a 200ms debounce
-        timer coalesces rapid scroll/arrow input into a single render.
-        The descriptive status text is set by ``_on_stretch_started``
-        once the worker actually spawns, not while the user is still
-        adjusting the value.
-
-        Any already-running render is cancelled right away so we stop
-        wasting CPU on a stale target -- the new render will spawn when
-        the debounce timer fires.
+        Briefly debounced so a fast scroll lands on the last value; the
+        player applies it live.
         """
         self._pending_pitch = int(semitones)
         self._pitch_debounce.start()
-        # Kill the stale render immediately; the next one is queued.
-        self._player.cancel_stretch()
 
     def _flush_pending_pitch(self) -> None:
         """Apply the latest pitch value after the debounce window expires."""
@@ -1150,98 +1133,6 @@ class PlayerControls(QWidget):
             direction: +1 for up, -1 for down. Clamped by the spinbox range.
         """
         self._pitch_spin.setValue(self._pitch_spin.value() + direction)
-
-    # -- Stretch worker progress indicator --
-    #
-    # Progress is shown *inside* (or immediately beside) the control the
-    # user is manipulating.  The pitch spinbox carries a "(processing
-    # 2/4)" suffix; the speed combo is followed by a small label with
-    # the same suffix text (combos can't carry inline text of their own).
-    # When both knobs are active, only the pitch suffix is shown -- the
-    # single worker renders both transforms in one pass, and duplicating
-    # the indicator confuses the eye.  The control stays enabled
-    # throughout -- any new input cancels the in-flight render and queues
-    # a fresh one via the debounce timer.
-
-    def _on_stretch_started(self) -> None:
-        """Begin showing render progress on the active control.
-
-        The spinbox stays enabled so the user can keep scrubbing -- the
-        player cancels the in-flight worker as soon as a new target is
-        committed (see ``_flush_pending_pitch``).
-        """
-        self._update_stretch_indicator(0, 0)
-
-    def _on_stretch_progress(self, current: int, total: int) -> None:
-        """Update the live render indicator with per-stem progress."""
-        self._update_stretch_indicator(current, total)
-
-    def _on_stretch_finished(self) -> None:
-        """Clear the render indicator and restore the idle display."""
-        self._pitch_spin.setSuffix("")
-        self._speed_status.setText("")
-
-    def _update_stretch_indicator(self, current: int, total: int) -> None:
-        """Paint render progress onto the pitch spinbox / speed label.
-
-        The pitch spinbox's primary text ("+2 semi") is produced by
-        :class:`PitchSpinBox.textFromValue`; this method only manages
-        the trailing progress suffix (e.g. ``" (2/4)"``).  Speed
-        progress uses a small floating label next to the speed combo,
-        since QComboBox can't carry inline suffix text.
-
-        The suffix format is deliberately minimal -- the spinbox/label
-        is already tight, and the bare ``(N/M)`` form is still read
-        as progress-out-of-total in context (the control is frozen
-        grey while it's showing).  Earlier versions used
-        ``(processing N/M)`` but that pushed the spinbox ~80 px wider.
-        """
-        pitch_on = self._player.pitch_semitones != 0
-        speed_on = self._player.speed != 1.0
-
-        if pitch_on:
-            if total > 0:
-                self._pitch_spin.setSuffix(f" ({current}/{total})")
-            else:
-                self._pitch_spin.setSuffix(" \u2026")
-        else:
-            self._pitch_spin.setSuffix("")
-
-        if speed_on and not pitch_on:
-            # Match the pitch spinbox suffix format verbatim so both
-            # renders look visually identical.  Sits right after the
-            # combo so the user sees "Speed: [1.5x] (2/4)".
-            if total > 0:
-                self._speed_status.setText(f"({current}/{total})")
-            else:
-                self._speed_status.setText("\u2026")
-        else:
-            # When pitch is active, the spinbox suffix already carries
-            # the indicator; don't duplicate it in a floating label.
-            self._speed_status.setText("")
-
-    def _render_status_label(self, current: int, total: int) -> str:
-        """Compose the floating-label status text (speed-only renders).
-
-        Retained for tests and for callers that want a single-string
-        status. For the pitch case the spinbox suffix is authoritative.
-        """
-        pitch_on = self._player.pitch_semitones != 0
-        speed_on = self._player.speed != 1.0
-        if pitch_on and speed_on:
-            verb = "Transposing and time-stretching"
-        elif pitch_on:
-            verb = "Transposing"
-        elif speed_on:
-            verb = "Time-stretching"
-        else:
-            # Transition back to identity (fast path emits no progress).
-            verb = "Rendering"
-        if total > 0:
-            return f"{verb} stems ({current}/{total})\u2026"
-        return f"{verb} stems\u2026"
-
-    # -- Metronome handlers --
 
     def _on_bpm_changed(self, value: int) -> None:
         """User changed the BPM spinbox."""

@@ -828,7 +828,6 @@ class TestRecordingStemMethods:
         player.add_recording_stem("recording_take1", longer_data)
 
         assert "recording_take1" in player._stems
-        assert "recording_take1" in player._original_stems
         assert player._total_frames == 88200
 
     def test_add_mono_recording_stem(self, mock_stems):
@@ -970,16 +969,6 @@ class TestNudgeStem:
         player.nudge_stem("vocals", -500.0)
         assert player.get_nudge_ms("vocals") == -200.0
 
-    def test_nudge_updates_original_stems(self, mock_stems):
-        player = MultiTrackPlayer()
-        player.load_stems(mock_stems)
-
-        player.nudge_stem("vocals", 10.0)
-
-        np.testing.assert_array_equal(
-            player._stems["vocals"], player._original_stems["vocals"]
-        )
-
     def test_nudge_nonexistent_stem_is_noop(self, mock_stems):
         player = MultiTrackPlayer()
         player.load_stems(mock_stems)
@@ -1079,27 +1068,15 @@ class TestChordSequence:
         player.load_stems(mock_stems)
         assert player.chord_sequence == []
 
-    def test_chord_at_maps_stretched_frames_back_to_original_time(
-        self, mock_stems,
-    ):
-        """At 0.5x the audio is twice as long: original time t sits at
-        stretched frame t / speed * sr, so the inverse mapping must
-        multiply by speed. The old code divided, looking up the chord
-        at 4x the playhead time."""
+    def test_chord_at_uses_song_time_at_any_speed(self, mock_stems):
+        """Speed is applied live, so the playhead is in song frames."""
         player = MultiTrackPlayer()
         player.load_stems(mock_stems)
-        chords = [(0.0, "Am"), (0.5, "G")]
-        player.set_chord_sequence(chords)
+        player.set_chord_sequence([(0.0, "Am"), (0.5, "G")])
         sr = player.sample_rate
         player._playback_speed = 0.5
-        # Original t=0.25s ("Am") sits at stretched frame 0.25/0.5*sr.
-        assert player.chord_at(int(0.25 / 0.5 * sr)) == "Am"
-        # Original t=0.75s ("G") sits at stretched frame 0.75/0.5*sr.
-        assert player.chord_at(int(0.75 / 0.5 * sr)) == "G"
-
-
-class TestMasterVolume:
-    """Master volume multiplier for all stems."""
+        assert player.chord_at(int(0.25 * sr)) == "Am"
+        assert player.chord_at(int(0.75 * sr)) == "G"
 
     def test_default_master_volume_is_unity(self):
         player = MultiTrackPlayer()

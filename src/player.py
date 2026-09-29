@@ -13,27 +13,25 @@ frame synchronisation with the stems being mixed to output.
 import glob
 import math
 import os
-import queue
 import threading
 from typing import Any
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
-import librosa
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 
 from src.click_utils import generate_click
 from src.import_messages import describe_error
-from src.qt_signal_utils import safe_disconnect as _safe_disconnect
+from src.stretch import StreamingStretcher
 
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
 
-# Bounds for pitch transposition, in semitones. librosa's pitch_shift
-# quality degrades noticeably beyond ±7 (it chains resample+time_stretch
-# internally); this range covers the practical use cases (vocal range
-# adjustment, capo equivalents) without exposing the quality cliff.
+# Bounds for pitch transposition, in semitones. A phase-vocoder pitch shift
+# (stretch, then resample) degrades noticeably beyond ±7; this range covers
+# the practical use cases (vocal range adjustment, capo equivalents)
+# without exposing the quality cliff.
 PITCH_MIN_SEMITONES = -7
 PITCH_MAX_SEMITONES = 7
 
@@ -41,6 +39,10 @@ PITCH_MAX_SEMITONES = 7
 # Used to distinguish user recordings from source stems when deciding
 # whether to apply pitch transposition.
 RECORDING_STEM_PREFIX = "recording_take"
+
+# Output frames a new or re-seeked stretch path prepares before the audio
+# callback reads it, so its first block costs no more than any other.
+_PRIME_FRAMES = 2048
 
 
 def read_stem_files(
@@ -112,271 +114,47 @@ def next_take_number(song_dir: str) -> int:
     return max(nums, default=0) + 1
 
 
-class StretchWorker(QThread):
-    """Background thread for pitch-preserving time-stretch and/or pitch
-    shift of all stems.
+class _SourceReader:
+    """Mixes the stems one stretcher plays, from a read head that loops.
 
-    Both transforms are applied in a single pass per stem so artifacts do
-    not compound. Pitch shift runs first (it internally resamples then
-    time-stretches back to the original length), then the requested
-    playback-speed stretch is applied.
-
-    Stems are dispatched to a small pool of **daemon threads** (not
-    ``concurrent.futures.ThreadPoolExecutor``) for overlap between the
-    Python bookkeeping and the C-level FFT / resampling kernels.  In
-    practice the GIL and librosa's own internal Python loops limit
-    wall-clock speedup to roughly 1.0-1.3x; the main perf lever is
-    ``_HOP_LENGTH`` (STFT hop size), which trades STFT frame count
-    linearly against render time with minimal quality impact.
-
-    Why daemon threads instead of ``ThreadPoolExecutor``:
-        ``ThreadPoolExecutor`` registers its workers with
-        ``concurrent.futures.thread._threads_queues``, which its atexit
-        handler ``_python_exit`` drains by calling ``t.join()`` on each
-        thread.  In-flight librosa calls are uninterruptible (pure C
-        kernels) -- if the user closes the app mid-render the pool
-        threads are stuck inside librosa and ``_python_exit`` hangs
-        indefinitely, forcing a Ctrl+C kill.  Daemon threads are *not*
-        registered in ``_threads_queues``; Python exits cleanly and
-        reaps them as part of process teardown.  This is safe here
-        because we only touch in-memory numpy buffers -- no file I/O
-        or external resources whose state would be corrupted by
-        abrupt termination.
-
-    Recording-take stems are only pitch-shifted when
-    ``sync_recording_pitch`` is True. Speed is always applied to every
-    stem (speed changes affect all audible audio; recordings must stay in
-    sync with the backing track).
-
-    Cancellation:
-        ``cancel()`` sets a flag checked between each stem and each
-        channel. In-flight librosa calls cannot be interrupted -- cancel
-        responsiveness is bounded by the length of a single channel's
-        pitch-shift / time-stretch pass (~0.5-2s on typical songs).
-        A cancelled worker emits no further ``progress`` / ``completed``
-        / ``error`` signals.  The dispatcher loop polls the cancel flag
-        every 100 ms and returns from ``run()`` as soon as it sees one
-        (orphaning any still-running daemon worker) so the QThread
-        ``finished`` signal fires promptly.
+    Called by ``StreamingStretcher`` from the audio callback. The read head
+    runs a little ahead of what the listener hears (the stretcher's
+    analysis window); mute, solo, and volume are applied as the stems are
+    read, so a change reaches the speakers a few tens of milliseconds later.
     """
-
-    completed = Signal(dict)  # {name: stretched_ndarray}
-    progress = Signal(int, int)  # (current_stem, total_stems)
-    error = Signal(str)
-
-    # Resampler quality.  librosa's default is "soxr_hq" (high-quality
-    # SOX resampler).  We keep it -- dropping to "soxr_mq" is ~3x faster
-    # but introduces an audible metallic timbre on transient-heavy
-    # material (drums, plucked strings), which is unacceptable for a
-    # tool whose whole purpose is faithful playback of the source.
-    # Speed wins come from parallel stem rendering, not from cutting
-    # resampler quality.
-    _RESAMPLE_TYPE = "soxr_hq"
-
-    # Cap parallelism to avoid excess RAM usage.  Each thread buffers a
-    # mono copy of one stem; 4 threads × ~28 MB/stem = ~112 MB overhead
-    # for a typical 5-min project.
-    _MAX_PARALLEL_STEMS = 4
 
     def __init__(
         self,
-        stems: dict[str, np.ndarray],
-        sample_rate: int,
-        speed: float,
-        pitch_semitones: int,
-        sync_recording_pitch: bool = False,
-        parent=None,
+        player: "MultiTrackPlayer",
+        names: frozenset[str] | None,
+        head: int,
     ) -> None:
-        super().__init__(parent)
-        self._stems = stems
-        self._sample_rate = int(sample_rate)
-        self._speed = float(speed)
-        self._pitch_semitones = int(pitch_semitones)
-        self._sync_recording_pitch = bool(sync_recording_pitch)
-        self._cancelled = False
+        self._player = player
+        self.names = names  # None: every stem
+        self.head = int(head)
+        self._gains: dict[str, float] = {}
 
-    def cancel(self) -> None:
-        """Request early termination at the next stem/channel boundary.
-
-        Once set, the worker emits no further ``progress``, ``completed``,
-        or ``error`` signals; its ``run()`` returns cleanly so the QThread
-        ``finished`` signal still fires and the player can reap it.
-        """
-        self._cancelled = True
-
-    @property
-    def cancelled(self) -> bool:
-        return self._cancelled
-
-    def run(self) -> None:
-        try:
-            self._stretch()
-        except Exception as exc:  # noqa: BLE001
-            if not self._cancelled:
-                self.error.emit(str(exc))
-
-    def _stretch(self) -> None:
-        total = len(self._stems)
-        if total == 0:
-            if not self._cancelled:
-                self.completed.emit({})
-            return
-
-        apply_speed = self._speed != 1.0
-        apply_pitch = self._pitch_semitones != 0
-
-        # Show "(0/N)" in the spinbox suffix immediately so the user sees
-        # the expected count from the first frame rather than "..." for the
-        # full render duration.
-        if not self._cancelled:
-            self.progress.emit(0, total)
-
-        # Per-stem work queue consumed by daemon workers.  A queue is
-        # used (rather than pre-partitioned slices) so faster stems
-        # don't leave slow ones dangling on a single worker.
-        work_q: queue.Queue[tuple[str, np.ndarray]] = queue.Queue()
-        for item in self._stems.items():
-            work_q.put(item)
-
-        # Results funnel: workers push (name, array, exc); the dispatcher
-        # thread drains it so ``progress.emit`` is called from the same
-        # thread that runs ``_stretch``.  Emitting from the daemon workers
-        # themselves breaks callers that invoke ``run()`` synchronously
-        # without an event loop: cross-thread signal deliveries are
-        # queued by Qt and never dispatched, so the progress updates
-        # would be lost until the test's event loop tick happens to run.
-        result_q: queue.Queue[
-            tuple[str, "np.ndarray | None", "BaseException | None"]
-        ] = queue.Queue()
-
-        def worker() -> None:
-            while not self._cancelled:
-                try:
-                    name, data = work_q.get_nowait()
-                except queue.Empty:
-                    return
-                try:
-                    result = self._process_stem(
-                        name, data, apply_speed, apply_pitch,
-                    )
-                except BaseException as exc:  # noqa: BLE001
-                    # Surface the first error to the dispatcher and bail.
-                    result_q.put((name, None, exc))
-                    return
-                if result is None:
-                    # _process_stem returns None when it observed the
-                    # cancel flag mid-channel.  Put a tombstone so the
-                    # dispatcher can count it as "done-but-empty" and
-                    # doesn't block waiting for a result that will
-                    # never arrive.
-                    result_q.put((name, None, None))
-                    return
-                result_q.put((name, result, None))
-
-        max_workers = min(total, self._MAX_PARALLEL_STEMS)
-        threads: list[threading.Thread] = []
-        for i in range(max_workers):
-            t = threading.Thread(
-                target=worker,
-                name=f"stretch-{i}",
-                daemon=True,  # see class docstring for rationale
-            )
-            t.start()
-            threads.append(t)
-
-        # Drain the results queue on the dispatcher thread.  Poll with a
-        # short timeout so we notice cancellation quickly (every 100 ms)
-        # instead of waiting up to several seconds for the currently-
-        # running librosa call to complete.  Orphaning still-running
-        # daemons on cancel is intentional: they finish their current
-        # librosa call and exit; the next render spawns fresh ones after
-        # the previous worker's QThread.finished fires.
-        out: dict[str, np.ndarray] = {}
-        worker_error: BaseException | None = None
-        completed_count = 0
-        while completed_count < total and not self._cancelled:
-            try:
-                name, result, exc = result_q.get(timeout=0.1)
-            except queue.Empty:
-                # All workers dead without filling the queue?  Unusual
-                # but possible if they all saw the cancel flag between
-                # pulling work and processing.  Exit to avoid hanging.
-                if all(not t.is_alive() for t in threads):
-                    break
-                continue
-            if exc is not None:
-                worker_error = exc
-                break
-            completed_count += 1
-            if result is None:
-                # Cancelled mid-stem tombstone -- don't accumulate, but
-                # it still counts toward completion so the loop exits.
-                continue
-            out[name] = result
-            if not self._cancelled:
-                self.progress.emit(completed_count, total)
-
-        if self._cancelled:
-            return
-        if worker_error is not None:
-            # Re-raise inside run() so StretchWorker.run's outer
-            # try/except converts it into an ``error`` signal.
-            raise worker_error
-        self.completed.emit(out)
-
-    def _process_stem(
-        self,
-        name: str,
-        data: np.ndarray,
-        apply_speed: bool,
-        apply_pitch: bool,
-    ) -> np.ndarray | None:
-        """Render one stem; return ``None`` if cancelled mid-flight."""
-        is_recording = name.startswith(RECORDING_STEM_PREFIX)
-        stem_apply_pitch = apply_pitch and (
-            not is_recording or self._sync_recording_pitch
+    def __call__(self, count: int) -> tuple[np.ndarray, int]:
+        player = self._player
+        loop_a = player._loop_a_frame
+        loop_b = player._loop_b_frame
+        looping = (
+            player._looping
+            and loop_a is not None
+            and loop_b is not None
+            and loop_b > loop_a
         )
-        if not apply_speed and not stem_apply_pitch:
-            # Nothing to do for this stem -- reuse the original buffer.
-            return data
-
-        # Preserve the peak amplitude after phase-vocoder processing.
-        original_peak = np.max(np.abs(data))
-
-        # librosa effects work on mono; process each channel.
-        channels = []
-        for ch_idx in range(data.shape[1]):
-            if self._cancelled:
-                return None
-            mono = data[:, ch_idx].astype(np.float32)
-            if stem_apply_pitch:
-                mono = librosa.effects.pitch_shift(
-                    mono,
-                    sr=self._sample_rate,
-                    n_steps=self._pitch_semitones,
-                    res_type=self._RESAMPLE_TYPE,
-                )
-            if apply_speed:
-                mono = librosa.effects.time_stretch(
-                    mono, rate=self._speed,
-                )
-            channels.append(mono)
-
-        if self._cancelled:
-            return None
-
-        # Recombine to stereo, matching shortest channel.
-        min_len = min(c.shape[0] for c in channels)
-        stereo = np.column_stack([c[:min_len] for c in channels])
-        stereo = stereo.astype(np.float32)
-
-        # Normalize to match original peak level (phase vocoder can
-        # reduce amplitude).
-        stretched_peak = np.max(np.abs(stereo))
-        if stretched_peak > 0 and original_peak > 0:
-            stereo *= original_peak / stretched_peak
-
-        return stereo
+        boundary = loop_b if looping else player._total_frames
+        start = self.head
+        if start >= boundary:
+            if not looping:
+                return np.zeros((0, 2), dtype=np.float32), start
+            start = loop_a
+        count = max(0, min(count, boundary - start))
+        out = np.zeros((count, 2), dtype=np.float32)
+        player._mix_stems_into(out, start, self.names, self._gains)
+        self.head = start + count
+        return out, start
 
 
 class MultiTrackPlayer(QObject):
@@ -395,9 +173,6 @@ class MultiTrackPlayer(QObject):
     play_finished = Signal()
     speed_changed = Signal(float)
     pitch_changed = Signal(int)  # emitted with semitones (-N..+N)
-    stretch_started = Signal()   # render began (worker spawned)
-    stretch_progress = Signal(int, int)  # (current_stem, total_stems)
-    stretch_finished = Signal()  # render completed (success or error)
     playback_failed = Signal(str)
     # Recording was armed but no input could be opened; recording is
     # disarmed and playback continues without it.
@@ -437,34 +212,18 @@ class MultiTrackPlayer(QObject):
         self._loop_wrap_count: int = 0
         self._loop_wrap_seen: int = 0
 
-        # Speed / time-stretch / pitch state.
+        # Speed and pitch. Both are applied live: StreamingStretcher
+        # instances in the audio callback stretch the mix as it plays, so
+        # positions, loop points, beats, and chords stay in song frames.
         self._playback_speed: float = 1.0
         self._pitch_semitones: int = 0
         self._sync_recording_pitch: bool = False
-        self._original_stems: dict[str, np.ndarray] = {}
-        self._stretch_worker: StretchWorker | None = None
-        # Keepalive refs for detached-but-still-running workers. Without
-        # this, a rapid succession of set_pitch/set_speed calls drops the
-        # previous Python wrapper to refcount zero; the GC then deletes
-        # the QThread while its run loop is still active, producing
-        # "QThread: Destroyed while thread is still running" crashes.
-        self._detached_workers: list[StretchWorker] = []
-        # Serialisation: at most one StretchWorker may be actively
-        # processing at a time.  When a render is requested while a
-        # previous worker is still draining its cancellation, the request
-        # is coalesced into this field and dispatched from
-        # ``_reap_detached_worker`` once the drain finishes.  Without
-        # this, rapid pitch/speed scrubbing spawns overlapping workers
-        # -- each allocating hundreds of MB of librosa intermediates --
-        # and the OS swaps them to the pagefile, filling the disk.
-        self._pending_render_emit: tuple[str, ...] | None = None
-        # What self._stems actually contain, as (speed, pitch, sync).
-        # The knobs (_playback_speed / _pitch_semitones) are set
-        # optimistically before a render lands, and cancel_stretch()
-        # can discard the render that would have realised them -- so
-        # "requested value unchanged" is not the same as "nothing to
-        # do".  set_speed/set_pitch compare against this instead.
-        self._applied_render_state: tuple[float, int, bool] = (1.0, 0, False)
+        # (stretcher, source reader) per group of stems that share a pitch;
+        # empty at speed 1.0 and pitch 0, where the callback mixes directly.
+        self._stretch_paths: list[tuple[StreamingStretcher, _SourceReader]] = []
+        # Held by the audio callback while it stretches and by the GUI
+        # thread while it rebuilds or seeks the stretch paths.
+        self._stretch_lock = threading.Lock()
 
         # Metronome state.
         self._metronome_enabled: bool = False
@@ -519,36 +278,14 @@ class MultiTrackPlayer(QObject):
         self._timer.timeout.connect(self._emit_position)
 
     def shutdown(self, wait_ms: int = 3000) -> None:
-        """Cancel in-flight work and wait (briefly) for QThreads to exit.
+        """Stop the position timer (app close).
 
-        Called from the main window's ``closeEvent``.  StretchWorker
-        uses daemon threads for parallel stem processing so Python's
-        atexit handlers don't block on them, but the QThread itself
-        (which dispatches to those daemons) is non-daemon and we wait
-        for it cleanly so Qt's teardown doesn't print
-        ``"QThread: Destroyed while thread is still running"``.
-
-        *wait_ms* is the per-worker upper bound; cancellation is only
-        checked at stem/channel boundaries inside librosa, which can
-        take a second or two to reach on large stems.  On timeout we
-        proceed anyway -- the QThread's dispatcher loop polls the
-        cancel flag every 100 ms and will return from run() soon
-        after, at which point Qt can safely reap it.
+        Speed and pitch run inside the audio callback, so there are no
+        render threads left to cancel or wait for; *wait_ms* is kept for
+        callers.
         """
-        self._pending_render_emit = None
         if self._timer.isActive():
             self._timer.stop()
-        workers: list[StretchWorker] = list(self._detached_workers)
-        if self._stretch_worker is not None:
-            workers.append(self._stretch_worker)
-        for w in workers:
-            w.cancel()
-        for w in workers:
-            if w.isRunning():
-                # QThread.wait returns False on timeout; we accept that
-                # silently -- the OS will clean the thread up, and at
-                # worst atexit blocks for wait_ms instead of forever.
-                w.wait(wait_ms)
 
     @property
     def has_stems(self) -> bool:
@@ -663,12 +400,7 @@ class MultiTrackPlayer(QObject):
         """
         if len(self._chord_times) == 0 or self._sample_rate == 0:
             return ""
-        speed = self._playback_speed if self._playback_speed > 0 else 1.0
-        # Frame is in the stretched timeline; chord onsets are in original
-        # audio time. _recompute_beat_frames maps original time t to
-        # stretched frame t / speed * sr, so the inverse is
-        # frame / sr * speed.
-        time_sec = frame / self._sample_rate * speed
+        time_sec = frame / self._sample_rate
         idx = int(np.searchsorted(self._chord_times, time_sec, side="right")) - 1
         if idx < 0:
             return ""
@@ -699,20 +431,18 @@ class MultiTrackPlayer(QObject):
             self._recompute_beat_frames()
 
     def _recompute_beat_frames(self) -> None:
-        """Convert beat_times (seconds) to frame indices for the current speed.
+        """Convert beat_times (seconds) to song frame indices.
 
-        When speed != 1.0, the audio is time-stretched, so a beat at time
-        *t* in the original sits at frame ``t / speed * sample_rate`` in
-        the stretched audio.
+        Frames are in the song's own time at any speed: the stretcher
+        maps them to the moment they are heard.
         """
         if not self._beat_times or self._sample_rate == 0:
             self._beat_frames = np.array([], dtype=np.int64)
             return
-        speed = self._playback_speed if self._playback_speed > 0 else 1.0
         sr = self._sample_rate
         offset_sec = self._beat_sync_nudge_ms / 1000.0
         self._beat_frames = np.array(
-            [max(0, int((t + offset_sec) / speed * sr)) for t in self._beat_times],
+            [max(0, int((t + offset_sec) * sr)) for t in self._beat_times],
             dtype=np.int64,
         )
 
@@ -730,7 +460,8 @@ class MultiTrackPlayer(QObject):
         interval_frames = int(bf[idx] - bf[idx - 1])
         if interval_frames <= 0:
             return 0.0
-        return 60.0 * self._sample_rate / interval_frames
+        # Beat frames are song time; what you hear runs at the speed.
+        return 60.0 * self._sample_rate / interval_frames * self._playback_speed
 
     # -- Count-in API -------------------------------------------------------
 
@@ -899,11 +630,10 @@ class MultiTrackPlayer(QObject):
         stems = dict(self._stems)
         stems[name] = data
         self._stems = stems
-        originals = dict(self._original_stems)
-        originals[name] = data
-        self._original_stems = originals
         self._total_frames = max(self._total_frames, data.shape[0])
         self._active_stems_cache = None
+        # A take may need its own stretch path (unpitched takes).
+        self._rebuild_stretch()
 
     def remove_recording_stem(self, name: str) -> None:
         """Remove a recording stem and recalculate total frames.
@@ -915,15 +645,13 @@ class MultiTrackPlayer(QObject):
         stems = dict(self._stems)
         stems.pop(name, None)
         self._stems = stems
-        originals = dict(self._original_stems)
-        originals.pop(name, None)
-        self._original_stems = originals
         self._muted_stems.discard(name)
         self._soloed_stems.discard(name)
         self._volumes.pop(name, None)
         self._nudge_offsets.pop(name, None)
         self._active_stems_cache = None
         self._recalculate_total_frames()
+        self._rebuild_stretch()
 
     def nudge_stem(self, name: str, offset_ms: float) -> None:
         """Shift a stem's audio by *offset_ms* milliseconds.
@@ -932,8 +660,8 @@ class MultiTrackPlayer(QObject):
         negative values shift it earlier. The offset is clamped to
         -200..+200 ms. Wrapped samples are zeroed out.
 
-        Both ``_stems`` and ``_original_stems`` are updated so the nudge
-        survives speed changes.
+        The shifted array replaces the stem in a new dict, so the audio
+        callback never sees a half-written stem.
         """
         if name not in self._stems:
             return
@@ -948,16 +676,14 @@ class MultiTrackPlayer(QObject):
             self._nudge_offsets[name] = offset_ms
             return
 
-        for store in (self._stems, self._original_stems):
-            if name not in store:
-                continue
-            data = store[name]
-            data = np.roll(data, delta_frames, axis=0)
-            if delta_frames > 0:
-                data[:delta_frames] = 0.0
-            else:
-                data[delta_frames:] = 0.0
-            store[name] = data
+        data = np.roll(self._stems[name], delta_frames, axis=0)
+        if delta_frames > 0:
+            data[:delta_frames] = 0.0
+        else:
+            data[delta_frames:] = 0.0
+        stems = dict(self._stems)
+        stems[name] = data
+        self._stems = stems
 
         self._nudge_offsets[name] = offset_ms
 
@@ -983,10 +709,9 @@ class MultiTrackPlayer(QObject):
         Shared prologue of ``load_stems`` and ``unload``.
         """
         self.stop()
-        self._pending_render_emit = None
-        self._detach_stretch_worker()
-        self._stems.clear()
-        self._original_stems.clear()
+        with self._stretch_lock:
+            self._stretch_paths = []
+        self._stems = {}
         self._muted_stems.clear()
         self._soloed_stems.clear()
         self._volumes.clear()
@@ -1006,7 +731,6 @@ class MultiTrackPlayer(QObject):
         self._loop_wrap_seen = 0
         self._playback_speed = 1.0
         self._pitch_semitones = 0
-        self._applied_render_state = (1.0, 0, False)
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
@@ -1047,7 +771,6 @@ class MultiTrackPlayer(QObject):
             (data.shape[0] for data in stems.values()), default=0,
         )
         self._current_frame = 0
-        self._original_stems = dict(self._stems)
         self._click_buf = self._generate_click(self._sample_rate)
         self._metronome_phase = 0
 
@@ -1151,6 +874,7 @@ class MultiTrackPlayer(QObject):
 
         if self._current_frame >= self._total_frames:
             self._current_frame = 0
+            self._restart_stretch()
 
         # Emitted once playback runs: its slot opens a modal dialog, and a
         # nested event loop must not run while the player is half set up.
@@ -1263,6 +987,7 @@ class MultiTrackPlayer(QObject):
             elif target_frame >= lb:
                 target_frame = la
         self._current_frame = target_frame
+        self._restart_stretch()
         self._metronome_phase = 0
         self._count_in_remaining = 0
         self._count_in_beat = 0
@@ -1410,13 +1135,14 @@ class MultiTrackPlayer(QObject):
         self._looping = False
 
     # ------------------------------------------------------------------
-    # Speed / Pitch / Time-Stretch
+    # Speed / Pitch
     # ------------------------------------------------------------------
     #
-    # Speed (time-stretch) and pitch (transposition) are both pre-rendered
-    # from ``_original_stems`` in a single ``StretchWorker`` pass so their
-    # artifacts do not compound. The fast path (speed=1.0 AND pitch=0)
-    # skips the worker entirely and swaps originals in directly.
+    # Applied live by StreamingStretcher (src/stretch.py): the audio
+    # callback stretches the mix as it plays, so a change is heard within
+    # a frame or two and nothing is rendered in advance. Stems whose pitch
+    # must stay put (recording takes, unless they follow the pitch) get a
+    # second stretcher at the same speed.
 
     @property
     def speed(self) -> float:
@@ -1433,35 +1159,30 @@ class MultiTrackPlayer(QObject):
         """Return True if recording stems are pitch-shifted with the backing track."""
         return self._sync_recording_pitch
 
+    @property
+    def stretching(self) -> bool:
+        """True while speed or pitch differ from the original."""
+        return bool(self._stretch_paths)
+
     def set_speed(self, speed: float) -> None:
-        """Set the playback speed with pitch-preserving time-stretch.
+        """Set the playback speed (0.5 to 2.0) with the pitch preserved.
 
-        Clamps *speed* to [0.5, 2.0]. Stretching runs in a background
-        thread; the ``speed_changed`` signal fires when the stretched
-        audio is ready.
-
-        Refused while a recording is in progress: the render swap
-        rescales the playhead against the new stem length while the
-        duplex stream keeps writing input at the old positions, which
-        scrambles the take.
+        Takes effect immediately. Refused while recording: a take is
+        captured against the song at its own tempo.
         """
         if self._recording:
             return
-        speed = max(0.5, min(speed, 2.0))
-        if speed == self._playback_speed and self._stems_render_current():
+        speed = max(0.5, min(float(speed), 2.0))
+        if speed == self._playback_speed:
             return
         self._playback_speed = speed
-        self._render_stretch(emit=("speed",))
+        self._rebuild_stretch()
+        self.speed_changed.emit(speed)
 
     def set_pitch(self, semitones: int) -> None:
-        """Set pitch transposition in semitones.
+        """Transpose by *semitones* (clamped) with the tempo preserved.
 
-        Clamps to [PITCH_MIN_SEMITONES, PITCH_MAX_SEMITONES]. Rendering
-        runs in a background thread; ``pitch_changed`` fires when the
-        transposed audio is ready (or immediately, on the fast path).
-
-        Refused while a recording is in progress, for the same reason
-        as ``set_speed``.
+        Takes effect immediately. Refused while recording, as speed is.
         """
         if self._recording:
             return
@@ -1471,310 +1192,132 @@ class MultiTrackPlayer(QObject):
             return
         semitones = max(PITCH_MIN_SEMITONES,
                         min(PITCH_MAX_SEMITONES, semitones))
-        if semitones == self._pitch_semitones and self._stems_render_current():
+        if semitones == self._pitch_semitones:
             return
         self._pitch_semitones = semitones
-        self._render_stretch(emit=("pitch",))
-
-    def _target_render_state(self) -> tuple[float, int, bool]:
-        """The render state the knobs currently ask for.
-
-        The sync-recording-pitch flag only changes audible output while
-        a pitch shift is active, so it is normalised to False at pitch 0
-        -- toggling the preference at pitch 0 must not mark the stems
-        stale.
-        """
-        pitch = self._pitch_semitones
-        sync = self._sync_recording_pitch if pitch != 0 else False
-        return (self._playback_speed, pitch, sync)
-
-    def _stems_render_current(self) -> bool:
-        """True when self._stems already reflect the knob values.
-
-        False means a render is owed -- either one is in flight, or a
-        previous one was discarded by ``cancel_stretch()`` before it
-        could land.
-        """
-        return self._applied_render_state == self._target_render_state()
+        self._rebuild_stretch()
+        self.pitch_changed.emit(semitones)
 
     def set_sync_recording_pitch(self, sync: bool) -> None:
-        """Enable or disable pitch-shifting of recording-take stems.
+        """Choose whether recording takes follow the pitch shift.
 
-        When False (default), recordings keep their source pitch even when
-        the backing track is transposed. When True, recordings are shifted
-        alongside the source stems. Takes effect on the next render.
+        When False (default), takes keep their own pitch while the song is
+        transposed; when True they shift with it.
         """
         sync = bool(sync)
         if sync == self._sync_recording_pitch:
             return
         self._sync_recording_pitch = sync
-        # Only re-render if a pitch shift is actually active -- otherwise
-        # the setting has no audible effect and we can skip the work.
-        if self._pitch_semitones != 0 and self._original_stems:
-            self._render_stretch(emit=("pitch",))
+        self._rebuild_stretch()
 
-    def _render_stretch(self, emit: tuple[str, ...] = ()) -> None:
-        """Render stems for the current speed + pitch state.
-
-        Detaches any in-flight worker first. Uses the fast path when both
-        transforms are identity.  Otherwise spawns a new ``StretchWorker``
-        -- unless a previously cancelled worker is still draining, in
-        which case the render is queued and dispatched from
-        ``_reap_detached_worker`` once the drain completes.  This
-        serialisation bounds memory use to one worker's intermediates.
-
-        *emit* is a tuple of signal names ("speed", "pitch") to fire after
-        the render completes; the caller uses this to indicate which knob
-        the user just turned so the UI can react appropriately.
-        """
-        was_rendering = self._detach_stretch_worker()
-        # A pending queued render is superseded by this one; keep the
-        # new emit tuple (so we still emit the correct signal at the end).
-        had_pending = self._pending_render_emit is not None
-        self._pending_render_emit = None
-
-        if not self._original_stems:
-            self._emit_stretch_signals(emit)
-            if was_rendering or had_pending:
-                self.stretch_finished.emit()
-            return
-
-        if self._stems_render_current():
-            # Stems already reflect the target -- e.g. a cancelled scrub
-            # came back to the applied value, or a completed render landed
-            # just before this request. Nothing to render.
-            self._emit_stretch_signals(emit)
-            if was_rendering or had_pending:
-                self.stretch_finished.emit()
-            return
-
-        speed = self._playback_speed
+    def _stretch_groups(self) -> list[tuple[frozenset[str] | None, int]]:
+        """(stem names, or None for all; semitones) per stretch path."""
+        if self._playback_speed == 1.0 and self._pitch_semitones == 0:
+            return []
         pitch = self._pitch_semitones
+        takes = frozenset(
+            name for name in self._stems
+            if name.startswith(RECORDING_STEM_PREFIX)
+        )
+        if pitch and takes and not self._sync_recording_pitch:
+            others = frozenset(n for n in self._stems if n not in takes)
+            return [(others, pitch), (takes, 0)]
+        return [(None, pitch)]
 
-        if speed == 1.0 and pitch == 0:
-            # Fast path: no transform at all, swap originals in directly.
-            # The draining worker (if any) is now irrelevant; its result
-            # would be discarded even if it completed.
-            self._apply_stretched_stems(dict(self._original_stems))
-            self._recompute_beat_frames()
-            self._emit_stretch_signals(emit)
-            if was_rendering or had_pending:
-                # Close the render lifecycle the UI was waiting on so it
-                # can restore its indicator.
-                self.stretch_finished.emit()
-            return
+    def _play_frame(self) -> int:
+        """The song frame the listener is hearing now."""
+        if self._stretch_paths:
+            return int(self._stretch_paths[0][0].position)
+        return self._current_frame
 
-        # A prior worker is still draining its cancellation.  Coalesce
-        # this render into the pending slot and let _reap_detached_worker
-        # dispatch it when the drain finishes.  Starting a second worker
-        # now would double the peak memory footprint (two pools, up to
-        # 8 parallel librosa calls) and reliably trips the OS into
-        # swapping to pagefile on modest machines.
-        if self._detached_workers:
-            self._pending_render_emit = emit
-            return
+    def _rebuild_stretch(self) -> None:
+        """Match the stretch paths to the speed, pitch, and stems.
 
-        self._spawn_stretch_worker(emit)
-
-    def _spawn_stretch_worker(self, emit: tuple[str, ...]) -> None:
-        """Start a ``StretchWorker`` for the player's current speed/pitch.
-
-        Always fires ``stretch_started`` so the UI can re-light its
-        render indicator.  Earlier revisions suppressed this emission
-        on queued dispatches (assuming the indicator was still on from
-        the previous worker), but that missed the common case where
-        the UI had already cleared the indicator via an intervening
-        ``cancel_stretch`` call -- the queued render would then run
-        invisibly.  Re-emitting on every spawn is idempotent: the UI's
-        handler resets the progress counter to (0/total) which is
-        indistinguishable from the initial state.
+        A speed or pitch change on the same stems only retunes the running
+        stretchers, so playback carries straight on; a change of stem
+        groups (or to or from the original speed and pitch) starts fresh
+        paths at the frame being heard.
         """
-        self._stretch_worker = StretchWorker(
-            self._original_stems,
-            self._sample_rate,
-            self._playback_speed,
-            self._pitch_semitones,
-            sync_recording_pitch=self._sync_recording_pitch,
-            parent=self,
-        )
-        self._stretch_worker.completed.connect(
-            lambda stems: self._on_stretch_ready(stems, emit)
-        )
-        self._stretch_worker.error.connect(
-            lambda msg: self._on_stretch_error(msg, emit)
-        )
-        # Re-emit per-stem progress so the UI can show a meaningful
-        # "rendering N/M stems" indicator instead of an indefinite spinner.
-        self._stretch_worker.progress.connect(self.stretch_progress)
-        self.stretch_started.emit()
-        self._stretch_worker.start()
+        groups = self._stretch_groups()
+        with self._stretch_lock:
+            current = [reader.names for _, reader in self._stretch_paths]
+            if groups and current == [names for names, _ in groups]:
+                for (stretcher, _), (_, semitones) in zip(
+                    self._stretch_paths, groups,
+                ):
+                    stretcher.set_params(self._playback_speed, semitones)
+                return
+            frame = min(self._play_frame(), self._total_frames)
+        # Built and primed here, outside the lock: filling a fresh path's
+        # analysis window on the audio thread overran a 512-frame block.
+        paths = []
+        for names, semitones in groups:
+            stretcher = StreamingStretcher(self._sample_rate, 2)
+            stretcher.set_params(self._playback_speed, semitones)
+            stretcher.reset(frame)
+            reader = _SourceReader(self, names, frame)
+            stretcher.fill(_PRIME_FRAMES, reader)
+            paths.append((stretcher, reader))
+        with self._stretch_lock:
+            self._current_frame = frame
+            self._stretch_paths = paths
 
-    def _detach_stretch_worker(self) -> bool:
-        """Disconnect, cancel, and release the current stretch worker.
+    def _restart_stretch(self) -> None:
+        """Start the stretch paths again from ``_current_frame`` (a seek)."""
+        with self._stretch_lock:
+            for stretcher, reader in self._stretch_paths:
+                stretcher.reset(self._current_frame)
+                reader.head = self._current_frame
+                stretcher.fill(_PRIME_FRAMES, reader)
 
-        Returns True if a running worker was detached (UI can use this
-        to emit a matching ``stretch_finished`` when no new render is
-        about to start).  Running workers are asked to ``cancel()`` so
-        they stop at the next stem/channel boundary instead of finishing
-        their full (now-stale) render; we retain a Python reference on
-        ``_detached_workers`` until the thread's ``finished`` signal
-        fires, preventing QThread GC-during-run crashes.
+    def _mix_stems_into(
+        self,
+        out: np.ndarray,
+        start: int,
+        names: frozenset[str] | None,
+        gains: dict[str, float],
+    ) -> None:
+        """Add the audible stems' frames ``start:start+len(out)`` to *out*.
+
+        *names* limits the mix to those stems (None: all). *gains* holds
+        the last gain applied per stem, so a change ramps over 5 ms.
         """
-        if self._stretch_worker is None:
-            return False
-        _safe_disconnect(self._stretch_worker.completed)
-        _safe_disconnect(self._stretch_worker.error)
-        _safe_disconnect(self._stretch_worker.progress)
-        worker = self._stretch_worker
-        self._stretch_worker = None
-        was_running = worker.isRunning()
-        if was_running:
-            worker.cancel()
-            # Keep alive until the thread actually stops. ``setParent(None)``
-            # is intentionally deferred to _reap_detached_worker so the Qt
-            # parent remains valid while the run loop is active.
-            self._detached_workers.append(worker)
-            worker.finished.connect(
-                lambda w=worker: self._reap_detached_worker(w)
+        stems = self._stems
+        active = self._active_stems_cache
+        if active is None:
+            if self._soloed_stems:
+                active = {n for n in stems if n in self._soloed_stems}
+            else:
+                active = {n for n in stems if n not in self._muted_stems}
+            self._active_stems_cache = active
+        count = len(out)
+        end = start + count
+        for name, data in stems.items():
+            if names is not None and name not in names:
+                continue
+            target = (
+                self._volumes.get(name, 1.0) * self._master_volume
+                if name in active else 0.0
             )
-            if not worker.isRunning():
-                # The thread can finish between the isRunning() check
-                # above and the connect() -- the finished signal then
-                # fired with nobody listening, and the worker would sit
-                # in _detached_workers forever, blocking every queued
-                # render. Reap it now; the reaper tolerates a double
-                # call if the signal did land after all.
-                self._reap_detached_worker(worker)
-        else:
-            worker.setParent(None)
-            worker.deleteLater()
-        return was_running
-
-    def cancel_stretch(self) -> None:
-        """Cancel any in-flight stretch render without starting a new one.
-
-        Clears any queued render as well -- an explicit cancel should
-        supersede a pending request.  Emits ``stretch_finished`` so the
-        UI can clear its render indicator.  Safe to call when no render
-        is active (no-op).
-        """
-        had_pending = self._pending_render_emit is not None
-        self._pending_render_emit = None
-        detached = self._detach_stretch_worker()
-        if detached or had_pending:
-            self.stretch_finished.emit()
-
-    def _reap_detached_worker(self, worker: "StretchWorker") -> None:
-        """Release a detached worker after its thread has stopped.
-
-        When the last detached worker drains, any render coalesced into
-        ``_pending_render_emit`` is dispatched here.  Fast-path swaps are
-        handled inline so the UI's ``stretch_finished`` fires promptly.
-        """
-        try:
-            self._detached_workers.remove(worker)
-        except ValueError:
-            # Already reaped (double delivery: manual reap in
-            # _detach_stretch_worker plus the queued finished signal).
-            # The wrapper may already be deleteLater'd -- don't touch it.
-            return
-        worker.setParent(None)
-        worker.deleteLater()
-
-        # Still more workers draining?  Wait for the last one.
-        if self._detached_workers:
-            return
-
-        emit = self._pending_render_emit
-        if emit is None:
-            return
-        self._pending_render_emit = None
-
-        if not self._original_stems:
-            self._emit_stretch_signals(emit)
-            self.stretch_finished.emit()
-            return
-
-        if self._stems_render_current():
-            # A completed render landed before the queued request was
-            # dispatched and already matches the target.
-            self._emit_stretch_signals(emit)
-            self.stretch_finished.emit()
-            return
-
-        speed = self._playback_speed
-        pitch = self._pitch_semitones
-        if speed == 1.0 and pitch == 0:
-            self._apply_stretched_stems(dict(self._original_stems))
-            self._recompute_beat_frames()
-            self._emit_stretch_signals(emit)
-            self.stretch_finished.emit()
-            return
-
-        # Always re-emit stretch_started here.  The UI may have
-        # cleared its indicator if cancel_stretch was the reason we
-        # reached the queued-render path; we must re-light it.  When
-        # the indicator is already on, re-emitting just resets the
-        # counter to (0/total) -- harmless.
-        self._spawn_stretch_worker(emit)
-
-    def _on_stretch_ready(
-        self, stems: dict, emit: tuple[str, ...],
-    ) -> None:
-        """Swap in rendered stems and adjust frame indices."""
-        self._apply_stretched_stems(stems)
-        self._recompute_beat_frames()
-        self._emit_stretch_signals(emit)
-        self.stretch_finished.emit()
-
-    def _on_stretch_error(
-        self, message: str, emit: tuple[str, ...],
-    ) -> None:
-        """Handle stretch failure by restoring originals at identity state."""
-        self._playback_speed = 1.0
-        self._pitch_semitones = 0
-        self._apply_stretched_stems(dict(self._original_stems))
-        # Beat frames must be recomputed after the stem swap: if speed was
-        # non-identity before the error, _beat_frames still held stretched
-        # indices that no longer match the restored (original-length) stems.
-        self._recompute_beat_frames()
-        # Emit both signals so any UI bound to either knob resets.
-        self.speed_changed.emit(1.0)
-        self.pitch_changed.emit(0)
-        self.stretch_finished.emit()
-
-    def _emit_stretch_signals(self, emit: tuple[str, ...]) -> None:
-        """Fire speed_changed / pitch_changed signals per *emit* contents."""
-        if "speed" in emit:
-            self.speed_changed.emit(self._playback_speed)
-        if "pitch" in emit:
-            self.pitch_changed.emit(self._pitch_semitones)
-
-    def _apply_stretched_stems(self, stems: dict) -> None:
-        """Replace current stems with *stems* and adjust frame indices."""
-        # Every call site applies stems that realise the knob values as
-        # they stand right now (any knob change detaches the worker whose
-        # completion would land here), so the applied state is simply the
-        # current target.
-        self._applied_render_state = self._target_render_state()
-        old_total = self._total_frames if self._total_frames > 0 else 1
-
-        self._stems = stems
-        self._total_frames = max(
-            (data.shape[0] for data in stems.values()), default=0
-        )
-
-        ratio = self._total_frames / old_total
-
-        self._current_frame = int(self._current_frame * ratio)
-        if self._loop_a_frame is not None:
-            self._loop_a_frame = int(self._loop_a_frame * ratio)
-        if self._loop_b_frame is not None:
-            self._loop_b_frame = int(self._loop_b_frame * ratio)
-        # The position and length are now in the new time base; tell the UI
-        # even while paused, or the time readout keeps the old values.
-        if self._sample_rate:
-            self.position_changed.emit(self._current_frame / self._sample_rate)
+            prev = gains.get(name, target)
+            if target == 0.0 and prev == 0.0:
+                gains[name] = 0.0
+                continue
+            read_len = min(end, data.shape[0]) - start
+            if read_len <= 0:
+                continue
+            chunk = data[start:start + read_len]
+            if prev != target:
+                ramp_len = min(read_len, max(int(0.005 * self._sample_rate), 1))
+                ramp = np.linspace(
+                    prev, target, ramp_len, dtype=np.float32,
+                )[:, np.newaxis]
+                out[:ramp_len] += chunk[:ramp_len] * ramp
+                if read_len > ramp_len:
+                    out[ramp_len:read_len] += chunk[ramp_len:] * target
+            else:
+                out[:read_len] += chunk * target
+            gains[name] = target
 
     # ------------------------------------------------------------------
     # Internal Callbacks
@@ -1905,6 +1448,104 @@ class MultiTrackPlayer(QObject):
             total_elapsed // beat_interval + 1, self._count_in_beats
         )
 
+    def _stretched_callback(self, outdata: np.ndarray, frames: int) -> None:
+        """Fill *outdata* through the stretchers (speed or pitch changed).
+
+        Reads up to each loop wrap separately, so the wrap is handled (loop
+        count, count-in on repeats) at the sample where it is heard.
+        Metronome and count-in clicks are added after stretching, so they
+        keep their shape at any speed.
+        """
+        outdata.fill(0.0)
+        speed = self._playback_speed
+        offset = 0
+        remaining = frames
+        ended = False
+        with self._stretch_lock:
+            paths = self._stretch_paths
+            if not paths:
+                return
+            main = paths[0][0]
+            while remaining > 0:
+                for stretcher, reader in paths:
+                    stretcher.fill(remaining, reader)
+                jump = main.jump_offset()
+                if jump == 0:
+                    for stretcher, _ in paths:
+                        stretcher.clear_jump()
+                    self._loop_wrap_count += 1
+                    if self._count_in_enabled and self._count_in_on_repeats:
+                        self._arm_count_in()
+                        if self._count_in_remaining > 0:
+                            ci_frames = min(remaining, self._count_in_remaining)
+                            beat_interval = int(
+                                60.0 / self._metronome_bpm * self._sample_rate
+                            )
+                            self._mix_count_in(
+                                outdata[offset:offset + ci_frames], ci_frames,
+                                beat_interval, len(self._click_buf),
+                            )
+                            self._count_in_remaining -= ci_frames
+                            offset += ci_frames
+                            remaining -= ci_frames
+                            if self._count_in_remaining <= 0:
+                                self._count_in_remaining = 0
+                                self._count_in_beat = 0
+                                self._metronome_phase = 0
+                            else:
+                                break
+                    continue
+                n = remaining if jump is None else min(remaining, jump)
+                start = main.position
+                for stretcher, reader in paths:
+                    outdata[offset:offset + n] += stretcher.read(n, reader)
+                if (self._metronome_enabled and self._beat_sync_enabled
+                        and len(self._beat_frames) > 0):
+                    self._mix_metronome_stretched(
+                        outdata, offset, n, start, speed,
+                    )
+                offset += n
+                remaining -= n
+                if main.finished:
+                    ended = True
+                    break
+            self._current_frame = min(int(main.position), self._total_frames)
+
+        if (self._metronome_enabled and self._metronome_bpm > 0
+                and not (self._beat_sync_enabled
+                         and len(self._beat_frames) > 0)):
+            beat_interval = int(60.0 / self._metronome_bpm * self._sample_rate)
+            if beat_interval > 0:
+                self._mix_metronome(
+                    outdata, frames, beat_interval, len(self._click_buf),
+                )
+        np.clip(outdata, -1.0, 1.0, out=outdata)
+        if ended and self._count_in_remaining == 0:
+            self._current_frame = self._total_frames
+            self._is_playing = False
+            raise sd.CallbackStop
+
+    def _mix_metronome_stretched(
+        self, outdata: np.ndarray, offset: int, count: int,
+        start_frame: float, speed: float,
+    ) -> None:
+        """Synced clicks for song frames heard in ``outdata[offset:+count]``.
+
+        The block plays song frames from *start_frame* at *speed* song
+        frames per output sample.
+        """
+        bf = self._beat_frames
+        end_frame = start_frame + count * speed
+        idx = int(np.searchsorted(bf, start_frame, side="left"))
+        click_len = len(self._click_buf)
+        gain = self._metronome_volume
+        while idx < len(bf) and bf[idx] < end_frame:
+            pos = offset + int((bf[idx] - start_frame) / speed)
+            n = min(click_len, offset + count - pos)
+            if n > 0:
+                outdata[pos:pos + n] += self._click_buf[:n] * gain
+            idx += 1
+
     def _full_duplex_callback(
         self,
         indata: np.ndarray,
@@ -1959,6 +1600,10 @@ class MultiTrackPlayer(QObject):
                     self._count_in_beat = 0
                     self._metronome_phase = 0
             np.clip(outdata, -1.0, 1.0, out=outdata)
+            return
+
+        if self._stretch_paths:
+            self._stretched_callback(outdata, frames)
             return
 
         # -- Normal playback -------------------------------------------------
