@@ -259,13 +259,16 @@ class SeparatorWorker(QThread):
         return np.stack(resampled_channels)
 
     def _create_session(self):
-        """Create a DML-first ONNX session with CPU fallback.
+        """Create the CPU ONNX session for HTDemucs.
+
+        The HTDemucs export does not compile on DirectML (issue #125), so
+        a GPU attempt only failed, slowly and with a console error.
 
         A model that exists but will not load is deleted, so the next
         import asks to download a fresh copy instead of failing again.
         """
         try:
-            return create_onnx_session(self.model_path)
+            return create_onnx_session(self.model_path, use_gpu=False)
         except ModelDamagedError:
             discard_model_files(self.model_path)
             raise

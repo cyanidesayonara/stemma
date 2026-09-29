@@ -257,9 +257,11 @@ class TestSeparatorCreateSession:
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
-    def test_cpu_fallback_when_dml_init_fails(
+    def test_goes_straight_to_cpu_with_dml_available(
         self, mock_infer, mock_providers, tmp_dir, sample_audio_path
     ):
+        """HTDemucs never compiles on DirectML (#125), so it is not tried;
+        the DML-then-CPU fallback is covered in test_onnx_session.py."""
         model_path = os.path.join(tmp_dir, "model.onnx")
         with open(model_path, "wb") as f:
             f.write(b"x")
@@ -286,9 +288,9 @@ class TestSeparatorCreateSession:
         )
         sess = worker._create_session()
         assert sess is cpu_session
-        assert mock_infer.call_count == 2
-        second_kw = mock_infer.call_args_list[1][1]
-        assert second_kw["providers"] == ["CPUExecutionProvider"]
+        assert mock_infer.call_count == 1
+        only_kw = mock_infer.call_args_list[0][1]
+        assert only_kw["providers"] == ["CPUExecutionProvider"]
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
