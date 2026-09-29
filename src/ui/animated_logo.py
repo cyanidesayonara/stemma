@@ -92,6 +92,7 @@ class _Note:
     ry: float
     transform: QTransform
     color: str
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,7 @@ class _Wave:
     width: float
     cap: Qt.PenCapStyle
     join: Qt.PenJoinStyle
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -213,6 +215,16 @@ def _parse_transform(text: str) -> QTransform:
     return result
 
 
+def _opacity(element: Element, paint_opacity: str) -> float:
+    """Element ``opacity`` times its fill or stroke opacity, 0 to 1."""
+    value = 1.0
+    for name in ("opacity", paint_opacity):
+        raw = element.get(name)
+        if raw is not None:
+            value *= min(1.0, max(0.0, float(raw)))
+    return value
+
+
 def _parse_note(element: Element) -> _Note:
     return _Note(
         cx=float(element.get("cx", 0)),
@@ -221,6 +233,7 @@ def _parse_note(element: Element) -> _Note:
         ry=float(element.get("ry", 0)),
         transform=_parse_transform(element.get("transform", "")),
         color=element.get("fill", "#000000"),
+        opacity=_opacity(element, "fill-opacity"),
     )
 
 
@@ -236,8 +249,11 @@ def _parse_wave(element: Element) -> _Wave:
         lengths=tuple(lengths),
         color=element.get("stroke", "#000000"),
         width=float(element.get("stroke-width", 1)),
-        cap=_CAPS[element.get("stroke-linecap", "butt")],
-        join=_JOINS[element.get("stroke-linejoin", "miter")],
+        # A value Qt has no match for ("inherit" at the top level, say)
+        # falls back to the SVG default, as QSvgRenderer does.
+        cap=_CAPS.get(element.get("stroke-linecap"), _CAPS["butt"]),
+        join=_JOINS.get(element.get("stroke-linejoin"), _JOINS["miter"]),
+        opacity=_opacity(element, "stroke-opacity"),
     )
 
 
@@ -269,6 +285,14 @@ def _load_logo(theme: str) -> _Logo:
                 layers.append([])
                 sequence.append(("static", len(layers) - 1))
             layers[-1].append(child)
+
+    if not any(kind == "note" for kind, _ in sequence):
+        # Nested notes (say, wrapped in a <g>) would otherwise leave a
+        # logo that silently never animates.
+        raise ValueError(
+            "no top-level noteheads (<ellipse>) in the logo SVG: "
+            f"{_logo_path(theme)}"
+        )
 
     # Voices run by pitch, bottom note first; each wave belongs to the
     # note whose staff line it starts on.
@@ -420,6 +444,9 @@ class AnimatedLogoWidget(QWidget):
 
         self._layer_pixmaps: list[QPixmap] = []
         self._layer_dpr = 0.0
+        # The resting frame, cached: repaints at rest (hover, resize,
+        # dialog moves) then cost one pixmap blit, not four restrokes.
+        self._rest_pixmap: QPixmap | None = None
 
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
@@ -445,6 +472,7 @@ class AnimatedLogoWidget(QWidget):
         self._is_dark = theme == "dark"
         self._logo = _load_logo(theme)
         self._layer_pixmaps = []
+        self._rest_pixmap = None
         self.update()
 
     def set_play_sound(self, enabled: bool) -> None:
@@ -479,6 +507,35 @@ class AnimatedLogoWidget(QWidget):
 
     def _paint_frame(self, p: QPainter, t: int) -> None:
         """Paint the logo as it looks *t* ms into the intro."""
+        if t >= _ANIM_END_MS:
+            p.drawPixmap(0, 0, self._rest_frame())
+        else:
+            self._paint_parts(p, t)
+
+    def _rest_frame(self) -> QPixmap:
+        """The final frame (the brand logo) for the current theme and DPR."""
+        dpr = self.devicePixelRatioF()
+        pix = self._rest_pixmap
+        if pix is not None and pix.devicePixelRatio() == dpr:
+            return pix
+        pix = self._blank_pixmap(dpr)
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._paint_parts(painter, _ANIM_END_MS)
+        painter.end()
+        self._rest_pixmap = pix
+        return pix
+
+    def _blank_pixmap(self, dpr: float) -> QPixmap:
+        pix = QPixmap(
+            math.ceil(self.width() * dpr), math.ceil(self.height() * dpr),
+        )
+        pix.setDevicePixelRatio(dpr)
+        pix.fill(Qt.GlobalColor.transparent)
+        return pix
+
+    def _paint_parts(self, p: QPainter, t: int) -> None:
+        """Paint static layers, notes and waves as they are at *t* ms."""
         _, view = _fit(self._logo.view_box, self.width(), self.height())
         pixmaps = self._static_pixmaps()
         for kind, index in self._logo.paint_order:
@@ -504,7 +561,7 @@ class AnimatedLogoWidget(QWidget):
     def _paint_note(p: QPainter, note: _Note, alpha: float,
                     lift: float) -> None:
         color = QColor(note.color)
-        color.setAlphaF(alpha)
+        color.setAlphaF(alpha * note.opacity)
         p.translate(0.0, lift)
         p.setTransform(note.transform, True)
         p.setPen(Qt.PenStyle.NoPen)
@@ -517,7 +574,7 @@ class AnimatedLogoWidget(QWidget):
         if reveal <= 0.0:
             return
         color = QColor(wave.color)
-        color.setAlphaF(alpha)
+        color.setAlphaF(alpha * wave.opacity)
         pen = QPen(color, wave.width)
         pen.setCapStyle(wave.cap)
         pen.setJoinStyle(wave.join)
@@ -535,11 +592,7 @@ class AnimatedLogoWidget(QWidget):
         pixmaps = []
         for layer in self._logo.static_layers:
             renderer = QSvgRenderer(QByteArray(layer.encode("utf-8")))
-            pix = QPixmap(
-                math.ceil(self.width() * dpr), math.ceil(self.height() * dpr),
-            )
-            pix.setDevicePixelRatio(dpr)
-            pix.fill(Qt.GlobalColor.transparent)
+            pix = self._blank_pixmap(dpr)
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             renderer.render(painter, target)

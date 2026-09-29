@@ -32,6 +32,7 @@ from src.ui.animated_logo import (
     _wave_reveal,
     _wave_swell,
 )
+from src.ui import animated_logo
 from src.ui.svg_source import local_name, read_svg
 
 THEMES = ("dark", "light")
@@ -196,6 +197,84 @@ class TestParseLogo:
         last_note = max(i for i, k in enumerate(kinds) if k == "note")
         first_wave = kinds.index("wave")
         assert "static" in kinds[last_note:first_wave]
+
+
+_MINI_LOGO = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140" '
+    'viewBox="10 4 240 140">'
+    '<line x1="18" y1="48" x2="228" y2="48" stroke="#ccc"/>'
+    "{notes}"
+    '<path d="M105,78 L225,78" fill="none" stroke="#bfa3dc" '
+    'stroke-width="1.8" stroke-linecap="{cap}" stroke-opacity="0.5"/>'
+    "</svg>"
+)
+_MINI_NOTE = (
+    '<ellipse cx="94" cy="78" rx="10.5" ry="6.5" fill="#bfa3dc" '
+    'opacity="0.8"/>'
+)
+
+
+def _load_mini(tmp_path, monkeypatch, *, notes=_MINI_NOTE, cap="round"):
+    """Parse a small hand-written logo SVG in place of the brand one."""
+    icons = tmp_path / "assets" / "icons"
+    icons.mkdir(parents=True)
+    (icons / "logo_main_dark.svg").write_text(
+        _MINI_LOGO.format(notes=notes, cap=cap), encoding="utf-8",
+    )
+    monkeypatch.setattr(animated_logo, "_ROOT", str(tmp_path))
+    # Bypass the cache so the brand logo's cached parse is untouched.
+    return animated_logo._load_logo.__wrapped__("dark")
+
+
+class TestParseRobustness:
+    def test_hand_written_logo_parses(self, tmp_path, monkeypatch):
+        logo = _load_mini(tmp_path, monkeypatch)
+        assert len(logo.notes) == len(logo.waves) == 1
+        assert logo.waves[0].cap == Qt.PenCapStyle.RoundCap
+
+    def test_nested_notes_fail_loudly(self, tmp_path, monkeypatch):
+        with pytest.raises(ValueError, match="noteheads"):
+            _load_mini(tmp_path, monkeypatch, notes=f"<g>{_MINI_NOTE}</g>")
+
+    def test_unknown_cap_falls_back_to_the_svg_default(self, tmp_path,
+                                                        monkeypatch):
+        logo = _load_mini(tmp_path, monkeypatch, cap="inherit")
+        assert logo.waves[0].cap == Qt.PenCapStyle.FlatCap
+
+    def test_opacity_is_read(self, tmp_path, monkeypatch):
+        logo = _load_mini(tmp_path, monkeypatch)
+        assert logo.notes[0].opacity == pytest.approx(0.8)
+        assert logo.waves[0].opacity == pytest.approx(0.5)
+
+
+class TestViewBox:
+    @pytest.mark.parametrize("theme", THEMES)
+    def test_no_ink_is_cut_off(self, app, theme):
+        # Render with a 20-unit band added on every side: none of it may
+        # hold ink, or the widget (which shows only the viewBox) clips it.
+        with open(_logo_path(theme), encoding="utf-8") as fh:
+            text = fh.read()
+        vx, vy, vw, vh = _load_logo(theme).view_box
+        pad, scale = 20, 4
+        text = text.replace(
+            f'viewBox="{vx:g} {vy:g} {vw:g} {vh:g}"',
+            f'viewBox="{vx - pad:g} {vy - pad:g} {vw + 2 * pad:g} '
+            f'{vh + 2 * pad:g}"',
+            1,
+        )
+        width, height = int((vw + 2 * pad) * scale), int((vh + 2 * pad) * scale)
+        renderer = QSvgRenderer(text.encode("utf-8"))
+        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        renderer.render(painter, QRectF(0, 0, width, height))
+        painter.end()
+        alpha = _pixels(image)[:, :, 3]
+        inner = alpha.copy()
+        inner[pad * scale: height - pad * scale,
+              pad * scale: width - pad * scale] = 0
+        assert np.count_nonzero(inner) == 0
+        assert np.count_nonzero(alpha) > 0
 
 
 class TestParsePolyline:
@@ -397,6 +476,31 @@ class TestRenderedFrames:
         without_parts = _svg_static_reference(logo, w.width(), w.height())
         diff = np.abs(blank.astype(int) - without_parts.astype(int))
         assert diff.max() <= 2
+
+
+class TestRestFrameCache:
+    def test_repaints_at_rest_reuse_one_pixmap(self, app):
+        w = AnimatedLogoWidget(theme="dark", play_sound=False)
+        _frame(w, _ANIM_END_MS)
+        cached = w._rest_pixmap
+        assert cached is not None
+        _frame(w, _ANIM_END_MS)
+        _frame(w, _ANIM_END_MS + 5000)
+        assert w._rest_pixmap is cached
+
+    def test_intro_frames_do_not_use_the_cache(self, app):
+        w = AnimatedLogoWidget(theme="dark", play_sound=False)
+        rest = _frame(w, _ANIM_END_MS)
+        assert not np.array_equal(_frame(w, _UNDULATE_START_MS + 150), rest)
+
+    def test_theme_switch_rebuilds_the_cache(self, app):
+        w = AnimatedLogoWidget(theme="dark", play_sound=False)
+        _frame(w, _ANIM_END_MS)
+        dark = w._rest_pixmap
+        w.set_theme("light")
+        assert w._rest_pixmap is None
+        _frame(w, _ANIM_END_MS)
+        assert w._rest_pixmap is not dark
 
 
 class TestPlayIntro:
