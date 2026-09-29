@@ -12,16 +12,36 @@ from __future__ import annotations
 import math
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QLabel, QProgressBar, QVBoxLayout, QWidget
 
-# The workers report 0-15 % for loading, resampling, and model setup,
-# then the separation itself; the estimate uses only the separation part,
-# whose pace is steady.
+# Both workers report 0-15 % for loading, resampling, and model setup,
+# then map the separation itself to 15-90 %; the estimate uses only that
+# part, whose pace is steady. After 90 % come post-processing and saving,
+# which are short and send no reports of their own.
 _ESTIMATE_FROM_PERCENT = 15
+_SEPARATION_END_PERCENT = 90
+_TAIL_S = 5.0
 _MIN_ELAPSED_S = 4.0
 _MIN_PROGRESS = 2.0
 _SMOOTHING = 0.3
+
+
+def stage_for(percent: int) -> str:
+    """Plain stage name for a worker progress *percent*.
+
+    The workers' own messages ("Processing segment 57/150...", "Using
+    DirectML (GPU) for MDX separation.") are not shown: the percentage and
+    the time left already say how far along the separation is.
+    """
+    if percent < 5:
+        return "Loading audio…"
+    if percent < _ESTIMATE_FROM_PERCENT:
+        return "Preparing the model…"
+    if percent < _SEPARATION_END_PERCENT:
+        return "Separating stems…"
+    return "Saving stems…"
 
 
 class SeparationEta:
@@ -29,10 +49,12 @@ class SeparationEta:
 
     def __init__(self) -> None:
         self._start: tuple[float, float] | None = None
-        self._estimate: float | None = None
+        self._rate: float | None = None  # Seconds per percent.
 
     def update(self, percent: float, now: float) -> float | None:
         """Add a report; return the seconds left, or None while unsure."""
+        if percent >= _SEPARATION_END_PERCENT:
+            return 0.0
         if percent < _ESTIMATE_FROM_PERCENT:
             return None
         if self._start is None:
@@ -41,15 +63,17 @@ class SeparationEta:
         t0, p0 = self._start
         elapsed = now - t0
         done = percent - p0
-        if elapsed < _MIN_ELAPSED_S or done < _MIN_PROGRESS:
-            return self._estimate
-        remaining = (100.0 - percent) * elapsed / done
-        if self._estimate is None:
-            self._estimate = remaining
-        else:
-            # Blend towards the latest rate so the estimate doesn't jump.
-            self._estimate += _SMOOTHING * (remaining - self._estimate)
-        return max(0.0, self._estimate)
+        if elapsed >= _MIN_ELAPSED_S and done >= _MIN_PROGRESS:
+            rate = elapsed / done
+            if self._rate is None:
+                self._rate = rate
+            else:
+                # Blend towards the latest rate so the estimate doesn't jump.
+                self._rate += _SMOOTHING * (rate - self._rate)
+        if self._rate is None:
+            return None
+        left = (_SEPARATION_END_PERCENT - percent) * self._rate
+        return max(0.0, left) + _TAIL_S
 
 
 def format_eta(seconds: float | None) -> str:
@@ -61,6 +85,50 @@ def format_eta(seconds: float | None) -> str:
     if seconds < 60:
         return f"About {int(math.ceil(seconds / 10.0) * 10)} s left"
     return f"About {int(math.ceil(seconds / 60.0))} min left"
+
+
+class _ElidedLabel(QLabel):
+    """One-line label that elides its text to the width it is given.
+
+    Its minimum width is zero, so a long title never widens the window;
+    the full text is in the tooltip.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+
+    def set_full_text(self, text: str) -> None:
+        """Show *text*, elided to fit, with all of it in the tooltip."""
+        self._full_text = text
+        self.setToolTip(text)
+        self.updateGeometry()
+        self._elide()
+
+    def full_text(self) -> str:
+        return self._full_text
+
+    def sizeHint(self) -> QSize:
+        margins = self.contentsMargins()
+        width = (self.fontMetrics().horizontalAdvance(self._full_text)
+                 + margins.left() + margins.right() + 2)
+        return QSize(width, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        shown = self.fontMetrics().elidedText(
+            self._full_text,
+            Qt.TextElideMode.ElideRight,
+            max(0, self.contentsRect().width()),
+        )
+        if shown != self.text():
+            self.setText(shown)
 
 
 class SeparationView(QWidget):
@@ -75,12 +143,12 @@ class SeparationView(QWidget):
         layout.setSpacing(6)
         center = Qt.AlignmentFlag.AlignHCenter
 
-        self._title = QLabel("")
+        self._title = _ElidedLabel()
         self._title.setObjectName("title-label")
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._title, alignment=center)
 
-        self._artist = QLabel("")
+        self._artist = _ElidedLabel()
         self._artist.setObjectName("subtle-label")
         self._artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._artist, alignment=center)
@@ -116,22 +184,19 @@ class SeparationView(QWidget):
     def start(self, title: str, artist: str) -> None:
         """Show *title* by *artist* at the start of its separation."""
         self._eta = SeparationEta()
-        self._title.setText(title)
-        self._artist.setText(artist)
+        self._title.set_full_text(title)
+        self._artist.set_full_text(artist)
         self._artist.setVisible(bool(artist))
         self._stage.setText("Starting…")
         self._bar.setValue(0)
         self._time_left.setText(f"0% · {format_eta(None)}")
 
-    def update_progress(
-        self, percent: int, message: str, now: float | None = None,
-    ) -> None:
-        """Show a worker progress report (*percent*, stage *message*)."""
+    def update_progress(self, percent: int, now: float | None = None) -> None:
+        """Show a worker progress report of *percent*."""
         now = time.monotonic() if now is None else now
         percent = max(0, min(100, int(percent)))
         self._bar.setValue(percent)
-        if message:
-            self._stage.setText(message)
+        self._stage.setText(stage_for(percent))
         left = format_eta(self._eta.update(percent, now))
         self._time_left.setText(f"{percent}% · {left}")
 
@@ -143,7 +208,7 @@ class SeparationView(QWidget):
 
     @property
     def title(self) -> str:
-        return self._title.text()
+        return self._title.full_text()
 
     @property
     def stage(self) -> str:
@@ -156,3 +221,8 @@ class SeparationView(QWidget):
     @property
     def percent(self) -> int:
         return self._bar.value()
+
+    @property
+    def queued_text(self) -> str:
+        """The queue line, or "" while it is hidden."""
+        return "" if self._queued.isHidden() else self._queued.text()

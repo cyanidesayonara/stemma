@@ -530,9 +530,9 @@ class PlayerControls(QWidget):
         self._separation_view.setVisible(True)
         self._hint_label.setVisible(False)
 
-    def update_separation(self, percent: int, message: str) -> None:
+    def update_separation(self, percent: int) -> None:
         """Pass a separation progress report to the empty player's view."""
-        self._separation_view.update_progress(percent, message)
+        self._separation_view.update_progress(percent)
 
     def hide_separation(self) -> None:
         """Return the empty player to its drop hint."""
