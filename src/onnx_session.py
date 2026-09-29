@@ -8,8 +8,13 @@ _DML_PROVIDER = "DmlExecutionProvider"
 _CPU_PROVIDER = "CPUExecutionProvider"
 
 
-def create_onnx_session(model_path: str):
-    """Create a DML-first ONNX session with a safe CPU fallback."""
+def create_onnx_session(model_path: str, use_gpu: bool = True):
+    """Create a DML-first ONNX session with a safe CPU fallback.
+
+    *use_gpu* False goes straight to the CPU, for a model known not to
+    compile on DirectML: the failed attempt costs time and makes ONNX
+    Runtime print an initialization error to the console.
+    """
     # Deferred import: ONNX Runtime is heavy and is only needed for inference.
     import onnxruntime as ort
 
@@ -19,7 +24,7 @@ def create_onnx_session(model_path: str):
         )
 
     available = set(ort.get_available_providers())
-    if _DML_PROVIDER in available:
+    if use_gpu and _DML_PROVIDER in available:
         dml_options = ort.SessionOptions()
         dml_options.enable_mem_pattern = False
         dml_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
