@@ -1082,8 +1082,6 @@ class MainWindow(QMainWindow):
                 if idx >= 0:
                     self._player_controls._speed_combo.setCurrentIndex(idx)
                 self._player_controls._speed_combo.blockSignals(False)
-                # Status text driven by the player's stretch_started/progress
-                # signals -- no need to set it manually here.
                 self._player.set_speed(speed)
 
         # Metronome state
