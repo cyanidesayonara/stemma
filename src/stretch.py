@@ -34,6 +34,9 @@ _WINDOW_SQ = _WINDOW ** 2
 _TINY = np.float32(1e-10)
 # Samples pulled from the source at a time when the analysis runs dry.
 _PULL = 2048
+# Output samples over which a pitch change crossfades from the old
+# resampler to the new one (10 ms): a hard switch clicked (#217 review).
+_PITCH_FADE = 441
 
 # A source read: (audio of shape (count, channels), song frame of its first
 # sample). It may return fewer samples than asked (a loop boundary); an
@@ -90,6 +93,7 @@ class StreamingStretcher:
         # analysis position maps back to where it came from in the song.
         self._runs: deque[tuple[int, int, int]] = deque()
         self._source_done = False
+        self._tail_flushed = False
         self._t = 0.0  # analysis position, in frames
         self._frame = 0  # output frames synthesised since reset
         self._phase: np.ndarray | None = None  # unit phasors, (ch, bins)
@@ -107,6 +111,8 @@ class StreamingStretcher:
         self._last_mark_frame: float | None = None
         self._position = float(position)
         self._last_mark_frame = None
+        self._old_resampler: soxr.ResampleStream | None = None
+        self._fading = False
         self._new_resampler()
 
     def set_params(self, speed: float, semitones: float) -> None:
@@ -114,7 +120,7 @@ class StreamingStretcher:
         speed = float(speed)
         semitones = float(semitones)
         if semitones != self._semitones:
-            self._flush_resampler()
+            self._start_pitch_fade()
             self._semitones = semitones
             self._new_resampler()
         self._speed = speed
@@ -139,8 +145,12 @@ class StreamingStretcher:
 
     def fill(self, count: int, source: SourceRead) -> None:
         """Make at least *count* output samples ready (unless it ends)."""
-        while len(self._fifo) < count and not self.finished:
+        while len(self._fifo) < count and not self._exhausted:
             self._synthesise_frame(source)
+        if self._exhausted and not self._tail_flushed:
+            self._tail_flushed = True
+            self._finish_pitch_fade()
+            self._flush_resampler()
 
     def jump_offset(self) -> int | None:
         """Output samples before the next loop wrap, or None if none is due.
@@ -164,12 +174,17 @@ class StreamingStretcher:
                 return
 
     @property
-    def finished(self) -> bool:
-        """True once the source has ended and all its audio is out."""
+    def _exhausted(self) -> bool:
+        """True once the analysis has passed the end of the source."""
         return (
             self._source_done
             and self._t * HOP >= self._input_end() - _PAD
         )
+
+    @property
+    def finished(self) -> bool:
+        """True once the source has ended and all its audio is out."""
+        return self._exhausted and self._tail_flushed and not len(self._fifo)
 
     # -- internals ---------------------------------------------------------
 
@@ -270,8 +285,7 @@ class StreamingStretcher:
             self._drop -= skip
             if len(samples) == 0:
                 return
-        if self._resampler is not None:
-            samples = self._resampler.resample_chunk(samples)
+        samples = self._resample(samples)
         if len(samples) == 0:
             return
         frame = self._source_frame(t)
@@ -310,8 +324,74 @@ class StreamingStretcher:
             self._channels, dtype="float32", quality="HQ",
         )
 
+    def _resample(self, samples: np.ndarray) -> np.ndarray:
+        """Pass one hop through the resampler, crossfading after a change."""
+        new = (
+            self._resampler.resample_chunk(samples)
+            if self._resampler is not None else samples
+        )
+        if not self._fading:
+            return new
+        old = (
+            self._old_resampler.resample_chunk(samples)
+            if self._old_resampler is not None else samples
+        )
+        # First, what the old resampler still held from before the change
+        # plays on; then both carry the same audio from the switch point,
+        # and the crossfade blends one pitch into the other.
+        held = min(self._old_held, len(old))
+        out = [old[:held]]
+        self._old_held -= held
+        self._old_tail = np.concatenate([self._old_tail, old[held:]])
+        self._new_head = np.concatenate([self._new_head, new])
+        if self._old_held == 0:
+            n = min(len(self._old_tail), len(self._new_head), self._fade_left)
+            if n:
+                done = _PITCH_FADE - self._fade_left
+                ramp = (np.arange(done, done + n, dtype=np.float32)
+                        / _PITCH_FADE)[:, np.newaxis]
+                out.append(self._old_tail[:n] * (1.0 - ramp)
+                           + self._new_head[:n] * ramp)
+                self._old_tail = self._old_tail[n:]
+                self._new_head = self._new_head[n:]
+                self._fade_left -= n
+            if self._fade_left == 0:
+                out.append(self._new_head)
+                self._end_pitch_fade()
+        return np.concatenate(out)
+
+    def _start_pitch_fade(self) -> None:
+        """Keep the current resampler for a crossfade into the next one."""
+        if self._fading:
+            self._finish_pitch_fade()
+        empty = np.zeros((0, self._channels), np.float32)
+        self._old_resampler = self._resampler
+        self._old_held = (
+            int(round(self._resampler.delay()))
+            if self._resampler is not None else 0
+        )
+        self._old_tail = empty
+        self._new_head = empty
+        self._fade_left = _PITCH_FADE
+        self._fading = True
+
+    def _finish_pitch_fade(self) -> None:
+        """Cut an unfinished crossfade short (another change, or the end)."""
+        if not self._fading:
+            return
+        if len(self._new_head):
+            self._fifo = np.concatenate([self._fifo, self._new_head])
+        self._end_pitch_fade()
+
+    def _end_pitch_fade(self) -> None:
+        empty = np.zeros((0, self._channels), np.float32)
+        self._old_resampler = None
+        self._old_tail = empty
+        self._new_head = empty
+        self._fading = False
+
     def _flush_resampler(self) -> None:
-        """Emit what the old resampler still holds before replacing it."""
+        """Emit what the resampler still holds (the end of the song)."""
         if self._resampler is None:
             return
         tail = self._resampler.resample_chunk(
@@ -319,4 +399,3 @@ class StreamingStretcher:
         )
         if len(tail):
             self._fifo = np.concatenate([self._fifo, tail])
-        self._resampler = None

@@ -212,7 +212,6 @@ def test_practice_cards_compose_in_intended_order(controls):
         # Card: Speed and Pitch
         controls._speed_label,
         controls._speed_combo,
-        controls._speed_status,
         controls._pitch_label,
         controls._pitch_spin,
         # Card: Metronome and Count-in
@@ -385,9 +384,8 @@ def test_cards_rewrap_when_their_content_grows(qapp):
     QApplication.processEvents()
     assert rack.cards_side_by_side is True
 
-    # Any label in a card can grow; the speed status is one that still
-    # lives there (loop points and trainer progress moved out).
-    rack._speed_status.setText("rendering 0.85x, then 0.90x, then 0.95x...")
+    # Any control in a card can grow; widen the trainer start combo.
+    rack._trainer_start_combo.setMinimumWidth(900)
     # The size change travels label -> card frame -> card -> rack as a chain
     # of posted layout requests, which takes more than one event-loop pass.
     for _ in range(3):
@@ -711,3 +709,11 @@ def test_tempo_tooltip_keeps_the_precise_value(controls):
     controls.apply_theme("light", LIGHT_COLORS)
 
     assert "91.4 BPM" in controls.song_info_bar.detected_bpm_label.toolTip()
+
+
+
+def test_loop_export_uses_song_time_at_any_speed():
+    """Loop points are song time; export multiplied them by the speed."""
+    from src.ui.main_window import loop_export_frames
+
+    assert loop_export_frames(60.0, 70.0, 44100) == (60 * 44100, 70 * 44100)

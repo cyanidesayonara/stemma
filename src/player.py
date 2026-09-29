@@ -44,6 +44,11 @@ RECORDING_STEM_PREFIX = "recording_take"
 # Output frames a new or re-seeked stretch path prepares before the audio
 # callback reads it, so its first block costs no more than any other.
 _PRIME_FRAMES = 2048
+# Going back to the original speed and pitch mid-play crossfades from the
+# stretched mix to the direct one over this many frames (10 ms): the
+# vocoder's phase no longer matches the original, and a hard switch
+# clicked (#217 review).
+_RETURN_FADE_FRAMES = 441
 
 
 def read_stem_files(
@@ -222,6 +227,13 @@ class MultiTrackPlayer(QObject):
         # (stretcher, source reader) per group of stems that share a pitch;
         # empty at speed 1.0 and pitch 0, where the callback mixes directly.
         self._stretch_paths: list[tuple[StreamingStretcher, _SourceReader]] = []
+        # Paths fading out after a return to the original speed and pitch.
+        self._fading_paths: list[tuple[StreamingStretcher, _SourceReader]] = []
+        self._fade_left: int = 0
+        # Song frame where the last stretched block ended, so synced clicks
+        # cover every frame exactly once (positions from the stretcher's
+        # hop marks jump by up to a hop when pitch is shifted).
+        self._click_cursor: float | None = None
         # Held by the audio callback while it stretches and by the GUI
         # thread while it rebuilds or seeks the stretch paths.
         self._stretch_lock = threading.Lock()
@@ -289,6 +301,10 @@ class MultiTrackPlayer(QObject):
         """
         if self._timer.isActive():
             self._timer.stop()
+        # Release the soxr streams before interpreter exit.
+        with self._stretch_lock:
+            self._stretch_paths = []
+            self._fading_paths = []
 
     @property
     def has_stems(self) -> bool:
@@ -718,6 +734,8 @@ class MultiTrackPlayer(QObject):
         self.stop()
         with self._stretch_lock:
             self._stretch_paths = []
+            self._fading_paths = []
+            self._click_cursor = None
         self._stems = {}
         self._muted_stems.clear()
         self._soloed_stems.clear()
@@ -994,8 +1012,7 @@ class MultiTrackPlayer(QObject):
                 target_frame = la
             elif target_frame >= lb:
                 target_frame = la
-        self._current_frame = target_frame
-        self._restart_stretch()
+        self._restart_stretch(target_frame)
         self._metronome_phase = 0
         self._count_in_remaining = 0
         self._count_in_beat = 0
@@ -1267,12 +1284,24 @@ class MultiTrackPlayer(QObject):
             stretcher.fill(_PRIME_FRAMES, reader)
             paths.append((stretcher, reader))
         with self._stretch_lock:
+            if not paths and self._stretch_paths and self._is_playing:
+                self._fading_paths = self._stretch_paths
+                self._fade_left = _RETURN_FADE_FRAMES
             self._current_frame = frame
             self._stretch_paths = paths
+            self._click_cursor = None
 
-    def _restart_stretch(self) -> None:
-        """Start the stretch paths again from ``_current_frame`` (a seek)."""
+    def _restart_stretch(self, frame: int | None = None) -> None:
+        """Start the stretch paths again from *frame* (a seek).
+
+        The frame is set under the same lock the audio callback holds, so
+        a callback finishing mid-seek cannot write its old position back.
+        """
         with self._stretch_lock:
+            if frame is not None:
+                self._current_frame = frame
+            self._fading_paths = []
+            self._click_cursor = None
             for stretcher, reader in self._stretch_paths:
                 stretcher.reset(self._current_frame)
                 reader.head = self._current_frame
@@ -1481,6 +1510,7 @@ class MultiTrackPlayer(QObject):
                 if jump == 0:
                     for stretcher, _ in paths:
                         stretcher.clear_jump()
+                    self._click_cursor = None
                     self._loop_wrap_count += 1
                     if self._count_in_enabled and self._count_in_on_repeats:
                         self._arm_count_in()
@@ -1504,7 +1534,11 @@ class MultiTrackPlayer(QObject):
                                 break
                     continue
                 n = remaining if jump is None else min(remaining, jump)
-                start = main.position
+                start = (
+                    main.position if self._click_cursor is None
+                    else self._click_cursor
+                )
+                self._click_cursor = start + n * speed
                 for stretcher, reader in paths:
                     outdata[offset:offset + n] += stretcher.read(n, reader)
                 if (self._metronome_enabled and self._beat_sync_enabled
@@ -1532,6 +1566,24 @@ class MultiTrackPlayer(QObject):
             self._current_frame = self._total_frames
             self._is_playing = False
             raise sd.CallbackStop
+
+    def _mix_return_fade(self, outdata: np.ndarray, frames: int) -> None:
+        """Crossfade the fading stretched mix into the direct one."""
+        with self._stretch_lock:
+            paths = self._fading_paths
+            if not paths:
+                return
+            n = min(frames, self._fade_left)
+            old = np.zeros((n, 2), dtype=np.float32)
+            for stretcher, reader in paths:
+                old += stretcher.read(n, reader)
+            done = _RETURN_FADE_FRAMES - self._fade_left
+            ramp = (np.arange(done, done + n, dtype=np.float32)
+                    / _RETURN_FADE_FRAMES)[:, np.newaxis]
+            outdata[:n] = outdata[:n] * ramp + old * (1.0 - ramp)
+            self._fade_left -= n
+            if self._fade_left <= 0:
+                self._fading_paths = []
 
     def _mix_metronome_stretched(
         self, outdata: np.ndarray, offset: int, count: int,
@@ -1774,6 +1826,9 @@ class MultiTrackPlayer(QObject):
                                 self._metronome_phase = 0
                 else:
                     break
+
+        if self._fading_paths:
+            self._mix_return_fade(outdata, frames)
 
         # Mix in grid-based metronome click track (only when not beat-synced).
         # Uses *frames* (the full PortAudio block size) so the beat phase

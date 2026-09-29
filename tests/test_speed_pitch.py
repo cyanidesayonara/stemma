@@ -266,3 +266,73 @@ class TestRecordingTakes:
         )
         player.set_speed(0.75)
         assert [r.names for _, r in player._stretch_paths] == [None]
+
+
+def _onsets(out, sr=SR, threshold=0.05, gap=0.1):
+    loud = np.flatnonzero(np.abs(out) > threshold)
+    if not len(loud):
+        return np.array([])
+    return loud[np.insert(np.diff(loud) > int(sr * gap), 0, True)] / sr
+
+
+class TestReviewFindings:
+    @pytest.mark.parametrize("speed, semitones", [
+        (1.0, 3), (0.75, 3), (0.5, -7), (1.25, 2),
+    ])
+    def test_every_synced_click_sounds_with_pitch_shifted(
+        self, player, speed, semitones,
+    ):
+        """Hop-mark positions jump with a resampler; clicks went missing."""
+        player.set_mute("vocals", True)
+        player.set_mute("drums", True)
+        beats = list(np.arange(0.2, 5.8, 0.4371))
+        player.set_beat_times(beats, [])
+        player.set_beat_sync_enabled(True)
+        player.set_metronome_enabled(True)
+        player.set_speed(speed)
+        player.set_pitch(semitones)
+        out = _run(player, int(5.7 / speed * SR / BLOCK))[:, 0]
+        heard = _onsets(out)
+        expected = [b / speed for b in beats if b / speed < len(out) / SR]
+        assert len(heard) == len(expected)
+        assert heard == pytest.approx(expected, abs=0.03)
+
+    def test_returning_to_original_speed_does_not_click(self, player):
+        player.set_mute("drums", True)
+        player.set_speed(0.85)
+        before = _run(player, 30)
+        player.set_speed(1.0)
+        after = _run(player, 10)
+        out = np.concatenate([before, after])[:, 0]
+        steady = np.abs(np.diff(before[4096:, 0])).max()
+        assert np.abs(np.diff(out[len(before) - 64:])).max() < 2 * steady
+
+    def test_pitch_change_crossfades(self, player):
+        player.set_mute("drums", True)
+        player.set_pitch(2)
+        before = _run(player, 30)
+        player.set_pitch(5)
+        after = _run(player, 30)
+        out = np.concatenate([before, after])[:, 0]
+        steady = np.abs(np.diff(before[4096:, 0])).max()
+        switch = len(before)
+        assert np.abs(np.diff(out[switch - 64:switch + 4096])).max() < 2 * steady
+
+    def test_seek_is_not_lost_to_a_running_callback(self, player):
+        """The frame is set under the callback's lock."""
+        player.set_speed(0.75)
+        _run(player, 5)
+        with player._stretch_lock:
+            pass  # the callback holds this while it runs
+        player.seek(3.0)
+        _run(player, 1)
+        assert player._current_frame >= 3 * SR
+
+    def test_the_last_moments_of_the_song_are_heard(self, player):
+        player.set_speed(2.0)
+        player.set_pitch(-7)
+        player.seek(5.5)
+        out = _run(player, 200)
+        # 0.5 s of song at 2x is 0.25 s; allow a hop of analysis edge.
+        tail = np.flatnonzero(np.abs(out[:, 0]) > 0.01)
+        assert tail[-1] / SR == pytest.approx(0.25, abs=0.02)

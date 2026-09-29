@@ -378,7 +378,6 @@ class PlayerControls(QWidget):
         self._loop_label = practice._loop_label
         self._speed_label = practice._speed_label
         self._speed_combo = practice._speed_combo
-        self._speed_status = practice._speed_status
         self._pitch_label = practice._pitch_label
         self._pitch_spin = practice._pitch_spin
         self._trainer_check = practice._trainer_check
@@ -541,7 +540,6 @@ class PlayerControls(QWidget):
         self._speed_combo.blockSignals(True)
         self._speed_combo.setCurrentText("1.0x")
         self._speed_combo.blockSignals(False)
-        self._speed_status.setText("")
 
         # Kill any in-flight debounce from the previous song so a pending
         # scroll doesn't fire set_pitch / set_speed against the freshly
@@ -1588,6 +1586,8 @@ class PlayerControls(QWidget):
             self._song_info_bar.set_bpm("")
             self._bpm_conf = ""
             self._detected_bpm_raw = ""
+
+    # -- Metronome handlers --
 
     def _on_metronome_toggled(self, checked: bool) -> None:
         """User toggled the metronome on/off."""
