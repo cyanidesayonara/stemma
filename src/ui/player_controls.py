@@ -574,8 +574,9 @@ class PlayerControls(QWidget):
         self.update_record_button_state()
 
         # Auto-detect if no beat grid has been loaded yet.
-        # Old sessions are handled by the det_ver gate in main_window:
-        # if det_ver < 4, beat_times are not restored, so this fires.
+        # Old sessions are handled by the det_ver gate in main_window: beat
+        # times saved before DETECTION_VERSION are not restored, so this
+        # fires.
         if has_stems and not self._player.beat_times:
             self.start_detection()
 
