@@ -267,13 +267,23 @@ def _youtube_message(low: str) -> str | None:
     return None
 
 
+# Terminal escape sequences (CSI, such as colour codes). yt-dlp colours its
+# "ERROR:" prefix when it thinks it writes to a terminal.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+
+
+def strip_ansi(text: str) -> str:
+    """Return *text* without terminal escape sequences."""
+    return _ANSI_ESCAPE.sub("", text or "")
+
+
 def format_import_error(message: str, max_len: int = 400) -> str:
     """Turn a raw exception or library message into short, readable text.
 
     Pure: it never logs. Use ``describe_error`` where the exception object
     is available.
     """
-    raw = (message or "").strip()
+    raw = strip_ansi(message).strip()
     if not raw:
         return MSG_GENERIC
     if raw in _READABLE:
@@ -344,7 +354,8 @@ def describe_error(
     """
     if isinstance(error, BaseException):
         logger.warning(
-            "%s: %s: %s", context, type(error).__name__, error,
+            "%s: %s: %s", context, type(error).__name__,
+            strip_ansi(str(error)),
             exc_info=(type(error), error, error.__traceback__),
         )
         for exc in _exception_chain(error):
@@ -353,7 +364,7 @@ def describe_error(
                 return found
         return format_import_error(str(error), max_len=max_len)
 
-    text = (error or "").strip()
+    text = strip_ansi(error).strip()
     if text and text not in _READABLE:
         logger.warning("%s: %s", context, text)
     return format_import_error(text, max_len=max_len)

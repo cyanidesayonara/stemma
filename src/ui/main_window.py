@@ -57,6 +57,7 @@ from src.app_settings import (
     read_latency_offset_ms,
     read_sync_recording_pitch,
 )
+from src.beat_detector import DETECTION_VERSION
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
 from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
@@ -958,7 +959,7 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
-            self._settings.setValue(f"{prefix}/det_ver", 4)
+            self._settings.setValue(f"{prefix}/det_ver", DETECTION_VERSION)
         # Library playback mode.
         self._settings.setValue(
             "session/repeat_mode", self._library_panel.repeat_mode
@@ -1190,13 +1191,12 @@ class MainWindow(QMainWindow):
                 self._player_controls.set_detected_bpm_text(
                     str(detected_bpm), bpm_conf,
                 )
-            # Schema version 4 = major/minor-only chords (no false 7ths).
-            # Skip restoring beat/chord data for older sessions so the
-            # auto-detect trigger fires once with the new algorithm.
+            # Skip restoring beat/chord data saved by an older detector so
+            # the auto-detect trigger fires once with the current one.
             det_ver = int(
                 self._settings.value(f"{prefix}/det_ver", 0) or 0
             )
-            if det_ver >= 4:
+            if det_ver >= DETECTION_VERSION:
                 try:
                     cs_str = self._settings.value(
                         f"{prefix}/chord_sequence", "[]",
@@ -1489,7 +1489,7 @@ class MainWindow(QMainWindow):
             nudge_str = self._settings.value(f"{prefix}/beat_nudge_ms", 0.0)
             nudge = float(nudge_str) if nudge_str else 0.0
             self._player_controls.set_beat_sync_nudge(nudge)
-            if det_ver >= 4:
+            if det_ver >= DETECTION_VERSION:
                 bt_str = self._settings.value(f"{prefix}/beat_times", "[]")
                 dt_str = self._settings.value(
                     f"{prefix}/downbeat_times", "[]",

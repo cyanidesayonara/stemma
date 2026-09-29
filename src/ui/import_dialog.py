@@ -34,7 +34,9 @@ from src.app_settings import (
     open_settings,
     read_default_import_model,
 )
+from src.crash_log import logger
 from src.downloader import (
+    DownloadCancelled,
     DownloadError,
     check_ffmpeg,
     download_audio,
@@ -111,20 +113,40 @@ class _DownloadWorker(QThread):
         self._output_path = output_path
 
     def run(self) -> None:
+        # The bar never moves backwards: a retry starts its download over,
+        # so its early progress is below what the failed attempt reached.
+        shown = 0
+
+        def on_progress(d):
+            nonlocal shown
+            if d.get("status") != "downloading":
+                return
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            downloaded = d.get("downloaded_bytes", 0)
+            if total > 0:
+                pct = min(int(downloaded / total * 100), 99)
+                if pct > shown:
+                    shown = pct
+                    self.progress.emit(shown, "Downloading audio...")
+
+        def on_retry(attempt, _delay):
+            self.progress.emit(shown, f"Retrying download (attempt {attempt})...")
+
         try:
             self.progress.emit(0, "Downloading audio...")
-
-            def on_progress(d):
-                if d.get("status") == "downloading":
-                    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                    downloaded = d.get("downloaded_bytes", 0)
-                    if total > 0:
-                        pct = int(downloaded / total * 100)
-                        self.progress.emit(min(pct, 99), "Downloading audio...")
-
-            download_audio(self._url, self._output_path, progress_callback=on_progress)
+            download_audio(
+                self._url,
+                self._output_path,
+                progress_callback=on_progress,
+                # Closing the dialog stops any automatic retry.
+                should_cancel=self.isInterruptionRequested,
+                on_retry=on_retry,
+            )
             self.progress.emit(100, "Download complete.")
             self.completed.emit(self._output_path)
+        except DownloadCancelled as exc:
+            # The user closed the dialog: not a failure worth a warning.
+            logger.info("YouTube download cancelled: %s", exc)
         except DownloadError as exc:
             self.error.emit(describe_error(exc, "YouTube download failed"))
 
@@ -803,6 +825,8 @@ class ImportDialog(QDialog):
         if self._metadata_worker is not None and self._metadata_worker.isRunning():
             self._metadata_worker.wait(5000)
         if self._download_worker is not None and self._download_worker.isRunning():
+            # yt-dlp cannot stop mid-attempt, but no retry starts after this.
+            self._download_worker.requestInterruption()
             self._download_worker.setParent(None)
             self._download_worker.wait(5000)
             if self._download_worker.isRunning():
