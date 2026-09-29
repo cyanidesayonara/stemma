@@ -180,7 +180,9 @@ class WaveformStackWidget(QWidget):
     def lane_count(self) -> int:
         return len(self._lanes)
 
-    def set_lane_capacity(self, lanes: int) -> None:
+    def set_lane_capacity(
+        self, lanes: int, readable_lanes: int | None = None,
+    ) -> None:
         """Cap the stack's height for *lanes* rows of waveform.
 
         Driven by the mixer's row count rather than by the lanes drawn, so
@@ -190,7 +192,10 @@ class WaveformStackWidget(QWidget):
         cap = max(STACK_HEIGHT, min(STACK_MAX_HEIGHT, lanes * LANE_MAX_HEIGHT))
         if self.maximumHeight() != cap:
             self.setMaximumHeight(cap)
-        floor = max(STACK_MIN_HEIGHT, lanes * LANE_MIN_HEIGHT)
+        # The floor counts the song's stems, not recording takes: with two
+        # takes it pushed the take rows below the fold at 1366 x 768.
+        counted = lanes if readable_lanes is None else readable_lanes
+        floor = max(STACK_MIN_HEIGHT, counted * LANE_MIN_HEIGHT)
         if self.minimumHeight() != floor:
             self.setMinimumHeight(floor)
 

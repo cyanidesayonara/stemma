@@ -476,3 +476,6 @@ def test_every_lane_keeps_a_readable_height(app):
     assert widget.minimumHeight() == 6 * LANE_MIN_HEIGHT
     widget.set_lane_capacity(2)
     assert widget.minimumHeight() == STACK_MIN_HEIGHT
+    # Recording takes don't raise the floor.
+    widget.set_lane_capacity(8, readable_lanes=6)
+    assert widget.minimumHeight() == 6 * LANE_MIN_HEIGHT

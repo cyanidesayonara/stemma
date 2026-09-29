@@ -4,7 +4,7 @@ from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.main_window import MainWindow
 from src.ui.player_controls import PlayerControls
 from src.ui.practice_rack import PracticeRack
 from src.ui.song_info_bar import SongInfoBar
@@ -715,8 +716,6 @@ def test_tempo_tooltip_keeps_the_precise_value(controls):
 
 def test_practice_card_controls_are_compact(qapp):
     """Shorter card controls leave the waveform more height (#159)."""
-    from src.ui.styles import get_stylesheet
-
     rack = PracticeRack(SongInfoBar())
     rack.setStyleSheet(get_stylesheet("dark"))
     rack.resize(1200, 300)
@@ -734,21 +733,31 @@ def test_practice_card_controls_are_compact(qapp):
     ((1000, 640), (900, 600)),
 ])
 def test_first_run_window_size(qapp, available, expected):
-    from PySide6.QtCore import QRect
-
-    from src.ui.main_window import MainWindow
-
     stub = MagicMock()
     stub.screen.return_value.availableGeometry.return_value = QRect(
         0, 0, *available,
     )
+    stub.frameGeometry.return_value.height.return_value = expected[1] + 39
+    stub.geometry.return_value.height.return_value = expected[1]
     MainWindow._apply_first_run_size(stub)
     stub.resize.assert_called_once_with(*expected)
+    x, y = stub.move.call_args.args
+    assert x >= 0 and y >= 0
+
+
+def test_first_run_window_stays_on_a_short_screen():
+    """A 1920x1080 screen at 200% is 516 px tall: the title bar went off."""
+    stub = MagicMock()
+    stub.screen.return_value.availableGeometry.return_value = QRect(
+        0, 0, 960, 516,
+    )
+    stub.frameGeometry.return_value.height.return_value = 639
+    stub.geometry.return_value.height.return_value = 600
+    MainWindow._apply_first_run_size(stub)
+    assert stub.move.call_args.args == (30, 0)
 
 
 def test_practice_icon_buttons_stay_square(qapp):
-    from src.ui.styles import get_stylesheet
-
     rack = PracticeRack(SongInfoBar())
     rack.setStyleSheet(get_stylesheet("light"))
     rack.resize(1200, 300)

@@ -810,10 +810,13 @@ class MainWindow(QMainWindow):
         width = max(900, min(_FIRST_RUN_SIZE.width(), int(area.width() * 0.9)))
         height = max(600, min(_FIRST_RUN_SIZE.height(), int(area.height() * 0.9)))
         self.resize(width, height)
-        self.move(
-            area.x() + (area.width() - width) // 2,
-            area.y() + (area.height() - height) // 2,
-        )
+        # Centre the frame, not just the client area, and never put the
+        # title bar above the screen (a short, scaled screen can be less
+        # than the 600 px minimum tall).
+        frame_extra = self.frameGeometry().height() - self.geometry().height()
+        x = area.x() + max(0, (area.width() - width) // 2)
+        y = area.y() + max(0, (area.height() - height - frame_extra) // 2)
+        self.move(x, y)
 
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
