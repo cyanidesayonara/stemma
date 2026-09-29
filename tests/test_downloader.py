@@ -4,14 +4,65 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yt_dlp
 
+import src.downloader as downloader
 from src.downloader import (
     is_supported_url,
     extract_metadata,
     download_audio,
     check_ffmpeg,
+    DownloadCancelled,
     DownloadError,
+    is_transient_error,
 )
+from src.import_messages import MSG_HTTP, describe_error, strip_ansi
+
+# The real yt-dlp message from the failed first import (colour codes and
+# all): YouTube refused the first media URL, and Retry worked.
+RAW_403 = (
+    "\x1b[0;31mERROR:\x1b[0m unable to download video data: "
+    "HTTP Error 403: Forbidden"
+)
+
+
+@pytest.fixture(autouse=True)
+def no_backoff_sleep(monkeypatch):
+    """Record backoff waits instead of sleeping through them."""
+    waits = []
+    monkeypatch.setattr(downloader, "_sleep", waits.append)
+    return waits
+
+
+def _ydl_sequence(mock_ydl_class, output_path, outcomes):
+    """Make each YoutubeDL instance run the next outcome in *outcomes*.
+
+    An outcome is an exception to raise from download(), or None to
+    succeed by writing the output file. Returns the list of option dicts
+    each attempt was built with.
+    """
+    remaining = list(outcomes)
+    built = []
+
+    def make(opts):
+        built.append(opts)
+        outcome = remaining.pop(0)
+        ydl = MagicMock()
+
+        def fake_download(urls):
+            if outcome is not None:
+                raise outcome
+            with open(output_path, "wb") as f:
+                f.write(b"fake mp3 data")
+
+        ydl.download.side_effect = fake_download
+        context = MagicMock()
+        context.__enter__ = MagicMock(return_value=ydl)
+        context.__exit__ = MagicMock(return_value=False)
+        return context
+
+    mock_ydl_class.side_effect = make
+    return built
 
 
 class TestURLValidation:
@@ -206,10 +257,12 @@ class TestDownloadAudio:
         mock_ydl = MagicMock()
         mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
         mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
-        mock_ydl.download.side_effect = Exception("403 Forbidden")
+        mock_ydl.download.side_effect = Exception("HTTP Error 403: Forbidden")
 
-        with pytest.raises(DownloadError, match="403 Forbidden"):
+        with pytest.raises(DownloadError, match="403: Forbidden"):
             download_audio("https://youtu.be/abc123", output_path)
+        # A persistent 403 is tried a bounded number of times, then raised.
+        assert mock_ydl_class.call_count == downloader._MAX_ATTEMPTS
 
     @patch("src.downloader.yt_dlp.YoutubeDL")
     def test_download_passes_correct_options(self, mock_ydl_class, tmp_path):
@@ -337,3 +390,271 @@ class TestExtractMetadataNoPlaylist:
 
         opts = mock_ydl_class.call_args[0][0]
         assert opts["noplaylist"] is True
+
+
+class TestTransientErrors:
+    """Which failures are worth a fresh extraction."""
+
+    @pytest.mark.parametrize("message", [
+        RAW_403,
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "HTTP Error 503: Service Unavailable",
+        "HTTP Error 502: Bad Gateway",
+        "ERROR: [download] Got error: The read operation timed out",
+        "Connection reset by peer",
+        "IncompleteRead(1024 bytes read, 2048 more expected)",
+        "Remote end closed connection without response",
+        "[WinError 10054] An existing connection was forcibly closed by the "
+        "remote host",
+        "[WinError 10060] A connection attempt failed because the connected "
+        "party did not properly respond after a period of time",
+        "[WinError 10053] An established connection was aborted by the "
+        "software in your host machine",
+    ])
+    def test_transient(self, message):
+        assert is_transient_error(message)
+
+    @pytest.mark.parametrize("message", [
+        "ERROR: [youtube] abc: Private video. Sign in if you've been granted "
+        "access to this video",
+        "ERROR: [youtube] abc: Video unavailable. This video has been "
+        "removed by the uploader",
+        "ERROR: Unsupported URL: https://example.com/",
+        "ERROR: [youtube] aaaaaaaaaaa: This video is unavailable. "
+        "HTTP Error 403: Forbidden",
+        "ERROR: [youtube] abc: Sign in to confirm you're not a bot",
+        "ERROR: [youtube] abc: Sign in to confirm your age. HTTP Error 403",
+        "ERROR: [youtube] abc: This video is not available in your country",
+        "HTTP Error 404: Not Found",
+        "HTTP Error 429: Too Many Requests",
+        "ERROR: [youtube] abc: Requested format is not available",
+        "Postprocessing: ffprobe and ffmpeg not found",
+        "",
+    ])
+    def test_permanent(self, message):
+        assert not is_transient_error(message)
+
+
+class TestDownloadRetry:
+    """A refused first media URL is retried with a fresh extraction."""
+
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_403_then_success_is_retried(self, mock_ydl_class, tmp_path,
+                                         no_backoff_sleep):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+
+        assert download_audio(self.URL, output_path) == output_path
+        # Each attempt builds a new YoutubeDL, so the media URL is
+        # extracted afresh rather than the refused one reused.
+        assert len(built) == 2
+        assert sum(no_backoff_sleep) > 0
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_backoff_grows(self, mock_ydl_class, tmp_path, no_backoff_sleep):
+        output_path = str(tmp_path / "audio.mp3")
+        err = yt_dlp.utils.DownloadError(RAW_403)
+        _ydl_sequence(mock_ydl_class, output_path, [err, err, None])
+
+        download_audio(self.URL, output_path)
+        first, second = downloader._BACKOFF_S[:2]
+        assert 0 < first < second
+        assert sum(no_backoff_sleep) == pytest.approx(first + second)
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_permanent_failure_is_not_retried(self, mock_ydl_class, tmp_path,
+                                              no_backoff_sleep):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(
+                "\x1b[0;31mERROR:\x1b[0m [youtube] abc: Private video"
+            ),
+        ])
+
+        with pytest.raises(DownloadError, match="Private video"):
+            download_audio(self.URL, output_path)
+        assert len(built) == 1
+        assert no_backoff_sleep == []
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_gives_up_after_the_last_attempt(self, mock_ydl_class, tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        err = yt_dlp.utils.DownloadError(RAW_403)
+        built = _ydl_sequence(
+            mock_ydl_class, output_path, [err] * downloader._MAX_ATTEMPTS,
+        )
+
+        with pytest.raises(DownloadError, match="403"):
+            download_audio(self.URL, output_path)
+        assert len(built) == downloader._MAX_ATTEMPTS
+        assert 2 <= downloader._MAX_ATTEMPTS <= 3
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_progress_hook_kept_on_every_attempt(self, mock_ydl_class,
+                                                 tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+        callback = MagicMock()
+
+        download_audio(self.URL, output_path, progress_callback=callback)
+        assert [opts["progress_hooks"] for opts in built] == [
+            [callback], [callback],
+        ]
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_cancel_before_retry_stops(self, mock_ydl_class, tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+
+        with pytest.raises(DownloadCancelled, match="cancelled"):
+            download_audio(self.URL, output_path, should_cancel=lambda: True)
+        assert len(built) == 1
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_retry_starts_clean(self, mock_ydl_class, tmp_path):
+        """A failed attempt's partial file is never resumed by a retry."""
+        output_path = str(tmp_path / "audio.mp3")
+        stem = str(tmp_path / "audio")
+        other = tmp_path / "keep.txt"
+        other.write_text("unrelated")
+        seen_at_start = []
+        built = []
+
+        def make(opts):
+            built.append(opts)
+            ydl = MagicMock()
+            attempt = len(built)
+
+            def fake_download(urls):
+                seen_at_start.append(sorted(os.listdir(tmp_path)))
+                if attempt == 1:
+                    # Partway through, then the stream is refused.
+                    with open(stem + ".part", "wb") as f:
+                        f.write(b"40 percent of another format")
+                    with open(stem + ".ytdl", "w") as f:
+                        f.write("{}")
+                    raise yt_dlp.utils.DownloadError(RAW_403)
+                with open(output_path, "wb") as f:
+                    f.write(b"fake mp3 data")
+
+            ydl.download.side_effect = fake_download
+            context = MagicMock()
+            context.__enter__ = MagicMock(return_value=ydl)
+            context.__exit__ = MagicMock(return_value=False)
+            return context
+
+        mock_ydl_class.side_effect = make
+
+        download_audio(self.URL, output_path)
+        assert seen_at_start[1] == ["keep.txt"]
+        assert other.exists()
+        assert all(opts["continuedl"] is False for opts in built)
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_on_retry_reports_the_next_attempt(self, mock_ydl_class,
+                                               tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+        retries = []
+
+        download_audio(
+            self.URL, output_path,
+            on_retry=lambda attempt, delay: retries.append((attempt, delay)),
+        )
+        assert retries == [(2, downloader._BACKOFF_S[0])]
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_cancel_during_backoff_stops(self, mock_ydl_class, tmp_path,
+                                         no_backoff_sleep):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [
+            yt_dlp.utils.DownloadError(RAW_403), None,
+        ])
+
+        def cancelled() -> bool:
+            # Cancel arrives once the backoff has started waiting.
+            return bool(no_backoff_sleep)
+
+        with pytest.raises(DownloadError, match="cancelled"):
+            download_audio(self.URL, output_path, should_cancel=cancelled)
+        assert len(built) == 1
+        assert sum(no_backoff_sleep) < downloader._BACKOFF_S[0]
+
+
+class TestNoColourCodes:
+    """yt-dlp messages reach the log and the UI without ANSI codes."""
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_download_asks_ytdlp_for_no_colour(self, mock_ydl_class,
+                                               tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        built = _ydl_sequence(mock_ydl_class, output_path, [None])
+
+        download_audio("https://youtu.be/abc123", output_path)
+        assert built[0]["no_color"] is True
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_metadata_asks_ytdlp_for_no_colour(self, mock_ydl_class):
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = {"title": "T", "uploader": "U"}
+
+        extract_metadata("https://youtu.be/abc123")
+        assert mock_ydl_class.call_args[0][0]["no_color"] is True
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_download_error_text_is_stripped(self, mock_ydl_class, tmp_path):
+        output_path = str(tmp_path / "audio.mp3")
+        err = yt_dlp.utils.DownloadError(RAW_403)
+        _ydl_sequence(
+            mock_ydl_class, output_path, [err] * downloader._MAX_ATTEMPTS,
+        )
+
+        with pytest.raises(DownloadError) as caught:
+            download_audio("https://youtu.be/abc123", output_path)
+        assert "\x1b" not in str(caught.value)
+        assert str(caught.value).startswith("ERROR: unable to download")
+        assert describe_error(caught.value) == MSG_HTTP
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_metadata_error_text_is_stripped(self, mock_ydl_class):
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.side_effect = yt_dlp.utils.DownloadError(
+            "\x1b[0;31mERROR:\x1b[0m [youtube] abc: Private video"
+        )
+
+        with pytest.raises(DownloadError) as caught:
+            extract_metadata("https://youtu.be/abc123")
+        assert "\x1b" not in str(caught.value)
+
+    def test_strip_ansi(self):
+        assert strip_ansi(RAW_403) == (
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+        )
+        assert strip_ansi("plain text") == "plain text"
+        assert strip_ansi("\x1b[1m\x1b[33mwarn\x1b[0m") == "warn"
+
+    def test_describe_error_never_shows_colour_codes(self):
+        # A raw message with codes that nothing maps is shown as-is, so
+        # it must be stripped there too.
+        shown = describe_error("\x1b[0;31mERROR:\x1b[0m something odd")
+        assert "\x1b" not in shown
+        assert shown == "ERROR: something odd"
+
+    def test_describe_error_logs_without_colour_codes(self, caplog):
+        with caplog.at_level("WARNING"):
+            describe_error("\x1b[0;31mERROR:\x1b[0m something odd", "ctx")
+        assert "\x1b" not in caplog.text
