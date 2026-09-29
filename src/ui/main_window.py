@@ -96,6 +96,8 @@ def loop_export_frames(
     reads (they were once rescaled with rendered stems).
     """
     return int(loop_a * sample_rate), int(loop_b * sample_rate)
+
+
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
 
 

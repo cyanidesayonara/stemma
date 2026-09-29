@@ -307,26 +307,72 @@ class TestReviewFindings:
         steady = np.abs(np.diff(before[4096:, 0])).max()
         assert np.abs(np.diff(out[len(before) - 64:])).max() < 2 * steady
 
-    def test_pitch_change_crossfades(self, player):
-        player.set_mute("drums", True)
-        player.set_pitch(2)
-        before = _run(player, 30)
-        player.set_pitch(5)
-        after = _run(player, 30)
-        out = np.concatenate([before, after])[:, 0]
-        steady = np.abs(np.diff(before[4096:, 0])).max()
-        switch = len(before)
-        assert np.abs(np.diff(out[switch - 64:switch + 4096])).max() < 2 * steady
+    @staticmethod
+    def _click_ratio(out, switch):
+        """Largest second difference near *switch* over the steady one.
+
+        A 10 ms crossfade stays under ~5x on a pure tone; the old hard
+        switch was ~21x, and a fade cut short by a second change ~1400x.
+        """
+        d2 = np.abs(np.diff(out, 2))
+        steady = d2[4096:switch - 2048].max()
+        return d2[switch - 64:switch + 8192].max() / steady
+
+    @pytest.mark.parametrize("changes", [
+        [[5]],                       # one change
+        [[5, 7]],                    # two in the same callback gap
+        [[3], [4], [5], [6], [7]],   # a burst, one per block (mouse wheel)
+    ])
+    def test_pitch_changes_crossfade(self, app, changes):
+        p = MultiTrackPlayer()
+        p.apply_loaded_stems({"vocals": _tone(6.0, 220.0)}, SR)
+        p._is_playing = True
+        p.set_pitch(2)
+        before = _run(p, 30)[:, 0]
+        parts = [before]
+        for step in changes:
+            for value in step:
+                p.set_pitch(value)
+            parts.append(_run(p, 1)[:, 0])
+        parts.append(_run(p, 30)[:, 0])
+        out = np.concatenate(parts)
+        assert self._click_ratio(out, len(before)) < 8
+        assert p.pitch_semitones == changes[-1][-1]
 
     def test_seek_is_not_lost_to_a_running_callback(self, player):
-        """The frame is set under the callback's lock."""
+        """Seeks from the GUI thread while a paced callback thread runs:
+        the frame is set under the callback's lock, so none is undone."""
+        import threading
+        import time
+
         player.set_speed(0.75)
-        _run(player, 5)
-        with player._stretch_lock:
-            pass  # the callback holds this while it runs
-        player.seek(3.0)
-        _run(player, 1)
-        assert player._current_frame >= 3 * SR
+        stop = threading.Event()
+
+        def callback_thread():
+            buf = np.zeros((256, 2), dtype=np.float32)
+            while not stop.is_set():
+                try:
+                    player._audio_callback(buf, 256, {}, None)
+                except sd.CallbackStop:
+                    player._is_playing = True
+                time.sleep(0.0005)
+
+        worker = threading.Thread(target=callback_thread)
+        worker.start()
+        lost = 0
+        try:
+            for i in range(200):
+                target = 0.5 + (i % 8) * 0.5
+                player.seek(target)
+                # Whatever the callback did meanwhile, playback continues
+                # from the target, never from where it was before the seek.
+                heard = player._current_frame / SR
+                if not target - 0.01 <= heard <= target + 0.2:
+                    lost += 1
+        finally:
+            stop.set()
+            worker.join()
+        assert lost == 0
 
     def test_the_last_moments_of_the_song_are_heard(self, player):
         player.set_speed(2.0)

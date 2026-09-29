@@ -75,6 +75,9 @@ class StreamingStretcher:
 
     @property
     def semitones(self) -> float:
+        """The pitch asked for (applied once a running crossfade ends)."""
+        if self._pending_semitones is not None:
+            return self._pending_semitones
         return self._semitones
 
     @property
@@ -113,17 +116,27 @@ class StreamingStretcher:
         self._last_mark_frame = None
         self._old_resampler: soxr.ResampleStream | None = None
         self._fading = False
+        self._pending_semitones: float | None = None
         self._new_resampler()
 
     def set_params(self, speed: float, semitones: float) -> None:
         """Change speed and pitch; takes effect with the next frame."""
         speed = float(speed)
         semitones = float(semitones)
+        self._speed = speed
+        if self._fading:
+            # A change mid-crossfade waits for it to finish (at most
+            # ~25 ms): cutting the fade short dropped the audio the old
+            # resampler held and clicked (#217 re-review).
+            self._pending_semitones = semitones
+            return
+        self._apply_semitones(semitones)
+
+    def _apply_semitones(self, semitones: float) -> None:
         if semitones != self._semitones:
             self._start_pitch_fade()
             self._semitones = semitones
             self._new_resampler()
-        self._speed = speed
 
     def read(self, count: int, source: SourceRead) -> np.ndarray:
         """Return *count* output samples, shape (count, channels).
@@ -389,6 +402,10 @@ class StreamingStretcher:
         self._old_tail = empty
         self._new_head = empty
         self._fading = False
+        pending = self._pending_semitones
+        self._pending_semitones = None
+        if pending is not None:
+            self._apply_semitones(pending)
 
     def _flush_resampler(self) -> None:
         """Emit what the resampler still holds (the end of the song)."""
