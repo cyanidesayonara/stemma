@@ -63,6 +63,11 @@ def _make_card(
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         title_row.addWidget(label)
+        # The title alone sets the row height: a taller status font moved
+        # this card's frame below its neighbours' (#212 review).
+        status.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
+        )
         title_row.addWidget(status)
         title_row.addStretch()
         outer.addLayout(title_row)
