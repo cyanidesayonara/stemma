@@ -630,3 +630,47 @@ def test_trainer_progress_does_not_widen_the_loop_card():
 
     host.close()
     host.deleteLater()
+
+
+@pytest.mark.parametrize("restored", [True, False])
+def test_key_and_tempo_badges_follow_a_theme_switch(controls, restored):
+    """A restored (or detected) key and tempo kept the dark badge in the
+    light theme: they were styled outside the info bar, which then had
+    nothing to redraw from (#159)."""
+    controls.apply_theme("dark", DARK_COLORS)
+    if restored:
+        controls.set_detected_key("B major", "high")
+        controls.set_detected_bpm_text("~91 BPM", "low")
+    else:
+        result = MagicMock()
+        result.bpm, result.bpm_confidence = 91.0, "low"
+        result.key, result.key_confidence = "B major", "high"
+        result.beat_times, result.downbeat_times = [], []
+        result.chord_sequence = []
+        with patch.object(
+            controls, "_is_active_detection_sender", return_value=True,
+        ):
+            controls._on_detect_completed(result)
+
+    controls.apply_theme("light", LIGHT_COLORS)
+
+    bar = controls.song_info_bar
+    for label in (bar.key_label, bar.detected_bpm_label):
+        sheet = label.styleSheet()
+        assert LIGHT_COLORS["surface0"] in sheet
+        assert DARK_COLORS["surface0"] not in sheet
+    assert "B major" in bar.key_label.text()
+
+
+def test_detecting_status_follows_a_theme_switch(controls):
+    controls.apply_theme("dark", DARK_COLORS)
+    controls.song_info_bar.show_detection_status(
+        "Key: detecting...", "Tempo: detecting...",
+    )
+
+    controls.apply_theme("light", LIGHT_COLORS)
+
+    bar = controls.song_info_bar
+    assert bar.key_label.text() == "Key: detecting..."
+    assert bar.detected_bpm_label.text() == "Tempo: detecting..."
+    assert LIGHT_COLORS["surface0"] in bar.key_label.styleSheet()

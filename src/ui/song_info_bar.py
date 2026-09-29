@@ -22,6 +22,10 @@ class SongInfoBar(QWidget):
         self._bpm_confidence = ""
         self._detected_key = ""
         self._detected_bpm = ""
+        # A readout's "detecting..." text while detection or its model
+        # download runs; kept so a theme switch can redraw it.
+        self._key_status: str | None = None
+        self._bpm_status: str | None = None
 
         self._key_label = QLabel("")
         self._key_label.setTextFormat(Qt.TextFormat.RichText)
@@ -124,6 +128,7 @@ class SongInfoBar(QWidget):
         pitch: int = 0,
     ) -> None:
         """Store and render detected key state."""
+        self._key_status = None
         self._detected_key = key
         self._key_confidence = confidence if key else ""
         if not key:
@@ -150,6 +155,7 @@ class SongInfoBar(QWidget):
 
     def set_bpm(self, text: str, confidence: str = "") -> None:
         """Store and render detected tempo state."""
+        self._bpm_status = None
         self._detected_bpm = text
         self._bpm_confidence = confidence if text else ""
         if not text:
@@ -182,18 +188,28 @@ class SongInfoBar(QWidget):
         self._chord_label.setStyleSheet("")
         self._chord_label.setToolTip("Detected chord (suggestion)")
 
-    def show_detection_status(self, text: str) -> None:
-        """Display a neutral status in both asynchronous readouts."""
-        colors = LIGHT_COLORS if self._theme == "light" else DARK_COLORS
-        style = (
-            f"background: {colors['surface0']}; "
-            f"border: 1px solid {colors['surface1']}; "
-            f"border-radius: 4px; "
-            f"padding: 1px 6px; color: {colors['text']};"
-        )
-        for label in (self._key_label, self._detected_bpm_label):
-            label.setStyleSheet(style)
-            label.setText(text)
+    def show_detection_status(
+        self, text: str, bpm_text: str | None = None,
+    ) -> None:
+        """Show a neutral status in the key and tempo readouts.
+
+        *text* goes in the key badge and *bpm_text* (default: the same) in
+        the tempo badge, until ``set_key``/``set_bpm`` replace them.
+        """
+        self.show_key_status(text)
+        self.show_bpm_status(text if bpm_text is None else bpm_text)
+
+    def show_key_status(self, text: str) -> None:
+        """Show *text* in the key readout until ``set_key`` replaces it."""
+        self._key_status = text
+        self._key_label.setStyleSheet(self.badge_style())
+        self._key_label.setText(text)
+
+    def show_bpm_status(self, text: str) -> None:
+        """Show *text* in the tempo readout until ``set_bpm`` replaces it."""
+        self._bpm_status = text
+        self._detected_bpm_label.setStyleSheet(self.badge_style())
+        self._detected_bpm_label.setText(text)
 
     def apply_theme(
         self,
@@ -206,14 +222,18 @@ class SongInfoBar(QWidget):
     ) -> None:
         """Regenerate rich-text colors without changing stored state."""
         self._theme = theme
-        if self._detected_key:
+        if self._key_status is not None:
+            self.show_key_status(self._key_status)
+        elif self._detected_key:
             self.set_key(
                 self._detected_key,
                 self._key_confidence,
                 effective_key=effective_key,
                 pitch=pitch,
             )
-        if self._detected_bpm:
+        if self._bpm_status is not None:
+            self.show_bpm_status(self._bpm_status)
+        elif self._detected_bpm:
             self.set_bpm(self._detected_bpm, self._bpm_confidence)
         if has_chords:
             self.set_chord(chord or "--")
