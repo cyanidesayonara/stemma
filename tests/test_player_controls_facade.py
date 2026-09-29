@@ -711,3 +711,50 @@ def test_tempo_tooltip_keeps_the_precise_value(controls):
     controls.apply_theme("light", LIGHT_COLORS)
 
     assert "91.4 BPM" in controls.song_info_bar.detected_bpm_label.toolTip()
+
+
+def test_practice_card_controls_are_compact(qapp):
+    """Shorter card controls leave the waveform more height (#159)."""
+    from src.ui.styles import get_stylesheet
+
+    rack = PracticeRack(SongInfoBar())
+    rack.setStyleSheet(get_stylesheet("dark"))
+    rack.resize(1200, 300)
+    rack.show()
+    QApplication.processEvents()
+    assert rack._loop_a_button.height() <= 28
+    assert rack._metronome_toggle.height() == 28
+    rack.close()
+    rack.deleteLater()
+
+
+@pytest.mark.parametrize("available, expected", [
+    ((1920, 1040), (1280, 820)),
+    ((1366, 728), (1229, 655)),
+    ((1000, 640), (900, 600)),
+])
+def test_first_run_window_size(qapp, available, expected):
+    from PySide6.QtCore import QRect
+
+    from src.ui.main_window import MainWindow
+
+    stub = MagicMock()
+    stub.screen.return_value.availableGeometry.return_value = QRect(
+        0, 0, *available,
+    )
+    MainWindow._apply_first_run_size(stub)
+    stub.resize.assert_called_once_with(*expected)
+
+
+def test_practice_icon_buttons_stay_square(qapp):
+    from src.ui.styles import get_stylesheet
+
+    rack = PracticeRack(SongInfoBar())
+    rack.setStyleSheet(get_stylesheet("light"))
+    rack.resize(1200, 300)
+    rack.show()
+    QApplication.processEvents()
+    for button in (rack._metronome_toggle, rack._count_in_toggle):
+        assert button.width() == button.height() == 28
+    rack.close()
+    rack.deleteLater()

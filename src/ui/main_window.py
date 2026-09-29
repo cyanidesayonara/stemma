@@ -16,6 +16,7 @@ import soundfile as sf
 from PySide6.QtCore import QByteArray, QEvent, QPointF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QColor,
+    QGuiApplication,
     QIcon,
     QKeyEvent,
     QKeySequence,
@@ -84,6 +85,7 @@ from src.version import __version__
 logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
+_FIRST_RUN_SIZE = QSize(1280, 820)
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
 
 
@@ -793,6 +795,25 @@ class MainWindow(QMainWindow):
         logo.play_intro(with_sound=False)
         dlg.exec()
 
+    def _apply_first_run_size(self) -> None:
+        """Open roomy on first run: up to 1280 x 820, within the screen.
+
+        Qt's size hint opened a window whose footer and lower mixer rows
+        were hidden until it was enlarged (#159). The minimum stays at
+        900 x 600 for small screens.
+        """
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        width = max(900, min(_FIRST_RUN_SIZE.width(), int(area.width() * 0.9)))
+        height = max(600, min(_FIRST_RUN_SIZE.height(), int(area.height() * 0.9)))
+        self.resize(width, height)
+        self.move(
+            area.x() + (area.width() - width) // 2,
+            area.y() + (area.height() - height) // 2,
+        )
+
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
         # A value of the wrong type (a hand-edited or damaged setting) made
@@ -800,6 +821,8 @@ class MainWindow(QMainWindow):
         geometry = self._settings.value("window/geometry")
         if isinstance(geometry, (QByteArray, bytes, bytearray)):
             self.restoreGeometry(QByteArray(geometry))
+        else:
+            self._apply_first_run_size()
         state = self._settings.value("window/state")
         if isinstance(state, (QByteArray, bytes, bytearray)):
             self.restoreState(QByteArray(state))

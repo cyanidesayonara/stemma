@@ -121,6 +121,8 @@ class PracticeRack(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Scopes the compact control styles in styles.py.
+        self.setObjectName("practice-rack")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         icon_color = QColor(DARK_COLORS["text"])
