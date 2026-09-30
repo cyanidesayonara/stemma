@@ -23,8 +23,8 @@ def qapp():
 
 @pytest.mark.parametrize("size, drawing", [
     (16, "icon_16px.svg"), (20, "icon_20px.svg"), (24, "icon_24px.svg"),
-    (30, "icon_32px.svg"), (32, "icon_32px.svg"),
-    (36, "icon_large.svg"), (48, "icon_large.svg"), (256, "icon_large.svg"),
+    (30, "icon_30px.svg"), (32, "icon_32px.svg"), (36, "icon_36px.svg"),
+    (40, "icon_large.svg"), (48, "icon_large.svg"), (256, "icon_large.svg"),
 ])
 def test_each_size_uses_its_own_drawing(size, drawing):
     assert os.path.basename(icons.drawing_for(size)) == drawing
@@ -80,8 +80,8 @@ def _interior_colors(image):
 @pytest.mark.parametrize("size", icons.PIXEL_SIZES)
 def test_pixel_drawings_render_without_resampling(size):
     """At its own size a pixel drawing uses only its palette: the tile,
-    the stem, four note colours and their dimmed corners. Resampling (the
-    old 24 px icon was the 32 px drawing scaled) blends dozens more."""
+    the stem, the note, and the three wave colours. Resampling (an old
+    24 px icon was the 32 px drawing scaled) blends dozens more."""
     assert len(_interior_colors(icons.render(size))) <= 10
 
 
@@ -147,3 +147,39 @@ def test_committed_icons_are_up_to_date():
         for old, new in pairs:
             assert _max_channel_difference(old, new) <= 8, (
                 os.path.relpath(path))
+
+
+def test_small_drawings_match_their_generator():
+    """The committed small SVGs are what generate_small_icons.py writes."""
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(icons.ICONS_DIR), "..", "scripts",
+                        "generate_small_icons.py")
+    spec = importlib.util.spec_from_file_location("small_icons", path)
+    small = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(small)
+    for size in small.SPEC:
+        committed = os.path.join(icons.ICONS_DIR, f"icon_{size}px.svg")
+        with open(committed, encoding="utf-8") as fh:
+            assert fh.read() == small.svg_for(size, small.grid_for(size))
+
+
+def test_the_three_waves_share_one_shape():
+    """Each wave was sampled at its own sub-pixel phase and came out
+    jagged differently (#220 review)."""
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(icons.ICONS_DIR), "..", "scripts",
+                        "generate_small_icons.py")
+    spec = importlib.util.spec_from_file_location("small_icons", path)
+    small = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(small)
+    for size in small.SPEC:
+        grid = small.grid_for(size)
+        shapes = []
+        for color in small.WAVES:
+            cells = [(x, y) for y, row in enumerate(grid)
+                     for x, c in enumerate(row) if c == color]
+            top = min(y for _, y in cells)
+            shapes.append(sorted((x, y - top) for x, y in cells))
+        assert shapes[0] == shapes[1] == shapes[2], size
