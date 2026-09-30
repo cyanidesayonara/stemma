@@ -55,7 +55,7 @@ A new practice cockpit: every stem gets its own colored lane in the waveform, a 
 
 Speed and pitch change instantly while the song plays, with no wait.
 
-While a song separates, the player shows its progress and time left, then opens it.
+While a song separates, the empty player shows its progress and time left, then opens it.
 
 A new look: a new app icon, stronger contrast in both themes, and tidier dialogs.
 

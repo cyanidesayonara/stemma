@@ -253,8 +253,8 @@ def stage(app, window, shot, song_id) -> None:
         if index >= 0 and rack.speed_combo.currentIndex() != index:
             rack.speed_combo.setCurrentIndex(index)
         rack.pitch_spin.setValue(-2)
-        # Speed and pitch apply live (#217); the pitch box only waits out
-        # its short scroll debounce before it reaches the player.
+        # Speed and pitch apply live (#217); the speed and pitch boxes only
+        # wait out their short debounce before they reach the player.
         pump(app, 1.0)
     show_current_chord(window)
     pump(app, 0.2)
