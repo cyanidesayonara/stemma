@@ -6,12 +6,16 @@ sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26.0
 lameenc>=1.7.0
-# librosa drives Speed, Pitch, and the Loop Trainer (time_stretch,
-# pitch_shift). 1.0 reworked the phase vocoder; it was measured against 0.11
+# librosa drives beat, key, and chord detection and resampling at import;
+# Speed and Pitch use stemma's own real-time phase vocoder (src/stretch.py)
+# with soxr, which librosa installs. 1.0 was measured against 0.11
 # before the release lock moved to it (issue #154), and the listening check
 # is part of the release acceptance pass (#159). Cap at the locked minor
 # version so CI never tests a different audio path than users get; lift it
 # together with the release lock.
 librosa>=1.0,<1.1
+# Streaming resampler for the pitch shift (src/stretch.py); already in the
+# release lock as a librosa dependency.
+soxr>=0.3
 yt-dlp>=2024.1.0
 imageio-ffmpeg>=0.4.9

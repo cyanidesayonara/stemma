@@ -87,6 +87,19 @@ logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
 _FIRST_RUN_SIZE = QSize(1280, 820)
+
+
+def loop_export_frames(
+    loop_a: float, loop_b: float, sample_rate: int,
+) -> tuple[int, int]:
+    """Frames of the exported loop region.
+
+    Loop points are in song time at any speed, like the stems the exporter
+    reads (they were once rescaled with rendered stems).
+    """
+    return int(loop_a * sample_rate), int(loop_b * sample_rate)
+
+
 _AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".flac"})
 
 
@@ -1043,9 +1056,8 @@ class MainWindow(QMainWindow):
             bool(looping),
         )
 
-        # Speed + pitch (async — seek after stretch completes). When both
-        # are non-identity, the pitch worker is superseded by the speed
-        # worker, which renders both in a single pass.
+        # Speed and pitch apply at once (they are live in the player), so
+        # the saved position can be sought straight after.
         try:
             speed = float(self._settings.value("session/speed", 1.0))
         except (TypeError, ValueError):
@@ -1066,56 +1078,22 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             position = 0.0
 
-        # Sync the spinbox display now so the UI matches the restored
-        # state even if the render is superseded (pitch_changed wouldn't
-        # fire in that case).
+        # Sync the spinbox display without re-triggering set_pitch.
         self._player_controls._pitch_spin.blockSignals(True)
         self._player_controls._pitch_spin.setValue(pitch_semi)
         self._player_controls._pitch_spin.blockSignals(False)
 
-        speed_non_identity = speed != 1.0
-        pitch_non_identity = pitch_semi != 0
-
-        def _seek_after_render(_v: object = None, pos=position) -> None:
-            self._disconnect_pending_restore_callbacks()
-            if not self._is_current_song_generation(generation, song_id):
-                return
-            self._player.seek(pos)
-            # Ensure key label reflects pitch even if only speed_changed fired.
-            self._player_controls._refresh_key_label()
-
-        if not speed_non_identity and not pitch_non_identity:
-            self._player.seek(position)
-        else:
-            # The last signal to fire is the one from the final render;
-            # speed supersedes pitch when both are active.
-            if speed_non_identity:
-                def _after_speed(_s: float) -> None:
-                    _seek_after_render()
-                self._player.speed_changed.connect(_after_speed)
-                self._pending_restore_callbacks.append(
-                    (self._player.speed_changed, _after_speed)
-                )
-            else:
-                def _after_pitch(_p: int) -> None:
-                    _seek_after_render()
-                self._player.pitch_changed.connect(_after_pitch)
-                self._pending_restore_callbacks.append(
-                    (self._player.pitch_changed, _after_pitch)
-                )
-
-            if pitch_non_identity:
-                self._player.set_pitch(pitch_semi)
-            if speed_non_identity:
-                self._player_controls._speed_combo.blockSignals(True)
-                label = f"{speed}x"
-                idx = self._player_controls._speed_combo.findText(label)
-                if idx >= 0:
-                    self._player_controls._speed_combo.setCurrentIndex(idx)
-                self._player_controls._speed_combo.blockSignals(False)
-                # Status text driven by the player's stretch_started/progress
-                # signals -- no need to set it manually here.
-                self._player.set_speed(speed)
+        if pitch_semi:
+            self._player.set_pitch(pitch_semi)
+        if speed != 1.0:
+            self._player_controls._speed_combo.blockSignals(True)
+            idx = self._player_controls._speed_combo.findText(f"{speed}x")
+            if idx >= 0:
+                self._player_controls._speed_combo.setCurrentIndex(idx)
+            self._player_controls._speed_combo.blockSignals(False)
+            self._player.set_speed(speed)
+        self._player.seek(position)
+        self._player_controls._refresh_key_label()
 
         # Metronome state
         try:
@@ -1303,10 +1281,8 @@ class MainWindow(QMainWindow):
             pass
         finally:
             self._suppress_recording_reload = False
-        # Cancel and drain stretch/peak workers *before* Qt tears down,
-        # otherwise Python's atexit blocks in ThreadPoolExecutor.join()
-        # (librosa pitch/time-stretch is uninterruptible mid-call, so
-        # the pool threads can't exit until the current stem finishes).
+        # Stop the player's timer and release its stretch streams before
+        # Qt tears down.
         self._player.shutdown()
         # Drain detection/peak QThreads owned by the controls too, so
         # closing during a fresh song's beat detection doesn't crash on
@@ -2163,14 +2139,9 @@ class MainWindow(QMainWindow):
             if opts is None:
                 return
             if opts.get("loop_region") and has_loop:
-                sr = self._player.sample_rate
-                # loop_a/loop_b are in the *stretched* timeline (the loop
-                # frames are rescaled by _apply_stretched_stems), but the
-                # exporter reads the original on-disk WAVs. Map back to
-                # original time: original_t = stretched_t * speed.
-                speed = self._player.speed
-                start_frame = int(loop_a * speed * sr)
-                end_frame = int(loop_b * speed * sr)
+                start_frame, end_frame = loop_export_frames(
+                    loop_a, loop_b, self._player.sample_rate,
+                )
             if opts.get("count_in"):
                 count_in_beats = self._player.count_in_beats
 

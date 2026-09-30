@@ -510,12 +510,12 @@ class TestBeatSyncAPI:
         expected = np.array([0, 22050, 44100], dtype=np.int64)
         np.testing.assert_array_equal(player._beat_frames, expected)
 
-    def test_beat_frames_scaled_by_speed(self, player):
-        """At half speed, beat frames should be doubled (audio is stretched)."""
+    def test_beat_frames_stay_in_song_time_at_any_speed(self, player):
+        """Speed is applied live, so beats keep their song frames."""
         player._sample_rate = 44100
         player._playback_speed = 0.5
         player.set_beat_times([0.0, 0.5, 1.0], [])
-        expected = np.array([0, 44100, 88200], dtype=np.int64)
+        expected = np.array([0, 22050, 44100], dtype=np.int64)
         np.testing.assert_array_equal(player._beat_frames, expected)
 
     def test_beat_frames_empty_when_no_beats(self, player):

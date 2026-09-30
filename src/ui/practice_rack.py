@@ -269,9 +269,6 @@ class PracticeRack(QWidget):
         )
         speed_row.addWidget(self._speed_combo)
 
-        self._speed_status = QLabel("")
-        self._speed_status.setObjectName("subtle-label")
-        speed_row.addWidget(self._speed_status)
         speed_row.addStretch()
         speed_body.addLayout(speed_row)
 

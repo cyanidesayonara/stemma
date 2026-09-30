@@ -471,7 +471,9 @@ class TestMainWindowAsyncLoading:
         assert window._player.current_seconds == pytest.approx(0.001, abs=1e-4)
         assert window._player.metronome_bpm == 135
 
-    def test_old_restore_callback_cannot_seek_new_song(self, window):
+    def test_restored_speed_applies_then_seeks_at_once(self, window):
+        """Speed is live now, so the saved position is sought right away;
+        no callback waits for a render that could seek a later song."""
         workers = []
 
         def make_worker(paths):
@@ -481,27 +483,20 @@ class TestMainWindowAsyncLoading:
 
         window._settings.setValue("session/song_id", "a")
         window._settings.setValue("session/speed", 0.75)
+        window._settings.setValue("session/position", 0.25)
         with patch.object(
             main_window_module, "StemLoadWorker",
             side_effect=make_worker, create=True,
-        ), patch.object(
-            window._player, "set_speed",
-        ):
+        ), patch.object(window._player, "seek") as seek:
             window._restore_session()
             arrays, sample_rate = player_module.read_stem_files(
                 workers[0].stem_paths,
             )
             workers[0].completed.emit(arrays, sample_rate)
-            pending = list(window._pending_restore_callbacks)
-            assert len(pending) == 1
-            late_callback = pending[0][1]
 
-            window._on_song_selected("b")
-            assert window._pending_restore_callbacks == []
-            with patch.object(window._player, "seek") as seek:
-                late_callback(0.75)
-
-        seek.assert_not_called()
+        assert window._player.speed == 0.75
+        seek.assert_called_with(0.25)
+        assert window._pending_restore_callbacks == []
 
     def test_existing_recordings_are_read_by_the_stem_worker(self, window):
         recording = (

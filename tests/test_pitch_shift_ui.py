@@ -1,22 +1,10 @@
-"""UI-level tests for pitch-shift behavior in ``PlayerControls``.
+"""UI-level tests for the pitch and speed controls in ``PlayerControls``.
 
-Covers the work done to make rapid spinbox scrolling safe and
-discoverable:
-
-  - A 200ms debounce coalesces rapid ``valueChanged`` emissions into a
-    single ``player.set_pitch`` call.
-  - Scrolling the spinbox cancels any in-flight render immediately so
-    we stop wasting CPU on a stale target.
-  - The pitch spinbox stays enabled during a render (no more frozen UI).
-  - ``stretch_progress`` updates the pitch spinbox with a processing
-    suffix (e.g. ``"+2 semitones (processing 2/4)"``) so progress is
-    visually attached to the control that spawned the render.
-  - ``stretch_finished`` clears the suffix.
-  - Speed-only renders fall back to the floating status label because
-    a QComboBox cannot carry inline suffix text.
-  - The spinbox itself renders human-readable text via
-    ``PitchSpinBox.textFromValue`` -- "original" at 0, "+N semitone(s)"
-    otherwise.
+  - A short debounce coalesces rapid ``valueChanged`` emissions into a
+    single ``player.set_pitch`` call; the player applies it live.
+  - The spinbox renders human-readable text via
+    ``PitchSpinBox.textFromValue`` -- "original" at 0, "+N semi"
+    otherwise -- at a width that fits every value.
 """
 
 from unittest.mock import patch
@@ -110,90 +98,8 @@ class TestPitchDebounce:
             controls._flush_pending_pitch()
         assert controls._pending_pitch is None
 
-    def test_change_cancels_running_render(self, controls, player):
-        """Scrolling the spinbox must cancel any in-flight worker
-        immediately -- we don't want to keep burning CPU on a stale
-        pitch while the user is still scrubbing."""
-        with patch.object(player, "cancel_stretch") as mock_cancel:
-            controls._on_pitch_changed(2)
-            mock_cancel.assert_called_once()
-
-
 # -----------------------------------------------------------------------
 # Status indicator driven by stretch_started / stretch_progress / stretch_finished
-# -----------------------------------------------------------------------
-
-class TestStretchStatusIndicator:
-    """The render lifecycle paints progress onto the active control."""
-
-    def test_started_keeps_spinbox_enabled(self, controls, player):
-        """The spinbox MUST stay interactive so the user can cancel
-        a pitch scrub by changing the target again."""
-        player._pitch_semitones = 2
-        controls._on_stretch_started()
-        assert controls._pitch_spin.isEnabled()
-
-    def test_started_keeps_speed_combo_enabled(self, controls, player):
-        player._playback_speed = 0.75
-        controls._on_stretch_started()
-        assert controls._speed_combo.isEnabled()
-
-    def test_pitch_render_updates_spinbox_suffix(self, controls, player):
-        player._pitch_semitones = 2
-        controls._on_stretch_started()
-        # Before any progress ticks, we show a pending state (non-empty).
-        assert controls._pitch_spin.suffix() != ""
-
-    def test_pitch_progress_appears_in_spinbox_suffix(
-        self, controls, player,
-    ):
-        player._pitch_semitones = 2
-        controls._on_stretch_progress(2, 4)
-        suffix = controls._pitch_spin.suffix()
-        # Compact indicator: just "(current/total)" -- the control
-        # being greyed-out is itself the "this is processing" cue.
-        assert "2/4" in suffix
-
-    def test_pitch_progress_does_not_duplicate_in_floating_label(
-        self, controls, player,
-    ):
-        """When pitch is the active transform, the spinbox suffix is the
-        indicator -- the floating label stays empty to avoid duplication."""
-        player._pitch_semitones = 2
-        controls._on_stretch_progress(2, 4)
-        assert controls._speed_status.text() == ""
-
-    def test_speed_only_progress_goes_to_floating_label(
-        self, controls, player,
-    ):
-        """Combos can't carry suffixes, so speed-only renders fall back
-        to the floating label next to the speed combo.  The compact
-        format matches the spinbox suffix so both indicators read the
-        same way."""
-        player._pitch_semitones = 0
-        player._playback_speed = 0.75
-        controls._on_stretch_progress(2, 4)
-        text = controls._speed_status.text()
-        assert "2/4" in text
-        # And the spinbox suffix stays empty (its main text already
-        # reads "original" when pitch is 0).
-        assert controls._pitch_spin.suffix() == ""
-
-    def test_finished_clears_spinbox_suffix(self, controls, player):
-        player._pitch_semitones = 2
-        controls._on_stretch_progress(2, 4)
-        controls._on_stretch_finished()
-        assert controls._pitch_spin.suffix() == ""
-
-    def test_finished_clears_floating_label(self, controls, player):
-        player._playback_speed = 0.75
-        controls._on_stretch_progress(1, 4)
-        controls._on_stretch_finished()
-        assert controls._speed_status.text() == ""
-
-
-# -----------------------------------------------------------------------
-# PitchSpinBox human-readable text
 # -----------------------------------------------------------------------
 
 class TestPitchSpinBoxText:
@@ -237,32 +143,15 @@ class TestPitchSpinBoxText:
         # No "(N/M)" fragment when idle.
         assert "/" not in text
 
-    def test_processing_suffix_appended_during_render(
-        self, controls, player,
-    ):
-        player._pitch_semitones = 2
-        controls._pitch_spin.setValue(2)
-        controls._on_stretch_progress(1, 4)
-        text = controls._pitch_spin.text()
-        assert "+2 semi" in text
-        # Compact progress format: just "(current/total)", no word.
-        assert "(1/4)" in text
-
-    def test_size_hint_fits_widest_processing_text(self, controls):
-        """sizeHint must be wide enough for the worst-case text so
-        the processing suffix never clips the ``semi`` or the counter.
-
-        Sizing is now fixed at construction (not dynamic) for
-        layout-stability reasons -- see PitchSpinBox docstring.
-        """
+    def test_size_hint_fits_every_value(self, controls):
         from PySide6.QtGui import QFontMetrics
         spin = controls._pitch_spin
         fm = QFontMetrics(spin.font())
-        # Longest text the spinbox can ever show at ±7 semitones
-        # with a progress counter capped at two digits per stem.
-        widest_text_w = fm.horizontalAdvance("+7 semi (10/10)")
-        assert spin.sizeHint().width() >= widest_text_w
-
+        widest = max(
+            fm.horizontalAdvance(spin.textFromValue(v))
+            for v in range(spin.minimum(), spin.maximum() + 1)
+        )
+        assert spin.sizeHint().width() >= widest
     def test_size_hint_is_stable_across_values(self, controls):
         """Width must not jitter as the value / suffix changes --
         the layout was previously thrashing on every render start."""
@@ -271,59 +160,9 @@ class TestPitchSpinBoxText:
         w_at_zero = spin.sizeHint().width()
         spin.setValue(7)
         w_at_seven = spin.sizeHint().width()
-        spin.setSuffix(" (3/10)")
-        w_processing = spin.sizeHint().width()
-        assert w_at_zero == w_at_seven == w_processing
+        assert w_at_zero == w_at_seven
 
 
-# -----------------------------------------------------------------------
-# Label verb selection based on active transforms (helper function)
-# -----------------------------------------------------------------------
-
-class TestRenderStatusLabel:
-    """``_render_status_label`` composes status text for the floating
-    label. Kept for the speed-only case; the pitch case uses the spinbox
-    suffix directly."""
-
-    def test_pitch_only(self, controls, player):
-        player._pitch_semitones = 3
-        player._playback_speed = 1.0
-        assert "Transposing" in controls._render_status_label(0, 0)
-
-    def test_speed_only(self, controls, player):
-        player._pitch_semitones = 0
-        player._playback_speed = 0.75
-        assert "Time-stretching" in controls._render_status_label(0, 0)
-
-    def test_both(self, controls, player):
-        player._pitch_semitones = 3
-        player._playback_speed = 0.5
-        label = controls._render_status_label(0, 0)
-        assert "Transposing and time-stretching" in label
-
-    def test_identity_falls_back_to_rendering(self, controls, player):
-        """Returning to identity (fast path) rarely triggers the worker,
-        but the label must still be sensible if it does."""
-        player._pitch_semitones = 0
-        player._playback_speed = 1.0
-        label = controls._render_status_label(0, 0)
-        assert "Rendering" in label
-
-    def test_progress_numbers_appear_when_total_positive(
-        self, controls, player,
-    ):
-        player._pitch_semitones = 3
-        assert "(2/4)" in controls._render_status_label(2, 4)
-
-    def test_progress_numbers_omitted_at_total_zero(self, controls, player):
-        """Before any progress ticks arrive, we show the bare verb."""
-        player._pitch_semitones = 3
-        label = controls._render_status_label(0, 0)
-        assert "(" not in label
-
-
-# -----------------------------------------------------------------------
-# Record button guard includes pitch (regression: was speed-only)
 # -----------------------------------------------------------------------
 
 class TestRecordButtonPitchGuard:
@@ -433,13 +272,6 @@ class TestSpeedDebounce:
         controls._speed_combo.setCurrentIndex(idx)
         assert controls._speed_debounce.isActive()
         assert controls._pending_speed == 0.75
-
-    def test_speed_change_cancels_in_flight(self, controls, player):
-        """A fresh change cancels any running render for CPU relief."""
-        with patch.object(player, "cancel_stretch") as mock_cancel:
-            idx = controls._speed_combo.findData(0.5)
-            controls._speed_combo.setCurrentIndex(idx)
-            mock_cancel.assert_called_once()
 
     def test_speed_rapid_changes_coalesce(self, controls, player):
         """Cycling through 1.0 -> 0.9 -> 0.75 -> 0.5 yields one set_speed(0.5)."""
