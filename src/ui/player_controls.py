@@ -705,15 +705,25 @@ class PlayerControls(QWidget):
         if total > 0:
             self._waveform.set_position(pos_s / total)
         self.update_count_in_display()
+        self._refresh_synced_bpm(pos_s)
 
-        # Update BPM spinbox with instantaneous BPM when beat-synced.
-        if self._beat_sync_btn.isChecked():
-            frame = int(pos_s * self._player.sample_rate)
-            ibpm = self._player.instantaneous_bpm_at(frame)
-            if ibpm > 0:
-                self._bpm_spin.blockSignals(True)
-                self._bpm_spin.setValue(max(20, min(300, round(ibpm))))
-                self._bpm_spin.blockSignals(False)
+    def _refresh_synced_bpm(self, pos_s: float | None = None) -> None:
+        """Show the live BPM at *pos_s* (default: the playhead) when synced.
+
+        The live BPM is the local tempo times the playback speed, so a
+        speed change or turning sync on refreshes it too, not only a
+        position change: while paused the position does not move.
+        """
+        if not self._beat_sync_btn.isChecked():
+            return
+        if pos_s is None:
+            pos_s = self._player.current_seconds
+        frame = int(pos_s * self._player.sample_rate)
+        ibpm = self._player.instantaneous_bpm_at(frame)
+        if ibpm > 0:
+            self._bpm_spin.blockSignals(True)
+            self._bpm_spin.setValue(max(20, min(300, round(ibpm))))
+            self._bpm_spin.blockSignals(False)
 
     def _update_chord_label(self) -> None:
         """Poll the player for the current chord and update the label."""
@@ -1098,6 +1108,7 @@ class PlayerControls(QWidget):
         self._refresh_key_label()
         self.update_record_button_state()
         self._update_trainer_status()
+        self._refresh_synced_bpm()
 
     def cycle_speed(self, direction: int) -> None:
         """Cycle to the next/previous speed preset.
@@ -1628,6 +1639,7 @@ class PlayerControls(QWidget):
                 "Metronome synced to detected beats (showing live BPM)"
             )
             self._tap_btn.setEnabled(False)
+            self._refresh_synced_bpm()
         else:
             self._bpm_spin.setReadOnly(False)
             self._bpm_spin.setButtonSymbols(
