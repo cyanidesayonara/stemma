@@ -63,3 +63,34 @@ def test_enabling_sync_while_paused_shows_live_bpm(qapp, player, controls):
     qapp.processEvents()
 
     assert controls._bpm_spin.value() == 180
+
+
+def test_new_beats_while_synced_and_paused_update_bpm(
+    qapp, player, controls,
+):
+    controls._beat_sync_btn.setChecked(True)
+    player.seek(5.0)
+    qapp.processEvents()
+    assert controls._bpm_spin.value() == 120
+
+    # A re-detection finds 100 BPM: a beat every 0.6 s.
+    beats = [i * 0.6 for i in range(30)]
+    controls.restore_beat_times(beats, beats[::4])
+    qapp.processEvents()
+
+    assert controls._bpm_spin.value() == 100
+
+
+def test_turning_sync_off_shows_the_manual_tempo(qapp, player, controls):
+    controls._bpm_spin.setValue(100)
+    player.seek(5.0)
+    controls._beat_sync_btn.setChecked(True)
+    player.set_speed(0.5)
+    qapp.processEvents()
+    assert controls._bpm_spin.value() == 60
+
+    controls._beat_sync_btn.setChecked(False)
+    qapp.processEvents()
+
+    assert controls._bpm_spin.value() == 100
+    assert player.metronome_bpm == 100

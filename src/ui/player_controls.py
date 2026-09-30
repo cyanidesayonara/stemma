@@ -1398,6 +1398,8 @@ class PlayerControls(QWidget):
         self._beat_sync_btn.setEnabled(has_beats)
         if not has_beats and self._beat_sync_btn.isChecked():
             self._beat_sync_btn.setChecked(False)
+        # New beats change the live tempo even while paused.
+        self._refresh_synced_bpm()
 
     def restore_beat_times(self, beat_times: list[float], downbeat_times: list[float]) -> None:
         """Restore beat times from a saved session and update UI."""
@@ -1641,6 +1643,11 @@ class PlayerControls(QWidget):
             self._tap_btn.setEnabled(False)
             self._refresh_synced_bpm()
         else:
+            # Back to the manual tempo the metronome keeps, not the last
+            # live value, so the box and the clicks agree.
+            self._bpm_spin.blockSignals(True)
+            self._bpm_spin.setValue(round(self._player.metronome_bpm))
+            self._bpm_spin.blockSignals(False)
             self._bpm_spin.setReadOnly(False)
             self._bpm_spin.setButtonSymbols(
                 QSpinBox.ButtonSymbols.UpDownArrows
