@@ -553,6 +553,34 @@ QGroupBox QLabel, QGroupBox QCheckBox {{
     background-color: transparent;
 }}
 
+/* The practice cards (Loop and Trainer, Speed and Pitch, Metronome and
+   Count-in) use slightly shorter controls than dialogs, so six waveform
+   lanes keep readable height in a short window (#159). */
+QWidget#practice-rack QPushButton {{
+    min-height: 20px;
+    padding: 3px 8px;
+}}
+
+/* Square icon buttons keep their own padding: their size rule counts it. */
+QWidget#practice-rack QPushButton#icon-btn {{
+    padding: 2px;
+}}
+
+QWidget#practice-rack QSpinBox,
+QWidget#practice-rack QDoubleSpinBox {{
+    min-height: 20px;
+    padding: 1px 4px;
+}}
+
+QWidget#practice-rack QComboBox {{
+    padding: 3px 18px 3px 6px;
+}}
+
+/* Editable display combos (volume presets) keep their zero padding. */
+QWidget#practice-rack QComboBox:editable {{
+    padding: 0px;
+}}
+
 QFrame#divider-line {{
     background-color: {c["surface1"]};
     border: none;
