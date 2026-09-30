@@ -99,7 +99,7 @@ class TestPitchDebounce:
         assert controls._pending_pitch is None
 
 # -----------------------------------------------------------------------
-# Status indicator driven by stretch_started / stretch_progress / stretch_finished
+# Pitch box labels
 # -----------------------------------------------------------------------
 
 class TestPitchSpinBoxText:
