@@ -50,7 +50,9 @@ Canonical documents:
   CPU fallback
 - `src/separation_queue.py`: serialized background separation jobs
 - `src/player.py`: real-time multi-track playback, loops, metronome,
-  recording, and rendered speed/pitch changes
+  and recording
+- `src/stretch.py`: real-time speed/pitch (phase vocoder and `soxr`)
+  applied to the mix as it plays
 - `src/library.py` and `src/data_paths.py`: persistent song metadata and
   per-user storage
 - `src/beat_detector.py`: tempo, beat/downbeat, key, and chord analysis

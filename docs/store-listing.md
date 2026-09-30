@@ -51,23 +51,27 @@ Built for Windows, with keyboard shortcuts for the whole practice loop that work
 
 What's new in version 3.0.0
 
-A new practice cockpit: every stem gets its own colored lane in the waveform, a muted stem dims in place, and the A-B loop shows its times. The practice controls are grouped into cards. Key, chord, and tempo share one readout under the waveform, and the transport stays at the bottom.
+A new practice cockpit: every stem gets its own colored lane in the waveform, a muted stem dims in place, and the A-B loop shows its times. The practice controls are grouped into cards, with key, chord, and tempo in one readout under the waveform.
 
-A new look: a new app icon, stronger contrast in both the light and dark themes, and tidier dialogs.
+Speed and pitch change instantly while the song plays, with no wait.
 
-Your library is safer: a damaged library file no longer removes songs, and an interrupted import is cleaned up on the next launch.
+While a song separates, the player shows its progress and time left, then opens it.
 
-Export Mix now exports the stems you hear, including solo and stem volumes, at the song's original speed and pitch.
+A new look: a new app icon, stronger contrast in both themes, and tidier dialogs.
 
-Keyboard and accessibility: the whole app can be used from the keyboard, controls have names for screen readers, and View > Switch Theme changes the theme.
+A damaged library file no longer removes songs, and an interrupted import is cleaned up on the next launch.
 
-Safer imports: stemma checks a file before importing it, asks before downloading a separation model, and downloads a fresh copy if one is damaged. Quitting during a separation asks first.
+Export Mix exports the stems you hear, at the original speed and pitch.
 
-Clearer errors: a problem shows a readable message, and the details go to a log file. If stemma cannot start, it says why.
+Keyboard and accessibility: the whole app works from the keyboard, and controls have names for screen readers.
 
-Recording: with no microphone connected, stemma turns recording off and keeps playing, and a take that cannot be saved stays in memory so you can try again.
+Safer imports: stemma checks a file before importing it, asks before downloading a model, and replaces a damaged one. Quitting during a separation asks first.
 
-Fixes: changing loop points quickly no longer crashes the app, and the chord readout follows the pitch shift.
+Clearer errors: a readable message, with details in a log file.
+
+Recording: with no microphone, stemma turns recording off and keeps playing, and a take that cannot be saved stays in memory.
+
+Fixes: changing loop points quickly no longer crashes the app, the chord readout follows the pitch shift, the synced metronome keeps the real tempo, and a YouTube download that fails once is retried.
 
 ---
 

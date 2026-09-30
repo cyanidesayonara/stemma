@@ -24,7 +24,6 @@ import dataclasses
 import os
 import shutil
 import sys
-import time
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_SCRIPT_DIR)
@@ -248,29 +247,15 @@ def stage(app, window, shot, song_id) -> None:
         if not toggle.isChecked():
             toggle.click()
     if shot.state == "loop_trainer":
-        renders = {"finished": 0, "last": time.monotonic()}
-
-        def note(finished: bool) -> None:
-            renders["last"] = time.monotonic()
-            if finished:
-                renders["finished"] += 1
-
-        player = window._player
-        player.stretch_started.connect(lambda: note(False))
-        player.stretch_finished.connect(lambda: note(True))
         rack = window._player_controls.practice_rack
         rack._trainer_check.setChecked(True)
         index = rack.speed_combo.findData(0.75)
         if index >= 0 and rack.speed_combo.currentIndex() != index:
             rack.speed_combo.setCurrentIndex(index)
-        # Let the speed render land before changing pitch. A pitch change
-        # supersedes a pending speed render, and the shot must show one
-        # settled state.
-        if player.speed != 0.75:
-            _wait_for_renders(app, renders)
-        renders["finished"] = 0
         rack.pitch_spin.setValue(-2)
-        _wait_for_renders(app, renders)
+        # Speed and pitch apply live (#217); the pitch box only waits out
+        # its short scroll debounce before it reaches the player.
+        pump(app, 1.0)
     show_current_chord(window)
     pump(app, 0.2)
     clear_focus(app)
@@ -298,23 +283,6 @@ def sync_metronome(window) -> None:
     button = controls._beat_sync_btn
     if button.isEnabled() and not button.isChecked():
         button.click()
-
-
-def _wait_for_renders(app, renders, timeout_s: float = 120.0) -> None:
-    """Wait until speed/pitch rendering has finished and gone quiet.
-
-    Otherwise the capture shows progress text such as "-2 semi (0/6)".
-    Counting starts against finishes does not work: a render superseded by
-    the next change starts but never finishes. So wait for at least one
-    finish followed by two quiet seconds.
-    """
-    end = time.monotonic() + timeout_s
-    while time.monotonic() < end:
-        pump(app, 0.25)
-        quiet = time.monotonic() - renders["last"]
-        if renders["finished"] and quiet >= 2.0:
-            return
-    print("  note: speed/pitch render still running at capture")
 
 
 def grab_import_over(app, window, library, stemma_dir):
