@@ -1,5 +1,15 @@
-# Optional: update / publish Partner Center drafts from a GitHub Release MSIX.
-# Uses Microsoft Store CLI (msstore) for MSIX products. See docs/store-release-pipeline.md.
+# Take a GitHub release into Microsoft Store certification, in two runs, with
+# the Microsoft Store CLI (msstore). See docs/store-release-pipeline.md.
+# - update_draft stages the release's MSIX and the listing from
+#   store/listing.yaml in a draft. Partner Center's own page keeps showing the
+#   old package and listing ("Unchanged") until the draft is committed: the
+#   Store only ingests a staged package at commit. Check the staged draft in
+#   the run log and the submission-metadata artifact (get_draft prints it too).
+# - submit commits that draft, which ingests the package and starts
+#   certification. Never press "Submit for certification" in Partner Center
+#   for a draft staged here: it submits the old content.
+# get_draft prints the submission status first, so it also tracks
+# certification (Certification -> Release -> Publishing -> in the Store).
 
 name: Partner Center submit (manual)
 
@@ -11,13 +21,14 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = credentials; update_draft = MSIX + listing (draft only); update_metadata = ensure draft + listing (draft only); get_draft = read submission JSON"
+        description: "configure = check credentials; update_draft = stage MSIX + listing; update_metadata = stage listing only; get_draft = status + staged draft; submit = commit the draft (starts certification)"
         type: choice
         options:
           - configure
           - update_draft
           - update_metadata
           - get_draft
+          - submit
         default: configure
 
 jobs:
@@ -115,12 +126,10 @@ jobs:
 
       - name: Update draft submission (MSIX package)
         if: ${{ inputs.mode == 'update_draft' }}
-        id: publish_msix
-        continue-on-error: true
         run: |
           set -euo pipefail
-          # Upload package into the Partner Center draft without starting
-          # certification. Submit manually in Partner Center when ready.
+          # Stage the package in the draft. A failed upload fails the run.
+          # Nothing reaches certification until mode submit commits it.
           msstore publish stemma.msix \
             --appId "$PRODUCT_ID" \
             --noCommit \
@@ -129,7 +138,6 @@ jobs:
       - name: Update draft listing metadata
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         id: update_metadata
-        continue-on-error: ${{ inputs.mode == 'update_draft' }}
         run: |
           set -euo pipefail
           NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
@@ -155,8 +163,8 @@ jobs:
             --tag "${{ inputs.tag }}"; then
             echo "Partner Center submission GET matches the updateMetadata payload."
           else
-            echo "::warning::Partner Center GET may still show stale listing fields while the draft is PendingCommit."
-            echo "::warning::Inspect the draft in Partner Center before Submit for certification."
+            echo "::warning::The submission GET may still show stale listing fields while the draft is PendingCommit."
+            echo "::warning::Check the submission-metadata artifact before running mode submit."
             if grep -q "What's new in version ${version}" submission-metadata.json; then
               echo "Merged updateMetadata payload includes What's new for version ${version}."
             fi
@@ -170,44 +178,33 @@ jobs:
           path: submission-metadata.json
           if-no-files-found: warn
 
-      - name: Summarize metadata update
-        if: ${{ inputs.mode == 'update_metadata' && steps.update_metadata.outcome == 'success' }}
+      - name: Summarize
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         run: |
           set -euo pipefail
           if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
-            echo "Created a new Partner Center draft from release MSIX before updating listing metadata."
+            echo "Created a new draft from the release MSIX before updating the listing."
           fi
-          echo "Listing metadata update completed."
-          echo "Partner Center GET may stay stale while the draft is PendingCommit."
-          echo "Inspect the draft in Partner Center, then click Submit for certification."
+          echo "Staged in the draft (PendingCommit). Partner Center's page shows the"
+          echo "old content until the draft is committed. Check the JSON above and the"
+          echo "submission-metadata artifact, then run this workflow with mode submit."
+          echo "Do not press Submit for certification in Partner Center."
 
-      - name: Summarize draft update
-        if: ${{ inputs.mode == 'update_draft' }}
+      - name: Commit the draft (starts certification)
+        if: ${{ inputs.mode == 'submit' }}
         run: |
           set -euo pipefail
-          publish_ok="${{ steps.publish_msix.outcome == 'success' }}"
-          metadata_ok="${{ steps.update_metadata.outcome == 'success' }}"
-          if [ "$publish_ok" != "true" ]; then
-            echo "::warning::MSIX upload via msstore publish failed."
-            echo "::warning::Microsoft documents msstore updates for free products only."
-            echo "::warning::Upload stemma.msix manually in Partner Center (Start update) if needed."
-          fi
-          if [ "$metadata_ok" != "true" ]; then
-            echo "::warning::Listing metadata update failed."
-            echo "::warning::Paste listing copy from docs/store-listing.md manually if needed."
-          fi
-          if [ "$publish_ok" != "true" ] && [ "$metadata_ok" != "true" ]; then
-            echo "::error::Neither MSIX upload nor metadata update succeeded."
-            exit 1
-          fi
-          echo "Partner Center draft update completed."
-          echo "Package and listing changes remain in draft (PendingCommit)."
-          echo "Inspect the draft in Partner Center, then click Submit for certification."
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
+          msstore submission publish "$PRODUCT_ID" --verbose
+          echo "Committed. Within minutes the status becomes Certification;"
+          echo "run mode get_draft to follow it."
 
-      - name: Get draft submission (debug)
+      - name: Submission status and staged draft
         if: ${{ inputs.mode == 'get_draft' }}
         run: |
           set -euo pipefail
-          msstore submission status "$PRODUCT_ID" --verbose
+          # Status first: Certification -> Release -> Publishing -> in the
+          # Store, with StatusDetails.Errors and CertificationReports.
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
           echo "---"
-          msstore submission get "$PRODUCT_ID" --verbose
+          NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose

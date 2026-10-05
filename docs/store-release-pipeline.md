@@ -34,32 +34,49 @@ CI (`.github/workflows/ci.yml`) also runs on `v*` tag pushes so a tag-only relea
 
   Add a `whats_new` entry for every release version. Screenshots under `assets/store_listing/screenshots/` must meet Store minimum size (1366x768) and count requirements.
 
-Partner Center draft/submit automation uses `.github/workflows/partner-center-submit.yml`
-(manual `workflow_dispatch`) with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview) (`msstore`), which supports MSIX products. Modes:
+Partner Center submission is automated end to end by
+`.github/workflows/partner-center-submit.yml` (manual `workflow_dispatch`)
+with the [Microsoft Store CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview)
+(`msstore`), which supports MSIX products. Modes:
 
 - **`configure`** -- credentials check only (`msstore reconfigure` + `msstore info`)
-- **`update_draft`** -- download `stemma.msix` from the release tag, upload it with
-  `msstore publish --noCommit` (draft only; does not start certification), then push
-  listing metadata and verify via the submission API
-- **`update_metadata`** -- ensure a pending draft exists (creating one with
-  `--noCommit` if needed), merge listing fields from `store/listing.yaml`, push with
-  `submission updateMetadata`, and verify via the submission API
-- **`get_draft`** -- print current submission status and package JSON (debug)
+- **`update_draft`** -- download `stemma.msix` from the release tag, stage it
+  with `msstore publish --noCommit`, then merge listing fields from
+  `store/listing.yaml`, stage them with `submission updateMetadata`, and
+  verify them via the submission API. A failed upload or metadata update
+  fails the run.
+- **`update_metadata`** -- the listing only: ensure a pending draft exists
+  (creating one from the release MSIX if needed), then stage and verify the
+  listing as above
+- **`submit`** -- commit the staged draft (`msstore submission publish`),
+  which ingests the package and starts certification
+- **`get_draft`** -- print the submission status, then the staged draft
+  JSON. Run it after `submit` to follow certification (Certification ->
+  Release -> Publishing -> in the Store), with `StatusDetails.Errors` and
+  `CertificationReports`.
 
-Partner Center UI can lag behind the submission API while a draft is in
-`PendingCommit`, especially until you inspect the draft in Partner Center.
-After `update_draft` or `update_metadata`, the workflow checks the merged
-payload and attempts a submission GET (warnings only if GET is stale). Submit
-for certification manually in Partner Center when you are ready to ship.
+A release goes in with two runs:
+
+1. Run **`update_draft`** with the release tag. Check the submission JSON in
+   the log and the `submission-metadata` artifact (`get_draft` prints the
+   draft again).
+2. Run **`submit`** with the same tag. Expect "Submission Committed with
+   status CommitStarted"; within minutes the status becomes Certification.
+   Partner Center shows "Update in certification" after a page reload (it
+   lags a few minutes).
+
+**Never press "Submit for certification" in Partner Center for a draft
+staged by the workflow.** Until the draft is committed, Partner Center's
+page shows it as "Unchanged" (the old package and listing), and its Submit
+button submits that old content. Only mode `submit` commits the staged
+package and listing.
 
 ```powershell
 python scripts/build_partner_center_payloads.py --tag v3.0.0
 ```
 
 Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.json`
-(gitignored). After `update_draft` or `update_metadata`, confirm listing fields via
-the workflow verification step or `get_draft`, then submit for certification
-manually in Partner Center.
+(gitignored) for a local look at what the workflow stages.
 
 ## Screenshots
 
@@ -119,11 +136,11 @@ Repository secrets for `partner-center-submit.yml`:
 - `PARTNER_CENTER_CLIENT_ID`
 - `PARTNER_CENTER_CLIENT_SECRET`
 
-Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.0.0`). Verify listing metadata via the workflow or **`get_draft`**, then click **Submit for certification** in Partner Center. Manual MSIX upload remains a fallback if automation fails.
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.0.0`), check the staged draft, then **`submit`**. Do not submit a workflow-staged draft from Partner Center. Manual MSIX upload remains a fallback if automation fails.
 
-**Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, and 32 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
+**Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, 30, 32, and 36 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
 
-**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; listing metadata can still be pushed via `update_draft`.
+**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; the listing can still be staged with `update_metadata`.
 
 Note: [microsoft/store-submission](https://github.com/microsoft/store-submission) targets EXE/MSI (Win32) packaged apps and does not support MSIX; stemma uses `msstore` instead.
 
