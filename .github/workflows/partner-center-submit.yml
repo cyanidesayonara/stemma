@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       mode:
-        description: "configure = check credentials; update_draft = stage MSIX + listing; update_metadata = stage listing only; get_draft = status + staged draft; submit = commit the draft (starts certification)"
+        description: "configure = check credentials; update_draft = stage MSIX + listing; update_metadata = stage listing only; get_draft = status + staged draft (tag unused); submit = commit the draft staged for this tag (starts certification)"
         type: choice
         options:
           - configure
@@ -151,7 +151,7 @@ jobs:
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
 
       - name: Check listing metadata after update
-        if: ${{ (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') && steps.update_metadata.outcome == 'success' }}
+        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         run: |
           set -euo pipefail
           version="${{ inputs.tag }}"
@@ -171,7 +171,8 @@ jobs:
           fi
 
       - name: Upload merged submission metadata
-        if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
+        # Also after a failed update, so there is something to inspect.
+        if: ${{ !cancelled() && (inputs.mode == 'update_draft' || inputs.mode == 'update_metadata') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: partner-center-submission-metadata
@@ -185,19 +186,39 @@ jobs:
           if [ "${{ steps.ensure_draft.outputs.created }}" = "true" ]; then
             echo "Created a new draft from the release MSIX before updating the listing."
           fi
-          echo "Staged in the draft (PendingCommit). Partner Center's page shows the"
-          echo "old content until the draft is committed. Check the JSON above and the"
-          echo "submission-metadata artifact, then run this workflow with mode submit."
-          echo "Do not press Submit for certification in Partner Center."
+          {
+            echo "Staged ${{ inputs.tag }} in the draft (PendingCommit)."
+            echo
+            echo "Partner Center's page shows the old content until the draft is"
+            echo "committed. Check the JSON in the log and the submission-metadata"
+            echo "artifact, then run this workflow with mode **submit** and the same tag."
+            echo
+            echo "**Do not press Submit for certification in Partner Center**: it"
+            echo "submits the old content."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Commit the draft (starts certification)
         if: ${{ inputs.mode == 'submit' }}
         run: |
           set -euo pipefail
-          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose
+          version="${{ inputs.tag }}"
+          version="${version#v}"
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose | tee status.txt
+          # Commit only a draft that is still staged, and staged for this tag.
+          if ! grep -q "PendingCommit" status.txt; then
+            echo "::error::No draft waiting to be committed. Run update_draft first, or get_draft to see the status."
+            exit 1
+          fi
+          NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission.json
+          if ! grep -qF "in version ${version}" submission.json; then
+            echo "::error::The pending draft's What's new is not for ${version}. Run update_draft with this tag first."
+            exit 1
+          fi
           msstore submission publish "$PRODUCT_ID" --verbose
-          echo "Committed. Within minutes the status becomes Certification;"
-          echo "run mode get_draft to follow it."
+          {
+            echo "Committed ${{ inputs.tag }}. Within minutes the status becomes"
+            echo "Certification; run mode get_draft to follow it."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Submission status and staged draft
         if: ${{ inputs.mode == 'get_draft' }}

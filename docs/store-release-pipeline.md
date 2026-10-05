@@ -60,7 +60,8 @@ A release goes in with two runs:
 1. Run **`update_draft`** with the release tag. Check the submission JSON in
    the log and the `submission-metadata` artifact (`get_draft` prints the
    draft again).
-2. Run **`submit`** with the same tag. Expect "Submission Committed with
+2. Run **`submit`** with the same tag. It refuses unless a draft is
+   pending (`PendingCommit`) and its What's new is for that tag. Expect "Submission Committed with
    status CommitStarted"; within minutes the status becomes Certification.
    Partner Center shows "Update in certification" after a page reload (it
    lags a few minutes).
@@ -140,7 +141,7 @@ Use **mode `configure`** first, then **`update_draft`** with a release tag (for 
 
 **Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, 30, 32, and 36 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
 
-**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, upload `stemma.msix` manually; the listing can still be staged with `update_metadata`.
+**Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, the fallback is: upload `stemma.msix` manually in Partner Center first (that makes the pending draft), then run `update_metadata` and `submit`. This fallback is untested: package upload has worked so far, and how Partner Center commits a draft made partly in its own UI has not been tried.
 
 Note: [microsoft/store-submission](https://github.com/microsoft/store-submission) targets EXE/MSI (Win32) packaged apps and does not support MSIX; stemma uses `msstore` instead.
 
