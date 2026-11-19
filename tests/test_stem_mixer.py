@@ -38,7 +38,8 @@ def _dispose_widgets_through_qt(app):
     before = set(QApplication.topLevelWidgets())
     yield
     for widget in QApplication.topLevelWidgets():
-        if widget not in before:
+        # Popup windows with a parent go with it; only delete the roots.
+        if widget not in before and widget.parent() is None:
             widget.close()
             widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
