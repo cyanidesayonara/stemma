@@ -281,14 +281,39 @@ def test_collect_librosa_version_reports_a_broken_bundle(monkeypatch):
     assert reported.startswith("unavailable (")
 
 
-def test_collect_stretch_check_runs_the_live_stretcher():
+def test_collect_stretch_check_runs_the_live_stretcher(monkeypatch):
     """The frozen smoke check must exercise live Speed and Pitch (soxr's
     native extension included), not just import the package."""
     import soxr
 
     from src.diagnostics import collect_stretch_check
 
+    real = soxr.ResampleStream.resample_chunk
+    calls = []
+
+    def counted(self, *args, **kwargs):
+        calls.append(1)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(soxr.ResampleStream, "resample_chunk", counted)
+
     assert collect_stretch_check() == soxr.__version__
+    # a pitch change, so the native resampler really ran
+    assert calls
+
+
+def test_collect_stretch_check_reports_non_finite_output(monkeypatch):
+    import numpy as np
+
+    from src import stretch
+    from src.diagnostics import collect_stretch_check
+
+    monkeypatch.setattr(
+        stretch.StreamingStretcher, "read",
+        lambda self, count, source: np.full((count, 2), np.nan, np.float32),
+    )
+
+    assert collect_stretch_check() == "unavailable (non-finite output)"
 
 
 def test_collect_stretch_check_reports_a_broken_bundle(monkeypatch):

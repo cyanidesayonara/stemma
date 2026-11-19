@@ -97,7 +97,9 @@ def collect_stretch_check() -> str:
         out = stretcher.read(rate // 4, source)
     except Exception as exc:  # noqa: BLE001 - reported, never raised
         return f"unavailable ({type(exc).__name__}: {exc})"
-    if not np.isfinite(out).all() or float(np.abs(out).max()) < 1e-4:
+    if not np.isfinite(out).all():
+        return "unavailable (non-finite output)"
+    if float(np.abs(out).max()) < 1e-4:
         return "unavailable (silent output)"
     return soxr.__version__
 
