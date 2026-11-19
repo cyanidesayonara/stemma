@@ -1,4 +1,8 @@
-PySide6>=6.6.0
+# Cap at the release lock's minor version: Qt minor releases change widget
+# metrics (6.12 narrowed spinboxes by 16 px), so a float makes CI's widget
+# snapshots measure a Qt that users never get. Lift the cap together with
+# the release lock and regenerate the goldens on that Qt.
+PySide6>=6.6.0,<6.12
 # DirectML supplies the onnxruntime import package and CPU fallback.
 # Do not co-install the conflicting plain onnxruntime distribution.
 onnxruntime-directml==1.24.4
