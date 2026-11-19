@@ -10,11 +10,16 @@ practice apps and DAWs do: a phase vocoder, one frame at a time, followed
 by a streaming resampler when the pitch moves. A speed or pitch change
 takes effect within a frame or two, and nothing is rendered in advance.
 
-The phase vocoder is the one librosa uses (same Hann window, frame size,
-hop, linearly interpolated magnitudes, and accumulated phase advance), so
-it sounds the same; a pitch shift is a stretch followed by a resample, so
-speed and pitch share one pass. The phase is carried as unit phasors
-(a complex multiply per frame, no trigonometry) and renormalised each
+The phase vocoder starts from librosa's (same Hann window, frame size,
+hop, linearly interpolated magnitudes, and accumulated phase advance) and
+adds identity phase locking (Laroche and Dolson, 1999): only the bins at
+spectral peaks carry their own accumulated phase, and every other bin
+keeps the phase offset it has to its peak in the analysis frame. Without
+it, the bins around a peak drift out of phase with one another and partly
+cancel, and real music played about 3 dB quieter than at 1.0x the moment
+Speed or Pitch moved (#227). A pitch shift is a stretch followed by a
+resample, so speed and pitch share one pass. The phase is carried as
+unit phasors (complex multiplies, no trigonometry) and renormalised each
 frame, so it stays exact however long the song plays.
 """
 
@@ -42,6 +47,27 @@ _PITCH_FADE = 441
 # sample). It may return fewer samples than asked (a loop boundary); an
 # empty read means the song has ended.
 SourceRead = Callable[[int], tuple[np.ndarray, int]]
+
+
+def _peak_owners(magnitude: np.ndarray) -> np.ndarray:
+    """Bin index of the spectral peak each bin belongs to, (ch, bins).
+
+    A peak is a bin louder than the bin below it and at least as loud as
+    the one above; every bin belongs to its nearest peak (the lower one on
+    a tie). Every spectrum has at least one peak (its leftmost maximum).
+    """
+    m = magnitude
+    bins = m.shape[1]
+    peak = np.empty(m.shape, dtype=bool)
+    peak[:, 1:-1] = (m[:, 1:-1] > m[:, :-2]) & (m[:, 1:-1] >= m[:, 2:])
+    peak[:, 0] = m[:, 0] >= m[:, 1]
+    peak[:, -1] = m[:, -1] > m[:, -2]
+    index = np.arange(bins)
+    below = np.maximum.accumulate(np.where(peak, index, -bins), axis=1)
+    above = np.minimum.accumulate(
+        np.where(peak, index, 2 * bins)[:, ::-1], axis=1,
+    )[:, ::-1]
+    return np.where(above - index < index - below, above, below)
 
 
 def pitch_rate(semitones: float) -> float:
@@ -257,7 +283,13 @@ class StreamingStretcher:
         if self._phase is None:
             self._phase = unit0.copy()
         else:
-            self._phase = self._phase * self._advance
+            # Identity phase locking: each peak advances its own phase;
+            # the bins around it follow, keeping their analysis-frame
+            # offset from it. At 1.0x this reproduces the input exactly.
+            advanced = self._phase * self._advance
+            owner = _peak_owners(magnitude)
+            offset = advanced * np.conj(unit0)
+            self._phase = np.take_along_axis(offset, owner, axis=1) * unit0
             self._phase /= np.maximum(np.abs(self._phase), _TINY)
         self._advance = unit1 * np.conj(unit0)
 

@@ -4,9 +4,11 @@
    then a resampler when the pitch moves. Speed alone changes the tempo,
    pitch alone the key.
 
-   The phase vocoder is the app's (librosa's): a periodic Hann window,
-   2048-point frames, a 512-sample hop, magnitudes interpolated between two
-   analysis frames and the phase carried as unit phasors. The pitch
+   The phase vocoder is the app's: a periodic Hann window, 2048-point
+   frames, a 512-sample hop, magnitudes interpolated between two analysis
+   frames, the phase carried as unit phasors, and identity phase locking
+   (each bin keeps its analysis offset from the nearest spectral peak, so
+   the music keeps its level, #227). The pitch
    resampler here is a variable-rate cubic interpolator rather than the
    app's soxr stream, so a pitch change needs no crossfade. It has no
    anti-alias filter: at +5 semitones, content above about 16.5 kHz aliases,
@@ -124,6 +126,11 @@ class Stretcher {
       this.ai.push(new Float32Array(BINS));
     }
     this.norm = new Float32Array(N_FFT);
+    // phase-locking scratch, used by each channel in turn
+    this.mag = new Float32Array(BINS);
+    this.or = new Float32Array(BINS);
+    this.oi = new Float32Array(BINS);
+    this.owner = new Int32Array(BINS);
     // two frames are in use at a time (i0, i1); the third is the next one
     this.slots = [new Spectrum(ch), new Spectrum(ch), new Spectrum(ch)];
     this.runs = new Float64Array(RUNS * 3);   // padded start, frame, count
@@ -235,26 +242,22 @@ class Stretcher {
       const pi = this.pi[c];
       const ar = this.ar[c];
       const ai = this.ai[c];
-      if (!this.started) {
-        pr.set(s0.ur[c]);
-        pi.set(s0.ui[c]);
-      } else {
-        for (let b = 0; b < BINS; b++) {
-          const r = pr[b] * ar[b] - pi[b] * ai[b];
-          const i = pr[b] * ai[b] + pi[b] * ar[b];
-          const m = Math.max(Math.sqrt(r * r + i * i), TINY);
-          pr[b] = r / m; pi[b] = i / m;
-        }
-      }
       const u0r = s0.ur[c], u0i = s0.ui[c], u1r = s1.ur[c], u1i = s1.ui[c];
       const m0 = s0.mag[c], m1 = s1.mag[c];
+      const mag = this.mag;
+      for (let b = 0; b < BINS; b++) { mag[b] = m0[b] + a * (m1[b] - m0[b]); }
+      if (!this.started) {
+        pr.set(u0r);
+        pi.set(u0i);
+      } else {
+        this.lockPhase(pr, pi, ar, ai, u0r, u0i);
+      }
       for (let b = 0; b < BINS; b++) {
         // advance = unit1 * conj(unit0)
         ar[b] = u1r[b] * u0r[b] + u1i[b] * u0i[b];
         ai[b] = u1i[b] * u0r[b] - u1r[b] * u0i[b];
-        const m = m0[b] + a * (m1[b] - m0[b]);
-        re[b] = m * pr[b];
-        im[b] = m * pi[b];
+        re[b] = mag[b] * pr[b];
+        im[b] = mag[b] * pi[b];
       }
       for (let b = 1; b < BINS - 1; b++) {
         re[N_FFT - b] = re[b];
@@ -300,6 +303,44 @@ class Stretcher {
     this.norm.copyWithin(0, HOP);
     this.norm.fill(0, N_FFT - HOP);
     this.t = t + rate;
+  }
+
+  // Identity phase locking (Laroche and Dolson), as src/stretch.py does:
+  // advance the phase, then give every bin its peak's advanced phase plus
+  // the bin's analysis offset from that peak. A peak is louder than the
+  // bin below it and at least as loud as the one above; a bin belongs to
+  // its nearest peak, the lower one on a tie.
+  lockPhase(pr, pi, ar, ai, u0r, u0i) {
+    const mag = this.mag;
+    const or = this.or;
+    const oi = this.oi;
+    const owner = this.owner;
+    for (let b = 0; b < BINS; b++) {
+      // offset = (phase * advance) * conj(unit0)
+      const r = pr[b] * ar[b] - pi[b] * ai[b];
+      const i = pr[b] * ai[b] + pi[b] * ar[b];
+      or[b] = r * u0r[b] + i * u0i[b];
+      oi[b] = i * u0r[b] - r * u0i[b];
+    }
+    let below = -BINS;
+    for (let b = 0; b < BINS; b++) {
+      if ((b === 0 || mag[b] > mag[b - 1])
+          && (b === BINS - 1 || mag[b] >= mag[b + 1])) { below = b; }
+      owner[b] = below;
+    }
+    let above = 2 * BINS;
+    for (let b = BINS - 1; b >= 0; b--) {
+      if (owner[b] === b) { above = b; }
+      if (above - b < b - owner[b]) { owner[b] = above; }
+    }
+    for (let b = 0; b < BINS; b++) {
+      // phase = offset[peak] * unit0, renormalised
+      const k = owner[b];
+      const r = or[k] * u0r[b] - oi[k] * u0i[b];
+      const i = or[k] * u0i[b] + oi[k] * u0r[b];
+      const m = Math.max(Math.sqrt(r * r + i * i), TINY);
+      pr[b] = r / m; pi[b] = i / m;
+    }
   }
 
   // Make room for one more hop by dropping what the resampler has passed

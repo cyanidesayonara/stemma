@@ -255,8 +255,17 @@ def test_worklet_stretcher_matches_the_apps(tmp_path, speed):
 
     rate = 44100
     t = np.arange(rate * 3) / rate
-    left = 0.3 * np.sin(2 * np.pi * 220 * t) + 0.2 * np.sin(2 * np.pi * 331 * t)
-    right = 0.25 * np.sin(2 * np.pi * 277 * t)
+    # Music-like: notes with harmonics, and noise. Phase locking (#227)
+    # picks peaks by comparing neighbouring bins, and in a noiseless
+    # sine's flat floor, 100 dB down, the two FFTs' rounding can pick
+    # differently; a noise floor keeps the comparison to real peaks.
+    rng = np.random.default_rng(0)
+    left = 0.03 * rng.standard_normal(len(t))
+    for note in [110.0, 220.0, 261.63, 329.63, 392.0]:
+        for harmonic in range(1, 9):
+            left += 0.05 / harmonic * np.sin(
+                2 * np.pi * note * harmonic * t + rng.uniform(0, 2 * np.pi))
+    right = np.roll(left, 301) * 0.9
     signal = np.stack([left, right]).astype(np.float32)
     (tmp_path / "in.f32").write_bytes(signal.tobytes())
     _scenario("stretch", tmp_path / "in.f32", tmp_path / "out.f32", speed)
@@ -276,7 +285,7 @@ def test_worklet_stretcher_matches_the_apps(tmp_path, speed):
 
     py = stretcher.read(len(js) + 1, source)
     # the JS resampler starts one sample ahead (read = 1)
-    assert np.max(np.abs(js[: len(js) - 1] - py[1:len(js)])) < 1e-4
+    assert np.max(np.abs(js[: len(js) - 1] - py[1:len(js)])) < 1e-5
 
 
 @needs_node
