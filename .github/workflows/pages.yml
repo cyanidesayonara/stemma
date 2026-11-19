@@ -37,6 +37,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read  # to see this run's own artifacts before deploying
 
 # one deploy at a time, and never cancel one halfway
 concurrency:
@@ -98,6 +99,25 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: _site
+
+      # deploy-pages looks the artifact up through the API, which can lag
+      # the upload by a few seconds: the v3.0.0 deploy found "0 artifacts"
+      # two seconds after it uploaded. Wait until it is listed.
+      - name: Wait for the artifact to be listed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              --jq '[.artifacts[] | select(.name == "github-pages" and (.expired | not))] | length')"
+            if [ "${count}" -ge 1 ]; then
+              echo "github-pages artifact listed after ${attempt} check(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::github-pages artifact not listed after 60 s; deploying anyway"
 
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
