@@ -41,9 +41,9 @@ SCREENSHOTS = LISTING_ART / "screenshots"
 # the listing art and the Partner Center image type each one fills, as the
 # current Store listing uses them
 ART = {
-    "tile_300x300.png": "Icon",
-    "box_1080x1080.png": "StoreLogoSquare",
-    "poster_720x1080.png": "StoreLogo9x16",
+    "tile_300x300.png": ("Icon", (300, 300)),
+    "box_1080x1080.png": ("StoreLogoSquare", (1080, 1080)),
+    "poster_720x1080.png": ("StoreLogo9x16", (720, 1080)),
 }
 # Partner Center's floor for desktop screenshots
 MIN_SCREENSHOT = (1366, 768)
@@ -72,20 +72,29 @@ def listing_images(screenshots: Path = SCREENSHOTS,
             raise SystemExit(f"{name} is {width}x{height}; the Store needs "
                              f"at least {MIN_SCREENSHOT[0]}x{MIN_SCREENSHOT[1]}")
         images.append((f"{ZIP_FOLDER}/{name}", path, "Screenshot"))
-    for name, image_type in ART.items():
+    for name, (image_type, size) in ART.items():
         path = art / name
         if not path.is_file():
             raise SystemExit(f"missing Store art: {path}")
+        if png_size(path) != size:
+            width, height = png_size(path)
+            raise SystemExit(f"{name} is {width}x{height}; the Store needs "
+                             f"{size[0]}x{size[1]}")
         images.append((f"{ZIP_FOLDER}/{name}", path, image_type))
     return images
 
 
 def replace_images(current: list[dict],
                    new: list[tuple[str, Path, str]]) -> list[dict]:
-    """The listing's image list with the Store's images retired and the
-    new ones pending upload."""
+    """The listing's image list with the Store's images of the types being
+    restaged retired, and the new ones pending upload. Images of any other
+    type (a hero image added in Partner Center, say) are left alone."""
+    restaged = {image_type for _name, _path, image_type in new}
     kept = []
     for image in current:
+        if image.get("ImageType") not in restaged:
+            kept.append(image)
+            continue
         if not image.get("Id"):
             # staged by an earlier run and never ingested: replaced below
             continue

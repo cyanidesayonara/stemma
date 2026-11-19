@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -65,7 +66,11 @@ def test_stage_retires_the_stores_images_and_adds_the_new_ones():
 def test_a_rerun_replaces_its_own_staged_images_instead_of_adding_more():
     images = stage_store_images.listing_images()
     once = stage_store_images.stage(_draft(), images)
-    twice = stage_store_images.stage(json.loads(json.dumps(once)), images)
+    # the read-back gives staged images "Id": null, as Partner Center does
+    reread = json.loads(json.dumps(once))
+    for image in reread["Listings"]["en-us"]["BaseListing"]["Images"]:
+        image.setdefault("Id", None)
+    twice = stage_store_images.stage(reread, images)
     listing = twice["Listings"]["en-us"]["BaseListing"]["Images"]
     assert len(listing) == 2 + len(images)
     assert sum(i["FileStatus"] == "PendingDelete" for i in listing) == 2
@@ -98,8 +103,6 @@ def test_a_draft_without_a_pending_package_is_refused():
 
 
 def test_a_screenshot_below_the_store_minimum_is_refused(tmp_path):
-    import struct
-
     shots = tmp_path / "screenshots"
     shots.mkdir()
     (shots / "captions.txt").write_text("small.png: too small\n",
@@ -110,3 +113,25 @@ def test_a_screenshot_below_the_store_minimum_is_refused(tmp_path):
     )
     with pytest.raises(SystemExit, match="800x600"):
         stage_store_images.listing_images(shots, tmp_path)
+
+
+def test_images_of_other_types_are_left_alone():
+    """A hero image added by hand in Partner Center survives a restage."""
+    draft = _draft()
+    hero = {"FileName": "hero.png", "FileStatus": "Uploaded", "Id": "9",
+            "ImageType": "PromotionalArt16x9"}
+    draft["Listings"]["en-us"]["BaseListing"]["Images"].append(hero)
+    staged = stage_store_images.stage(draft, stage_store_images.listing_images())
+    assert hero in staged["Listings"]["en-us"]["BaseListing"]["Images"]
+
+
+def test_store_art_of_the_wrong_size_is_refused(tmp_path):
+    art = tmp_path / "art"
+    art.mkdir()
+    for name in stage_store_images.ART:
+        (art / name).write_bytes(
+            b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
+            + struct.pack(">II", 64, 64) + b"\x08\x02\x00\x00\x00"
+        )
+    with pytest.raises(SystemExit, match="64x64; the Store needs"):
+        stage_store_images.listing_images(art=art)
