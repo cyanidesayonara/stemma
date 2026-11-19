@@ -127,6 +127,18 @@ Public download URL pattern (public repo):
 
 Example: `https://github.com/cyanidesayonara/stemma/releases/download/v3.0.0/stemma.msix`
 
+## Keeping the upload link private
+
+A staged draft's `FileUploadUrl` is a write-capable Azure blob SAS link:
+anyone holding it can replace the package and images Partner Center
+ingests at commit. This repository's Actions logs and artifacts are
+public, so the workflow never runs `msstore publish`, `submission get`,
+or `submission publish` with `--verbose` (msstore then logs the link),
+writes submission JSON only to files, and shows it in the log or the
+artifact only through `scripts/redact_submission.py`. Keep it that way
+when changing the workflow, and if a link ever does reach a log, delete
+that run (`gh run delete <id>`) before the link expires, about a day later.
+
 ## Partner Center credentials (GitHub Actions)
 
 Repository secrets for `partner-center-submit.yml`:
