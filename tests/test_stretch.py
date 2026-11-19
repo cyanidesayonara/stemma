@@ -154,7 +154,8 @@ def test_combined_keeps_the_level_two_passes_lose():
 
 
 @pytest.mark.parametrize("speed, semitones", [
-    (0.75, 0), (0.95, 0), (1.25, 0), (1.0, 2), (1.0, -2), (0.75, -2),
+    (0.5, 0), (0.75, 0), (0.95, 0), (1.25, 0),
+    (1.0, 2), (1.0, -2), (1.0, 7), (1.0, -7), (0.75, -2),
 ])
 def test_polyphonic_level_holds_when_speed_or_pitch_moves(speed, semitones):
     """Touching Speed or Pitch must not drop the song by ~3 dB (#227)."""

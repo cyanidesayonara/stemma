@@ -45,7 +45,7 @@ future scope lives in `docs/ROADMAP.md`.
 | **Export** | `soundfile` (WAV), `lameenc` (MP3) | Individual stems or custom mix |
 | **YouTube Import** | `yt-dlp` + `ffmpeg` | Download audio from YouTube URLs |
 | **Packaging** | PyInstaller | One-folder (COLLECT) build shipped as `stemma.zip` + `stemma.msix` |
-| **Time/pitch processing** | `src/stretch.py` (numpy phase vocoder + `soxr`) | Real-time on the mix, like DAWs and practice apps: changes apply within a frame, nothing is pre-rendered; librosa's vocoder plus identity phase locking, so the mix keeps its level and sounds less phasey (#227); speed and pitch in one pass |
+| **Time/pitch processing** | `src/stretch.py` (numpy phase vocoder + `soxr`) | Real-time on the mix, like DAWs and practice apps: changes apply within a frame, nothing is pre-rendered; librosa's vocoder plus identity phase locking, so the mix keeps its level (#227); speed and pitch in one pass |
 
 ### Why HTDemucs v4?
 

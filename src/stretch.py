@@ -17,11 +17,10 @@ spectral peaks carry their own accumulated phase, and every other bin
 keeps the phase offset it has to its peak in the analysis frame. Without
 it, the bins around a peak drift out of phase with one another and partly
 cancel, and real music played about 3 dB quieter than at 1.0x the moment
-Speed or Pitch moved (#227); it also sounds less phasey. A pitch shift is
-a stretch followed by a resample, so speed and pitch share one pass. The
-phase is carried as unit phasors (complex multiplies, no trigonometry)
-and renormalised each frame, so it stays exact however long the song
-plays.
+Speed or Pitch moved (#227). A pitch shift is a stretch followed by a
+resample, so speed and pitch share one pass. The phase is carried as
+unit phasors (complex multiplies, no trigonometry) and renormalised each
+frame, so it stays exact however long the song plays.
 """
 
 from __future__ import annotations
