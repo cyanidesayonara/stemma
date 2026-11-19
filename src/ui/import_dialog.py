@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.audio_io import audio_duration
 from src.app_settings import (
     SEPARATION_MODEL_TOOLTIP,
     SEPARATION_MODELS,
@@ -742,8 +743,7 @@ class ImportDialog(QDialog):
         Returns True to proceed, False to abort.
         """
         try:
-            info = sf.info(audio_path)
-            duration = info.duration
+            duration = audio_duration(audio_path)
         except Exception:
             return True
 

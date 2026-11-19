@@ -31,6 +31,7 @@ import numpy as np
 import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
+from src.audio_io import read_audio
 from src.import_messages import ModelDamagedError, describe_error
 from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session, session_provider_label
@@ -170,7 +171,7 @@ class MdxSeparatorWorker(QThread):
             raise FileNotFoundError(
                 f"Input audio file not found: {self.input_path}"
             )
-        audio, sr = sf.read(self.input_path, always_2d=True)
+        audio, sr = read_audio(self.input_path)
         return to_stereo(audio.T.astype(np.float32)), sr
 
     def _resample(self, audio: np.ndarray, sr: int) -> np.ndarray:
