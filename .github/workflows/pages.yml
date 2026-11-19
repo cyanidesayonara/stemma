@@ -37,6 +37,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read  # to see this run's own artifacts before deploying
 
 # one deploy at a time, and never cancel one halfway
 concurrency:
@@ -95,9 +96,38 @@ jobs:
           du -sh _site
           find _site -type f | sort
 
+      # Each attempt uploads under its own name. A rerun of a failed job
+      # keeps the earlier attempt's artifact in the same run, and
+      # deploy-pages refuses a run with two artifacts of the name it wants.
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: _site
+          name: github-pages-${{ github.run_attempt }}
+
+      # The artifact listings lag the upload by a moment: the v3.0.0 deploy
+      # found "0 artifacts" half a second after it uploaded. Wait until the
+      # run's artifact API lists this attempt's, then give the lookup
+      # deploy-pages uses (a separate service) a few more seconds. Never
+      # fail here: a slow or flaky API should not block a deploy that works.
+      - name: Wait for the artifact to be listed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: github-pages-${{ github.run_attempt }}
+        run: |
+          set -uo pipefail
+          for attempt in $(seq 1 30); do
+            count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=${ARTIFACT}" \
+              --jq '[.artifacts[] | select(.expired | not)] | length' 2>/dev/null || echo 0)"
+            if [ "${count:-0}" -ge 1 ]; then
+              echo "${ARTIFACT} listed after ${attempt} check(s)"
+              sleep 5
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::${ARTIFACT} not listed after 60 s; deploying anyway"
 
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
