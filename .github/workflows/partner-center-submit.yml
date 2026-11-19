@@ -224,7 +224,9 @@ jobs:
           set -euo pipefail
           version="${{ inputs.tag }}"
           version="${version#v}"
-          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose | tee status.txt
+          # msstore prints "Submission Status = ..." through its logger, on
+          # stderr: capture both streams or the check below never sees it
+          NO_COLOR=1 msstore submission status "$PRODUCT_ID" --verbose 2>&1 | tee status.txt
           # Commit only a draft that is still staged, and staged for this tag.
           if ! grep -q "PendingCommit" status.txt; then
             echo "::error::No draft waiting to be committed. Run update_draft first, or get_draft to see the status."
