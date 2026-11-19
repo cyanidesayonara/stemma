@@ -160,3 +160,68 @@ def test_unpaired_marker_fails():
 def test_missing_marker_fails():
     with pytest.raises(SystemExit, match="no <!-- gen:shots --> marker"):
         build_site.check_markers("index.html", "", ["shots"])
+
+
+# ---- the mixer demo's songs ------------------------------------------------
+
+DEMO = ROOT / "site" / "demo"
+# licences that allow stems (derivatives) on a page promoting a Store app:
+# no NoDerivatives, no NonCommercial
+ALLOWED_LICENCES = {
+    "CC0 1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "CC BY 3.0": "https://creativecommons.org/licenses/by/3.0/",
+    "CC BY 4.0": "https://creativecommons.org/licenses/by/4.0/",
+}
+
+
+def _songs():
+    import json
+
+    return json.loads((DEMO / "songs.json").read_text(encoding="utf-8"))[
+        "songs"
+    ]
+
+
+def test_demo_songs_are_credited_and_freely_licensed():
+    songs = _songs()
+    assert len(songs) >= 2
+    for song in songs:
+        for field in ("id", "title", "artist", "genre", "source"):
+            assert song[field], f"{song.get('id')}: no {field}"
+        assert ALLOWED_LICENCES.get(song["licence"]) == song["licence_url"]
+        assert song["source"].startswith("https://")
+
+
+def test_demo_songs_have_every_stem_and_overview():
+    for song in _songs():
+        assert song["stems"] == [
+            "vocals", "drums", "bass", "other", "guitar", "piano",
+        ]
+        for stem in song["stems"]:
+            path = DEMO / song["id"] / f"{stem}.mp3"
+            assert path.is_file(), f"missing {path}"
+            assert path.stat().st_size < 1_500_000, f"{path} is too large"
+            peaks = song["peaks"][stem]
+            assert len(peaks) > 100
+            assert all(0 <= p <= 99 for p in peaks)
+
+
+def test_demo_song_timings_fit_the_clip():
+    for song in _songs():
+        duration = song["duration"]
+        assert 20 <= duration <= 60
+        for key in ("beats", "downbeats"):
+            times = song[key]
+            assert times == sorted(times)
+            assert all(0 <= t <= duration for t in times)
+        for start, chord in song["chords"]:
+            assert 0 <= start <= duration
+            assert re.fullmatch(r"(N|[A-G](#|b)?m?)", chord), chord
+
+
+def test_demo_copy_is_published_with_the_site(tmp_path):
+    out = tmp_path / "site"
+    build_site.build(ROOT, _version(), "2026-11-19", out)
+    assert (out / "stretch-worklet.js").is_file()
+    for song in _songs():
+        assert (out / "demo" / song["id"] / "vocals.mp3").is_file()

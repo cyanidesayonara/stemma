@@ -12,11 +12,14 @@ site/
   index.html    the page; a template with <!-- gen:NAME --> blocks
   style.css     the stylesheet; colours only through palette.css variables
   palette.css   generated from src/ui/styles.py, never edited by hand
-  demo.js       the "Try the mixer" demo
+  demo.js       the "Try the mixer" demo: song picker, controls, lanes
+  stretch-worklet.js  its audio engine (mixing, loop, speed, pitch)
+  demo/         the demo songs: songs.json and <id>/<stem>.mp3
   site.js       the dark/light theme toggle
 scripts/
-  build_site.py    fills the template and assembles the site
-  site_palette.py  writes site/palette.css
+  build_site.py       fills the template and assembles the site
+  site_palette.py     writes site/palette.css
+  make_demo_songs.py  writes site/demo/ from stemma's own separations
 .github/workflows/pages.yml   builds and deploys
 ```
 
@@ -71,13 +74,43 @@ python scripts/build_site.py --from ../stemma-rel --version v2.6.0 --released 20
 
 ## The mixer demo
 
-`site/demo.js` plays an eight-bar tune written for the page, sequenced in the
-Web Audio API as six stems, with the app's practice controls: mute, solo and
-volume per stem, click-to-seek and drag-to-loop on stacked lanes, the Loop
-Trainer, speed, pitch and a metronome. Because the tune is sequenced rather
-than recorded, speed changes the tempo without the pitch and pitch changes
-the key without the tempo, as the app does for real songs. It separates
-nothing; the page says so.
+The demo plays short clips of free-to-use songs, each separated into six
+stems by stemma itself (the 6-stem model), so visitors hear what the app
+really produces rather than studio multitracks. `site/demo.js` is the
+cockpit: a song picker, mute, solo and volume per stem, click-to-seek and
+drag-to-loop on stacked lanes, the Loop Trainer, speed, pitch and a
+metronome. `site/stretch-worklet.js` is the audio engine, an AudioWorklet
+that mixes the stems and changes speed and pitch live with the app's phase
+vocoder (`src/stretch.py`, ported), so tempo and key stay independent.
+
+The key, chord, tempo and beat readouts are the app's own detector
+(`src/beat_detector.py`), run on each clip. The lanes are drawn from a
+stored overview, so they show before any audio downloads; a song's stems
+(about 2-3 MB) load when it is first played.
+
+### The songs
+
+| Song | Artist | Genre | Licence | Source |
+|---|---|---|---|---|
+| Makes-Shift Salvation | HoliznaCC0 | Indie rock | CC0 1.0 | [Free Music Archive](https://freemusicarchive.org/music/holiznacc0/makeshift-salvation/makes-shift-salvation) |
+| Swansong | Josh Woodward | Folk pop | CC BY 3.0 | [Free Music Archive](https://freemusicarchive.org/music/Josh_Woodward/Breadcrumbs/JoshWoodward-Breadcrumbs-01-Swansong/) |
+| Bossa Antigua | Kevin MacLeod | Bossa nova | CC BY 4.0 | [incompetech](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1700069) |
+| Funkorama | Kevin MacLeod | Funk | CC BY 4.0 | [incompetech](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100474) |
+
+Only licences that allow derivative works without a non-commercial clause
+qualify (CC0, CC BY); `tests/test_site.py` enforces that and the credit the
+page shows beside the player for each song.
+
+To add or remake a song: download it, separate it in stemma (or with the
+6-stem model), put its stem folder beside the others, add it to `SONGS` in
+`scripts/make_demo_songs.py`, and run
+
+```powershell
+python scripts/make_demo_songs.py <folder of separated songs>
+```
+
+The script picks a clip of whole bars where every part plays (or uses the
+`start` you give it), runs the detector, and rewrites `site/demo/`.
 
 ## Deploy
 

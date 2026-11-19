@@ -61,12 +61,14 @@
 
 <section id="try" class="demo" aria-labelledby="try-title">
   <h2 id="try-title">Try the mixer, right here</h2>
-  <p class="lede">A short tune made for this page, already split into six stems. Mute a part, solo another, drag across the lanes to loop a few bars, slow it down or change the key. stemma does the splitting for any song you bring, on your own PC.</p>
+  <p class="lede">Free-to-use songs, each split into six stems by stemma itself: what you hear is what the app gives you. Pick one, mute a part, solo another, drag across the lanes to loop a few bars, slow it down or change the key. The app does the same for any song you bring, on your own PC.</p>
   <div class="cockpit" id="cockpit">
+    <div class="songs" id="songs" role="group" aria-label="Songs"></div>
+    <p class="credit" id="credit"></p>
     <div class="readout" aria-live="off">
-      <span class="badge">Key: <b data-readout="key">A minor</b></span>
-      <span class="badge">Chord: <b data-readout="chord">Am</b></span>
-      <span class="badge">Tempo: <b data-readout="tempo">100 BPM</b></span>
+      <span class="badge">Key: <b data-readout="key">&ndash;</b></span>
+      <span class="badge">Chord: <b data-readout="chord">&ndash;</b></span>
+      <span class="badge">Tempo: <b data-readout="tempo">&ndash;</b></span>
     </div>
     <div class="lanes-wrap">
       <canvas id="lanes" height="240" role="img" aria-label="The six stems as coloured lanes, with the playhead and the loop. Click to jump, drag to set a loop."></canvas>
@@ -103,6 +105,8 @@
         </label>
         <label class="row">Pitch
           <select data-act="pitch">
+            <option value="-5">-5 semitones</option>
+            <option value="-4">-4 semitones</option>
             <option value="-3">-3 semitones</option>
             <option value="-2">-2 semitones</option>
             <option value="-1">-1 semitone</option>
@@ -110,6 +114,8 @@
             <option value="1">+1 semitone</option>
             <option value="2">+2 semitones</option>
             <option value="3">+3 semitones</option>
+            <option value="4">+4 semitones</option>
+            <option value="5">+5 semitones</option>
           </select>
         </label>
         <label class="row check"><input type="checkbox" data-act="click"> <span>Metronome</span></label>
@@ -120,8 +126,8 @@
         <svg class="i-play" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>
         <svg class="i-pause" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor"/></svg>
       </button>
-      <span class="time" data-readout="time">Bar 1 of 8</span>
-      <span class="note small">Change the speed or the key while it plays.</span>
+      <span class="time" data-readout="time">0:00</span>
+      <span class="note small" data-readout="status" aria-live="polite"></span>
     </div>
   </div>
   <noscript><p class="note">The mixer needs JavaScript.</p></noscript>
