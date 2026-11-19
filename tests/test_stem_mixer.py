@@ -1,8 +1,11 @@
 """Tests for stem mixer rows and their wiring into the waveform."""
 
+import gc
+
 import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
@@ -18,6 +21,28 @@ def app():
     if instance is None:
         instance = QApplication([])
     return instance
+
+
+@pytest.fixture(autouse=True)
+def _dispose_widgets_through_qt(app):
+    """Delete each test's top-level widgets through Qt, then collect.
+
+    These tests build parentless rows, panels and PlayerControls around
+    MagicMock players and drop them, leaving the widget trees in reference
+    cycles. The module-boundary gc.collect in conftest then freed all of
+    them at once in arbitrary order, and on CI (Python 3.12, PySide6 6.11.1)
+    that corrupted the heap. deleteLater plus a flush of deferred deletes
+    lets Qt destroy each tree parent-first while nothing else is running,
+    so the collection afterwards only frees dead wrappers.
+    """
+    before = set(QApplication.topLevelWidgets())
+    yield
+    for widget in QApplication.topLevelWidgets():
+        if widget not in before:
+            widget.close()
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
 
 
 class TestMixChangedWiring:
