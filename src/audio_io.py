@@ -25,11 +25,16 @@ from src.crash_log import logger
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
-def _ffmpeg_exe() -> str | None:
-    """Return the bundled ffmpeg, or one on PATH, or None."""
+def ffmpeg_exe() -> str | None:
+    """Return a path to an ffmpeg executable, or None if unavailable.
+
+    Prefers the binary bundled with imageio-ffmpeg so the app works
+    without the user installing ffmpeg separately. Falls back to
+    whatever is on PATH.
+    """
     try:
         return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:  # noqa: BLE001 - any failure means not bundled
+    except RuntimeError:
         return shutil.which("ffmpeg")
 
 
@@ -41,7 +46,7 @@ def _decode_with_ffmpeg(
     Returns None when ffmpeg is missing, fails, or produces no audio, so
     the caller can fall back to soundfile.
     """
-    exe = _ffmpeg_exe()
+    exe = ffmpeg_exe()
     if exe is None:
         return None
     cmd = [

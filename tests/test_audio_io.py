@@ -102,14 +102,26 @@ class TestReadAudio:
         assert audio.shape[1] == 1
 
     def test_falls_back_to_soundfile_without_ffmpeg(self, headerless_mp3):
-        with patch.object(audio_io, "_ffmpeg_exe", return_value=None):
+        with patch.object(audio_io, "ffmpeg_exe", return_value=None):
             audio, sr = audio_io.read_audio(headerless_mp3)
         assert sr == _SR
         assert audio.shape[0] == sf.info(headerless_mp3).frames
 
     def test_falls_back_when_ffmpeg_fails(self, headerless_mp3, tmp_path):
         missing = str(tmp_path / "no-ffmpeg.exe")
-        with patch.object(audio_io, "_ffmpeg_exe", return_value=missing):
+        with patch.object(audio_io, "ffmpeg_exe", return_value=missing):
+            audio, _sr = audio_io.read_audio(headerless_mp3)
+        assert audio.shape[0] == sf.info(headerless_mp3).frames
+
+    def test_falls_back_when_ffmpeg_exits_with_error(self, headerless_mp3):
+        # The real ffmpeg, but it rejects the arguments and exits non-zero
+        # with nothing on stdout.
+        real_run = audio_io.subprocess.run
+
+        def bad_args(cmd, **kwargs):
+            return real_run([*cmd[:-1], "-no-such-option", "-"], **kwargs)
+
+        with patch.object(audio_io.subprocess, "run", side_effect=bad_args):
             audio, _sr = audio_io.read_audio(headerless_mp3)
         assert audio.shape[0] == sf.info(headerless_mp3).frames
 
