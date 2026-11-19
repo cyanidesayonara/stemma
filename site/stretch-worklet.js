@@ -8,8 +8,10 @@
    2048-point frames, a 512-sample hop, magnitudes interpolated between two
    analysis frames and the phase carried as unit phasors. The pitch
    resampler here is a variable-rate cubic interpolator rather than the
-   app's soxr stream, so a pitch change needs no crossfade. At 1.0x and the
-   original pitch the stretcher is skipped, as the app skips it.
+   app's soxr stream, so a pitch change needs no crossfade. It has no
+   anti-alias filter: at +5 semitones, content above about 16.5 kHz aliases,
+   which was judged inaudible enough for a demo. At 1.0x and the original
+   pitch the stretcher is skipped, as the app skips it.
 
    Every buffer is allocated up front: nothing allocates on the audio
    thread while it plays, so the garbage collector never interrupts it.
