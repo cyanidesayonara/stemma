@@ -64,6 +64,44 @@ def collect_librosa_version() -> str:
     return librosa.__version__
 
 
+def collect_stretch_check() -> str:
+    """Run live Speed and Pitch briefly and return soxr's version.
+
+    The stretcher (``src.stretch``) needs soxr's compiled extension for any
+    pitch change. Importing the package is not enough to prove a frozen
+    build has it, so this stretches half a second of noise at 0.75x and
+    +2 semitones through the real code path. Returns
+    ``"unavailable (...)"`` when it fails or the output is silent.
+    """
+    try:
+        # Deferred imports: an explicit smoke path; normal startup builds
+        # the stretcher only when Speed or Pitch first moves.
+        import numpy as np
+        import soxr
+
+        from src.stretch import StreamingStretcher
+
+        rate = 44100
+        noise = np.random.default_rng(0).standard_normal(
+            (rate // 2, 2)).astype(np.float32) * 0.1
+        position = [0]
+
+        def source(count: int) -> tuple[np.ndarray, int]:
+            start = position[0]
+            chunk = noise[start:start + count]
+            position[0] += len(chunk)
+            return chunk, start
+
+        stretcher = StreamingStretcher(rate, 2)
+        stretcher.set_params(0.75, 2)
+        out = stretcher.read(rate // 4, source)
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        return f"unavailable ({type(exc).__name__}: {exc})"
+    if not np.isfinite(out).all() or float(np.abs(out).max()) < 1e-4:
+        return "unavailable (silent output)"
+    return soxr.__version__
+
+
 def collect_diagnostics() -> dict[str, str | list[str]]:
     """Return app and ONNX Runtime version/provider diagnostics."""
     # Deferred import: diagnostics is an explicit smoke path, while normal
@@ -74,6 +112,7 @@ def collect_diagnostics() -> dict[str, str | list[str]]:
         "stemma_version": __version__,
         "onnxruntime_version": ort.__version__,
         "librosa_version": collect_librosa_version(),
+        "soxr_version": collect_stretch_check(),
         "available_providers": list(ort.get_available_providers()),
         "model_providers": [
             f"{name}: {provider}"
@@ -91,6 +130,13 @@ def format_diagnostics(
         f"stemma version: {diagnostics['stemma_version']}",
         f"ONNX Runtime version: {diagnostics['onnxruntime_version']}",
         f"librosa version: {diagnostics.get('librosa_version', 'unknown')}",
+    ]
+    soxr_version = str(diagnostics.get("soxr_version", "unknown"))
+    if soxr_version[:1].isdigit():
+        lines.append(f"soxr version: {soxr_version} (live speed and pitch ran)")
+    else:
+        lines.append(f"soxr version: {soxr_version}")
+    lines += [
         f"Available ONNX providers: {providers}",
     ]
     model_providers = diagnostics.get("model_providers") or []

@@ -10,6 +10,7 @@ _DIAGNOSTICS = {
     "stemma_version": "2.6.0",
     "onnxruntime_version": "1.24.4",
     "librosa_version": "1.0.0",
+    "soxr_version": "1.1.0",
     "available_providers": [
         "DmlExecutionProvider",
         "CPUExecutionProvider",
@@ -37,6 +38,9 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
     monkeypatch.setattr(
         "src.diagnostics.collect_librosa_version", lambda: "1.0.0",
     )
+    monkeypatch.setattr(
+        "src.diagnostics.collect_stretch_check", lambda: "1.1.0",
+    )
 
     diagnostics = collect_diagnostics()
 
@@ -44,6 +48,7 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
         "stemma_version": __version__,
         "onnxruntime_version": "1.24.4",
         "librosa_version": "1.0.0",
+        "soxr_version": "1.1.0",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -59,6 +64,7 @@ def test_format_diagnostics_is_human_readable():
         "stemma_version": "2.6.0",
         "onnxruntime_version": "1.24.4",
         "librosa_version": "1.0.0",
+        "soxr_version": "1.1.0",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -69,6 +75,7 @@ def test_format_diagnostics_is_human_readable():
         "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
         "librosa version: 1.0.0",
+        "soxr version: 1.1.0 (live speed and pitch ran)",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -110,6 +117,7 @@ def test_diagnostics_file_is_atomic_utf8_and_returns_success(
         "stemma version: 2.6.0",
         "ONNX Runtime version: 1.24.4",
         "librosa version: 1.0.0",
+        "soxr version: 1.1.0 (live speed and pitch ran)",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -271,3 +279,52 @@ def test_collect_librosa_version_reports_a_broken_bundle(monkeypatch):
     reported = collect_librosa_version()
 
     assert reported.startswith("unavailable (")
+
+
+def test_collect_stretch_check_runs_the_live_stretcher():
+    """The frozen smoke check must exercise live Speed and Pitch (soxr's
+    native extension included), not just import the package."""
+    import soxr
+
+    from src.diagnostics import collect_stretch_check
+
+    assert collect_stretch_check() == soxr.__version__
+
+
+def test_collect_stretch_check_reports_a_broken_bundle(monkeypatch):
+    from src.diagnostics import collect_stretch_check
+
+    # None in sys.modules makes the import raise, as a missing module would.
+    monkeypatch.setitem(sys.modules, "soxr", None)
+
+    assert collect_stretch_check().startswith("unavailable (")
+
+
+def test_collect_stretch_check_reports_silent_output(monkeypatch):
+    import numpy as np
+
+    from src import stretch
+    from src.diagnostics import collect_stretch_check
+
+    monkeypatch.setattr(
+        stretch.StreamingStretcher, "read",
+        lambda self, count, source: np.zeros((count, 2), np.float32),
+    )
+
+    assert collect_stretch_check() == "unavailable (silent output)"
+
+
+def test_format_diagnostics_marks_a_failed_stretch_check():
+    from src.diagnostics import format_diagnostics
+
+    output = format_diagnostics({
+        "stemma_version": "3.0.0",
+        "onnxruntime_version": "1.24.4",
+        "librosa_version": "1.0.0",
+        "soxr_version": "unavailable (ImportError: no soxr)",
+        "available_providers": ["CPUExecutionProvider"],
+    })
+
+    assert "soxr version: unavailable (ImportError: no soxr)" in output
+    # the release workflow requires a version number on this line
+    assert "soxr version: 1" not in output
