@@ -1,6 +1,6 @@
 # Roadmap
 
-Latest stable release: **v2.6.0**.
+Latest stable release: **v3.0.0**.
 
 This document is intentionally short. GitHub issues hold acceptance criteria,
 discussion, and live status; `../CHANGELOG.md` records only shipped releases.
@@ -14,7 +14,7 @@ scope or date. Each upcoming version has a GitHub milestone.
   background loading, reproducible release validation, and Store listing
   automation ([#134](https://github.com/cyanidesayonara/stemma/issues/134)).
 
-## v3.0 -- practice cockpit
+## v3.0 -- practice cockpit (shipped)
 
 - [#131: practice cockpit interface](https://github.com/cyanidesayonara/stemma/issues/131)
   — the recomposition (stacked stem lanes, practice cards, song readout

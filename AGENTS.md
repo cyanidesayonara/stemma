@@ -11,8 +11,7 @@ mute/solo any stem, and play along with your instrument.
 
 Local-only. No cloud, no subscriptions, no command line needed by the end user.
 
-Latest stable release: **v2.6.0**. The current `main` line targets
-**v3.0**, which is not released. See "Current Status" below.
+Latest stable release: **v3.0.0**. See "Current Status" below.
 
 Canonical documents:
 
@@ -82,11 +81,10 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Verified against GitHub Releases on 2026-09-23:
+Set with the v3.0.0 release prep on 2026-11-19:
 
-- Latest stable: **v2.6.0**
-- Current source on `main` targets **v3.0** (unreleased)
-- v3.0 focus: practice cockpit visual recomposition ([#131](https://github.com/cyanidesayonara/stemma/issues/131))
+- Latest stable: **v3.0.0** (the practice cockpit, [#131](https://github.com/cyanidesayonara/stemma/issues/131))
+- Next: v3.1, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132))
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.
