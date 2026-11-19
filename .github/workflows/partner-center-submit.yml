@@ -147,6 +147,23 @@ jobs:
             --listing store/listing.yaml \
             --tag "${{ inputs.tag }}" \
             --out submission-metadata.json
+          if [ "${{ inputs.mode }}" = "update_draft" ]; then
+            # The listing images (screenshots and art) travel like the
+            # package: listed as PendingUpload in the draft, the files in
+            # the one zip at FileUploadUrl, which this replaces with the
+            # MSIX plus the images. Committing ingests them together.
+            python scripts/stage_store_images.py \
+              --submission submission-metadata.json \
+              --msix stemma.msix \
+              --zip upload.zip
+            upload_url="$(python -c 'import json; print(json.load(open("submission-metadata.json", encoding="utf-8"))["FileUploadUrl"])')"
+            echo "::add-mask::${upload_url}"
+            curl -fsS --retry 3 -X PUT \
+              -H "x-ms-blob-type: BlockBlob" \
+              --data-binary @upload.zip \
+              "${upload_url}" -o /dev/null
+            echo "Uploaded the package and the listing images ($(du -h upload.zip | cut -f1))."
+          fi
           metadata="$(cat submission-metadata.json)"
           msstore submission updateMetadata "$PRODUCT_ID" "$metadata" --verbose
 
@@ -157,6 +174,10 @@ jobs:
           version="${{ inputs.tag }}"
           version="${version#v}"
           NO_COLOR=1 msstore submission get "$PRODUCT_ID" --verbose > submission-after.json
+          if [ "${{ inputs.mode }}" = "update_draft" ]; then
+            staged="$(grep -c '"PendingUpload"' submission-after.json || true)"
+            echo "Draft entries pending upload (package and images): ${staged}"
+          fi
           if python scripts/verify_partner_center_metadata.py \
             --submission submission-after.json \
             --expected submission-metadata.json \
