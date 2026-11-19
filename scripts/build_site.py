@@ -10,6 +10,7 @@ listing uses, so the site always says what the released app does:
     features     the Store product features
     whatsnew     the Store "What's new" for that version, one item per paragraph
     shots       every Store screenshot, with its caption
+    meta        link-preview tags, with the first screenshot as the image
 
 The copy and the screenshots come from ``--from`` (a checkout of the released
 tag), while the pages, styles and script come from this checkout, so a site
@@ -42,12 +43,16 @@ sys.path.insert(0, str(ROOT))
 from src.store_listing import load_listing, png_size  # noqa: E402
 
 SITE = ROOT / "site"
+# where the site is published, for the absolute URLs link previews need;
+# the Pages workflow passes the real one (a custom domain included)
+DEFAULT_SITE_URL = "https://cyanidesayonara.github.io/stemma/"
 SHOTS = Path("assets") / "store_listing" / "screenshots"
 
 # each page and the blocks it must carry
 PAGES = {
     "index.html": [
         "version", "released", "pitch", "features", "whatsnew", "shots",
+        "meta",
     ],
 }
 
@@ -117,12 +122,33 @@ def long_date(iso: str) -> str:
     return f"{day:%B} {day.day}, {day.year}"
 
 
-def blocks(source: Path, version: str, released: str) -> dict[str, str]:
+def share_meta(site_url: str, shot: str, alt: str, size: tuple[int, int]
+               ) -> str:
+    """The link-preview tags: canonical URL and a large image card."""
+    image = f"{site_url}img/shots/{shot}"
+    return "\n".join([
+        f'<link rel="canonical" href="{_e(site_url)}">',
+        f'<meta property="og:url" content="{_e(site_url)}">',
+        f'<meta property="og:image" content="{_e(image)}">',
+        f'<meta property="og:image:width" content="{size[0]}">',
+        f'<meta property="og:image:height" content="{size[1]}">',
+        f'<meta property="og:image:alt" content="{_e(alt)}">',
+        f'<meta name="twitter:image" content="{_e(image)}">',
+        f'<meta name="twitter:image:alt" content="{_e(alt)}">',
+    ])
+
+
+def blocks(source: Path, version: str, released: str,
+           site_url: str = DEFAULT_SITE_URL) -> dict[str, str]:
     listing = load_listing(source / "store" / "listing.yaml")
     if version not in listing.whats_new:
         raise SystemExit(f"store/listing.yaml has no whats_new for {version}")
+    if not site_url.endswith("/"):
+        site_url += "/"
+    shots = screenshots(source)
+    first, first_caption = shots[0]
     figures = []
-    for name, caption in screenshots(source):
+    for name, caption in shots:
         alt = caption or screenshot_alt(name)
         width, height = png_size(source / SHOTS / name)
         figures.append(
@@ -144,6 +170,10 @@ def blocks(source: Path, version: str, released: str) -> dict[str, str]:
             for item in whats_new_items(listing.whats_new[version])
         ),
         "shots": "\n".join(figures),
+        "meta": share_meta(
+            site_url, first, first_caption or screenshot_alt(first),
+            png_size(source / SHOTS / first),
+        ),
     }
 
 
@@ -173,8 +203,9 @@ def fill(page: str, values: dict[str, str]) -> str:
     return BLOCK.sub(sub, page)
 
 
-def build(source: Path, version: str, released: str, out: Path) -> None:
-    values = blocks(source, version, released)
+def build(source: Path, version: str, released: str, out: Path,
+          site_url: str = DEFAULT_SITE_URL) -> None:
+    values = blocks(source, version, released, site_url)
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(SITE, out)
@@ -209,13 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--released",
                         help="release date, ISO 8601; default: today")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--site-url", default=DEFAULT_SITE_URL,
+                        help="where the site is published")
     args = parser.parse_args(argv)
     source = args.source.resolve()
     version = args.version or load_listing(
         source / "store" / "listing.yaml"
     ).listing_version
     released = args.released or dt.date.today().isoformat()
-    build(source, version.lstrip("v"), released, args.out.resolve())
+    build(source, version.lstrip("v"), released, args.out.resolve(),
+          args.site_url)
     print(f"Built the site for {version} in {args.out}")
     return 0
 

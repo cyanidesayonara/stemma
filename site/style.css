@@ -488,3 +488,39 @@ button.song[aria-pressed="true"] {
   color: var(--subtext);
   min-height: 1.3em;
 }
+
+/* the questions, as disclosures */
+.faq {
+  display: grid;
+  gap: 8px;
+}
+
+.faq details {
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  border-radius: 10px;
+  padding: 0 16px;
+}
+
+.faq details[open] { border-color: var(--surface1); }
+
+.faq summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-weight: 600;
+}
+
+.faq summary::marker { color: var(--accent); }
+
+.faq details p {
+  margin: 0 0 14px;
+  color: var(--subtext);
+}
+
+.faq code {
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface0);
+  color: var(--text);
+}

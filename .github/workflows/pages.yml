@@ -77,19 +77,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      # its base_url is the site's real address (a custom domain once one
+      # is set), which the link-preview tags need
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+
       - name: Build the site
         env:
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
           TAG: ${{ steps.release.outputs.tag }}
           PUBLISHED: ${{ steps.release.outputs.published }}
         run: |
           set -euo pipefail
           python -m pip install --quiet "PyYAML==6.0.3"
           python scripts/build_site.py --from rel --version "${TAG}" \
-            --released "${PUBLISHED}" --out _site
+            --released "${PUBLISHED}" --site-url "${SITE_URL}/" --out _site
           du -sh _site
           find _site -type f | sort
-
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
