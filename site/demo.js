@@ -32,6 +32,7 @@
     songs: [],
     song: null,       // the chosen entry from songs.json
     loaded: null,     // id of the song whose audio the engine holds
+    gen: 0,           // which load that is; the engine echoes it back
     loading: false,
     playing: false,
     speed: 1,
@@ -111,8 +112,10 @@
       master.connect(ctx.destination);
       node.port.onmessage = function (ev) {
         var m = ev.data;
-        // reports about another song (still pausing) do not move this one
-        if (m.type === "pos" && state.song && state.loaded === state.song.id) {
+        // reports about an earlier load (another song, still pausing) do
+        // not move this one
+        if (m.gen !== state.gen || state.loaded !== state.song.id) { return; }
+        if (m.type === "pos") {
           state.pos = m.frame / ctx.sampleRate;
           state.posAt = performance.now();
         } else if (m.type === "wrap") {
@@ -166,7 +169,9 @@
         transfer.push(l.buffer, r.buffer);
       });
       sendGains();
-      send({ type: "load", stems: stems, length: audio.length,
+      state.gen += 1;
+      send({ type: "load", gen: state.gen, stems: stems,
+        length: audio.length,
         beats: song.beats.map(function (t) { return Math.round(t * sr); }),
         downbeats: song.downbeats.map(function (t) {
           return Math.round(t * sr);
@@ -257,7 +262,7 @@
     });
     credit.innerHTML = "";
     var text = document.createElement("span");
-    text.textContent = "“" + song.title + "” by " + song.artist +
+    text.textContent = "“" + song.title + "” by " + (song.credit_as || song.artist) +
       ", ";
     var lic = document.createElement("a");
     lic.href = song.licence_url;

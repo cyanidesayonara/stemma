@@ -70,6 +70,7 @@ SONGS = [
         "folder": "kevin-macleod-bossa-antigua",
         "title": "Bossa Antigua",
         "artist": "Kevin MacLeod",
+        "credit_as": "Kevin MacLeod (incompetech.com)",
         "genre": "Bossa nova",
         "licence": "CC BY 4.0",
         "licence_url": "https://creativecommons.org/licenses/by/4.0/",
@@ -82,6 +83,7 @@ SONGS = [
         "folder": "kevin-macleod-funkorama",
         "title": "Funkorama",
         "artist": "Kevin MacLeod",
+        "credit_as": "Kevin MacLeod (incompetech.com)",
         "genre": "Funk",
         "licence": "CC BY 4.0",
         "licence_url": "https://creativecommons.org/licenses/by/4.0/",
@@ -169,6 +171,9 @@ def overview(clip: dict[str, np.ndarray]) -> dict[str, list[int]]:
 def make_song(song: dict, stems_dir: Path) -> dict:
     stems, rate = load_stems(stems_dir / song["folder"])
     model = beat_model()
+    if model is None:
+        raise SystemExit("beat_this.onnx is missing: run a detection in "
+                         "stemma once so it downloads, then rerun")
     whole = detect_bpm_and_key(stems, rate, model_path=model)
     start = song["start"]
     if start is None:
@@ -195,6 +200,9 @@ def make_song(song: dict, stems_dir: Path) -> dict:
           f"{found.bpm:.0f} BPM, {found.key}", flush=True)
     entry = {k: song[k] for k in ("id", "title", "artist", "genre",
                                    "licence", "licence_url", "source")}
+    if song.get("credit_as"):
+        # the attribution the artist asks for, shown in the credit line
+        entry["credit_as"] = song["credit_as"]
     entry.update({
         "clip_start": round(start, 3),
         "duration": round(duration, 3),

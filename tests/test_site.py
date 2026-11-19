@@ -1,11 +1,15 @@
 """The website: palette held to the app, templates filled from a release."""
 
 import importlib.util
+import json
 import re
 import shutil
 import struct
+import subprocess
+import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -165,6 +169,7 @@ def test_missing_marker_fails():
 # ---- the mixer demo's songs ------------------------------------------------
 
 DEMO = ROOT / "site" / "demo"
+NOTE_NAMES = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}
 # licences that allow stems (derivatives) on a page promoting a Store app:
 # no NoDerivatives, no NonCommercial
 ALLOWED_LICENCES = {
@@ -175,8 +180,6 @@ ALLOWED_LICENCES = {
 
 
 def _songs():
-    import json
-
     return json.loads((DEMO / "songs.json").read_text(encoding="utf-8"))[
         "songs"
     ]
@@ -216,7 +219,8 @@ def test_demo_song_timings_fit_the_clip():
             assert all(0 <= t <= duration for t in times)
         for start, chord in song["chords"]:
             assert 0 <= start <= duration
-            assert re.fullmatch(r"(N|[A-G](#|b)?m?)", chord), chord
+            # spelled as demo.js's NOTE_NAMES, which it transposes
+            assert chord == "N" or chord.rstrip("m") in NOTE_NAMES, chord
 
 
 def test_demo_copy_is_published_with_the_site(tmp_path):
@@ -225,3 +229,94 @@ def test_demo_copy_is_published_with_the_site(tmp_path):
     assert (out / "stretch-worklet.js").is_file()
     for song in _songs():
         assert (out / "demo" / song["id"] / "vocals.mp3").is_file()
+
+
+# ---- the demo's audio engine, run in Node -----------------------------------
+
+NODE = shutil.which("node")
+HARNESS = ROOT / "tests" / "js" / "worklet_harness.js"
+WORKLET = ROOT / "site" / "stretch-worklet.js"
+needs_node = pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+
+
+def _scenario(name, *extra):
+    done = subprocess.run(
+        [NODE, str(HARNESS), str(WORKLET), name, *map(str, extra)],
+        capture_output=True, text=True, check=True, timeout=120,
+    )
+    return json.loads(done.stdout or "{}")
+
+
+@needs_node
+@pytest.mark.parametrize("speed", [0.75, 1.25])
+def test_worklet_stretcher_matches_the_apps(tmp_path, speed):
+    sys.path.insert(0, str(ROOT))
+    from src.stretch import StreamingStretcher
+
+    rate = 44100
+    t = np.arange(rate * 3) / rate
+    left = 0.3 * np.sin(2 * np.pi * 220 * t) + 0.2 * np.sin(2 * np.pi * 331 * t)
+    right = 0.25 * np.sin(2 * np.pi * 277 * t)
+    signal = np.stack([left, right]).astype(np.float32)
+    (tmp_path / "in.f32").write_bytes(signal.tobytes())
+    _scenario("stretch", tmp_path / "in.f32", tmp_path / "out.f32", speed)
+    js = np.frombuffer((tmp_path / "out.f32").read_bytes(), np.float32)
+    js = js.reshape(2, -1).T
+
+    stretcher = StreamingStretcher(rate, 2)
+    stretcher.set_params(speed, 0)
+    frames = signal.T
+    position = [0]
+
+    def source(count):
+        chunk = frames[position[0]:position[0] + count]
+        start = position[0]
+        position[0] += len(chunk)
+        return chunk, start
+
+    py = stretcher.read(len(js) + 1, source)
+    # the JS resampler starts one sample ahead (read = 1)
+    assert np.max(np.abs(js[: len(js) - 1] - py[1:len(js)])) < 1e-4
+
+
+@needs_node
+def test_worklet_never_boosts_when_a_loop_moves():
+    """A loop dragged later, or turned back on after a wrap, never plays
+    louder than the mix (the seam fade once went negative: 1238x)."""
+    mix_peak = 0.48
+    for step, found in _scenario("loop-moves").items():
+        assert not found["nan"], step
+        assert found["peak"] < mix_peak * 1.1, (step, found["peak"])
+
+
+@needs_node
+def test_worklet_pause_survives_a_jump_during_its_fade():
+    found = _scenario("pause-in-fade")
+    assert found["playingAfterPause"] is False
+    assert found["heard"] == pytest.approx(3.0, abs=0.01)
+
+
+@needs_node
+def test_worklet_path_follows_the_last_speed_in_a_fade():
+    assert _scenario("switch-in-fade")["direct"] is True
+
+
+@needs_node
+def test_worklet_clicks_every_beat_of_every_loop_pass():
+    for speed, found in _scenario("clicks").items():
+        # a 1 s loop with two beats, heard for 4 s of song time
+        passes = found["wraps"] + 1
+        assert found["clicks"] == passes * 2, (speed, found)
+
+
+@needs_node
+def test_worklet_clamps_a_loop_past_the_end():
+    found = _scenario("past-the-end")
+    assert found["loopB"] == found["length"]
+    assert not found["direct"]["nan"]
+    assert not found["stretched"]["nan"]
+
+
+@needs_node
+def test_worklet_reports_carry_the_load_id():
+    assert _scenario("gens")["gens"] == [1]
