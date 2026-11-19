@@ -4,8 +4,7 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
-Latest stable release: **v2.6.0**. The current `main` line targets
-**v3.0**, which is not released yet.
+Latest stable release: **v3.0.0**.
 
 ## Download
 
@@ -22,6 +21,16 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - Windows 10/11
 
 ## Features
+
+### The practice cockpit
+
+- A tall stacked waveform with one colored lane per stem, sharing the
+  playhead and A-B loop region; muted stems dim in place.
+- Practice controls grouped into three cards: Loop and Trainer, Speed and
+  Pitch, Metronome and Count-in.
+- Key, chord, and tempo in one readout strip under the waveform.
+- Play, stop, record, and master volume anchored at the bottom while the
+  practice content scrolls.
 
 ### Separation
 
@@ -41,8 +50,8 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 
 - Per-stem mute, solo, and volume.
 - A-B loop, pitch-preserving speed presets, and pitch transposition
-  (plus or minus 7 semitones). The key and chord readouts follow the
-  transposition.
+  (plus or minus 7 semitones), applied live while the song plays. The key
+  and chord readouts follow the transposition.
 - Loop Trainer: with a loop set, speed steps up one preset on each repeat,
   from a chosen start speed up to 1.0x.
 - Automatic tempo, key, beat, and live chord detection.
@@ -67,19 +76,6 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - Dark and light themes; choose the data folder and audio devices under
   **Edit > Preferences**.
 - 100% local processing. No cloud, no account, no subscription.
-
-## v3.0 Target (Unreleased)
-
-The current source tree includes the v3.0 practice cockpit. It is not part
-of the stable v2.6.0 Store or portable downloads yet:
-
-- A tall stacked waveform with one colored lane per stem, sharing the
-  playhead and A-B loop region; muted stems dim in place.
-- Practice controls grouped into three cards: Loop and Trainer, Speed and
-  Pitch, Metronome and Count-in.
-- Key, chord, and tempo in one readout strip under the waveform.
-- Play, stop, record, and master volume anchored at the bottom while the
-  practice content scrolls.
 
 ## Development
 

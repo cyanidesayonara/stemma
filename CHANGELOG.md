@@ -9,6 +9,32 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v3.0.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.0.0) - 2026-11-19
+
+- A new practice cockpit: a stacked waveform with one colored lane per stem
+  (muted stems dim in place), the practice controls grouped into Loop and
+  Trainer, Speed and Pitch, and Metronome and Count-in cards, and key, chord,
+  and tempo in one readout strip.
+- Speed and pitch apply live while the song plays, at the song's own level,
+  instead of rendering first.
+- While a song separates, the empty player shows its progress and time left.
+- A new app icon, Store art, and stronger contrast in both themes; the whole
+  app works from the keyboard, and controls have names for screen readers.
+- Safer imports and downloads: files are checked before import, MP3s decode
+  in full (header-less VBR files used to import truncated), every model
+  download asks first (the beat model included), and a damaged model is
+  replaced. An offline beat-model failure no longer stalls each song load.
+- Export Mix exports the stems you hear, at the original speed and pitch.
+- A damaged library file no longer removes songs, an interrupted import is
+  cleaned up on the next launch, quitting during a separation asks first,
+  and errors are readable, with details in a log file.
+- Recording without a microphone turns recording off and keeps playing.
+- Fixes: rapid loop-point changes no longer crash, the chord readout follows
+  the pitch shift, the synced metronome keeps the real tempo, and a YouTube
+  download that fails once is retried.
+- A website with a playable mixer demo:
+  https://cyanidesayonara.github.io/stemma/
+
 ## [v2.6.0](https://github.com/cyanidesayonara/stemma/releases/tag/v2.6.0) - 2026-07-31
 
 - Added DirectML-capable MDX two-stem separation with automatic CPU fallback.
