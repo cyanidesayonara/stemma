@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stemma - practice any song with the band</title>
+<meta name="description" content="stemma splits any song into vocals, drums, bass, guitar, piano and other, so you can mute your part and play along. Free for Windows, runs entirely on your PC.">
+<meta property="og:title" content="stemma">
+<meta property="og:description" content="Split any song into stems, mute your part, and play along. Free for Windows, runs entirely on your PC.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://cyanidesayonara.github.io/stemma/img/icon.png">
+<link rel="icon" href="img/favicon.png">
+<link rel="stylesheet" href="palette.css">
+<link rel="stylesheet" href="style.css">
+<script>
+  // the theme the visitor picked last time, before the first paint
+  try {
+    var saved = localStorage.getItem("stemma-theme");
+    if (saved === "light" || saved === "dark") {
+      document.documentElement.setAttribute("data-theme", saved);
+    }
+  } catch (e) {}
+</script>
+</head>
+<body>
+<!-- Every gen: block is filled by scripts/build_site.py from the released
+     store/listing.yaml and Store screenshots; edit those, not this. -->
+<div class="lanes" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+<div class="wrap">
+
+<nav class="bar">
+  <picture class="mark">
+    <source srcset="img/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img class="logo" src="img/logo-dark.svg" alt="stemma" width="180" height="32" data-dark="img/logo-dark.svg" data-light="img/logo-light.svg">
+  </picture>
+  <div class="links">
+    <a href="#try">Try it</a>
+    <a href="#features">Features</a>
+    <a href="#new">What's new</a>
+    <button class="theme" type="button" aria-label="Switch to the light theme" title="Switch theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>
+    </button>
+  </div>
+</nav>
+
+<header class="top">
+  <h1>Mute your part.<br>Play along.</h1>
+  <p class="pitch"><!-- gen:pitch --><!-- /gen:pitch --></p>
+  <div class="cta">
+    <a class="button primary" href="https://apps.microsoft.com/detail/9p2w12l8f381">Get it from Microsoft Store</a>
+    <a class="button" href="https://github.com/cyanidesayonara/stemma/releases/latest/download/stemma.zip">Download the zip</a>
+  </div>
+  <p class="note">Free for Windows 10 and 11. Version <!-- gen:version --><!-- /gen:version -->, released <!-- gen:released --><!-- /gen:released -->. <a href="#new">What's new</a></p>
+  <ul class="chips" aria-label="Promises">
+    <li>Runs on your PC</li>
+    <li>No account</li>
+    <li>No subscription</li>
+    <li>No uploads</li>
+  </ul>
+</header>
+
+<section id="try" class="demo" aria-labelledby="try-title">
+  <h2 id="try-title">Try the mixer, right here</h2>
+  <p class="lede">Free-to-use songs, each split into six stems by stemma itself: what you hear is what the app gives you. Pick one, mute a part, solo another, drag across the lanes to loop a few bars, slow it down or change the key. The app does the same for any song you bring, on your own PC.</p>
+  <div class="cockpit" id="cockpit">
+    <div class="songs" id="songs" role="group" aria-label="Songs"></div>
+    <p class="credit" id="credit"></p>
+    <div class="readout" aria-live="off">
+      <span class="badge">Key: <b data-readout="key">&ndash;</b></span>
+      <span class="badge">Chord: <b data-readout="chord">&ndash;</b></span>
+      <span class="badge">Tempo: <b data-readout="tempo">&ndash;</b></span>
+    </div>
+    <div class="lanes-wrap">
+      <canvas id="lanes" height="240" role="img" aria-label="The six stems as coloured lanes, with the playhead and the loop. Click to jump, drag to set a loop."></canvas>
+      <p class="hint">Click a lane to jump there. Drag across the lanes to set an A-B loop.</p>
+    </div>
+    <div class="rack">
+      <div class="card">
+        <h3>Stems</h3>
+        <div class="stems" id="stems"></div>
+      </div>
+      <div class="card">
+        <h3>Loop and Trainer</h3>
+        <div class="row">
+          <button type="button" class="chip" data-act="loop" aria-pressed="false">Loop</button>
+          <button type="button" class="chip" data-act="clear">Clear</button>
+          <span class="loop-times" data-readout="loop">No loop set</span>
+        </div>
+        <label class="row check"><input type="checkbox" data-act="trainer"> <span>Loop Trainer: start at 0.75x, faster on every repeat</span></label>
+      </div>
+      <div class="card">
+        <h3>Speed and Pitch</h3>
+        <label class="row">Speed
+          <select data-act="speed">
+            <option value="0.5">0.50x</option>
+            <option value="0.6">0.60x</option>
+            <option value="0.75">0.75x</option>
+            <option value="0.8">0.80x</option>
+            <option value="0.85">0.85x</option>
+            <option value="0.9">0.90x</option>
+            <option value="0.95">0.95x</option>
+            <option value="1" selected>1.00x</option>
+            <option value="1.25">1.25x</option>
+          </select>
+        </label>
+        <label class="row">Pitch
+          <select data-act="pitch">
+            <option value="-5">-5 semitones</option>
+            <option value="-4">-4 semitones</option>
+            <option value="-3">-3 semitones</option>
+            <option value="-2">-2 semitones</option>
+            <option value="-1">-1 semitone</option>
+            <option value="0" selected>original</option>
+            <option value="1">+1 semitone</option>
+            <option value="2">+2 semitones</option>
+            <option value="3">+3 semitones</option>
+            <option value="4">+4 semitones</option>
+            <option value="5">+5 semitones</option>
+          </select>
+        </label>
+        <label class="row check"><input type="checkbox" data-act="click"> <span>Metronome</span></label>
+      </div>
+    </div>
+    <div class="transport">
+      <button type="button" class="play" data-act="play" aria-label="Play">
+        <svg class="i-play" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor"/></svg>
+      </button>
+      <span class="time" data-readout="time">0:00</span>
+      <span class="note small" data-readout="status" aria-live="polite"></span>
+    </div>
+  </div>
+  <noscript><p class="note">The mixer needs JavaScript.</p></noscript>
+</section>
+
+<section class="how" aria-labelledby="how-title">
+  <h2 id="how-title">How it works</h2>
+  <ol class="steps">
+    <li><b>Import</b> an MP3, WAV or FLAC file, or paste a YouTube link.</li>
+    <li><b>Separate</b> it into 2, 4 or 6 stems. It all happens on your PC; the first time, stemma downloads the models it needs.</li>
+    <li><b>Practice.</b> Mute your part, loop the hard bars, slow them down, change the key, and record your take over the band.</li>
+  </ol>
+</section>
+
+<section id="features" aria-labelledby="features-title">
+  <h2 id="features-title">Features</h2>
+  <ul class="features">
+<!-- gen:features --><!-- /gen:features -->
+  </ul>
+</section>
+
+<section aria-labelledby="shots-title">
+  <h2 id="shots-title">Screenshots</h2>
+  <div class="grid">
+<!-- gen:shots --><!-- /gen:shots -->
+  </div>
+</section>
+
+<section id="new" aria-labelledby="new-title">
+  <h2 id="new-title">What's new in <!-- gen:version --><!-- /gen:version --></h2>
+  <ul class="news">
+<!-- gen:whatsnew --><!-- /gen:whatsnew -->
+  </ul>
+  <p class="note"><a href="https://github.com/cyanidesayonara/stemma/releases">Every release</a></p>
+</section>
+
+<section class="private" aria-labelledby="private-title">
+  <h2 id="private-title">Your songs stay yours</h2>
+  <div class="card wide">
+    <p>Separation runs on your own machine. Nothing is uploaded, there is no account and no telemetry, and once the models are downloaded stemma works offline. Two-stem separation uses your GPU when Windows supports it, and falls back to the CPU when it does not.</p>
+    <p><a href="https://github.com/cyanidesayonara/stemma/blob/main/docs/privacy-policy.md">Privacy policy</a></p>
+  </div>
+</section>
+
+<footer>
+  <a href="https://github.com/cyanidesayonara/stemma">Source on GitHub</a> &middot;
+  <a href="https://github.com/cyanidesayonara/stemma/issues">Report a problem</a> &middot;
+  MIT licence &middot; Made by Santtu Nykänen
+</footer>
+
+</div>
+<script src="demo.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

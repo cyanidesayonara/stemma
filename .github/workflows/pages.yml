@@ -1,0 +1,99 @@
+name: Website
+
+# Publishes https://cyanidesayonara.github.io/stemma/ to GitHub Pages.
+#
+# The pages, styles and the mixer demo come from main (site/); the copy and
+# the screenshots come from the latest stable release's tag, checked out
+# beside main in rel/, so the site always describes the version people
+# download and never main's unreleased work. scripts/build_site.py fills the
+# templates from that tag's store/listing.yaml and Store screenshots.
+#
+# Triggers:
+#   - a finished, successful Release run (a v* tag): the new release goes
+#     live on the site with no one touching site/
+#   - a push to main that changes the site or its build: redeploys with the
+#     latest release's copy
+#   - manual dispatch
+# workflow_run always runs on the default branch, which keeps the deploy
+# inside the github-pages environment's default-branch rule. A prerelease is
+# never "latest", so it leaves the site on the last stable version.
+#
+# One-time setup (done): Settings > Pages > Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "scripts/build_site.py"
+      - "src/store_listing.py"
+      - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deploy at a time, and never cancel one halfway
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Find the latest stable release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # with no tag, gh release view is the latest non-draft,
+          # non-prerelease release
+          gh release view --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,publishedAt \
+            --jq '"tag=\(.tagName)\npublished=\(.publishedAt)"' >> "${GITHUB_OUTPUT}"
+          cat "${GITHUB_OUTPUT}"
+
+      - name: Check out the released commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          path: rel
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Build the site
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          PUBLISHED: ${{ steps.release.outputs.published }}
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet "PyYAML==6.0.3"
+          python scripts/build_site.py --from rel --version "${TAG}" \
+            --released "${PUBLISHED}" --out _site
+          du -sh _site
+          find _site -type f | sort
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

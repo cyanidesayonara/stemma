@@ -196,7 +196,9 @@ build. A release tag still synchronizes both before packaging:
 
 Running that command does not publish a release. The GitHub Release is the
 authority for what shipped. Follow `store-release-pipeline.md` for tag,
-artifact, checksum, and Store submission details.
+artifact, checksum, and Store submission details. A successful release also
+redeploys the website from the new tag's Store listing and screenshots; see
+`website.md`.
 
 ## Contribution workflow
 
