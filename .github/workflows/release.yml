@@ -86,6 +86,8 @@ jobs:
             'stemma version: \d+\.\d+\.\d+',
             'ONNX Runtime version: \S+',
             'librosa version: \d+\.\d+',
+            # a version only when live Speed and Pitch actually ran
+            'soxr version: \d+\.\d+\S* \(live speed and pitch ran\)',
             'DmlExecutionProvider'
           )
           foreach ($pattern in $required) {
