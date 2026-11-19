@@ -5,10 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>stemma - practice any song with the band</title>
 <meta name="description" content="stemma splits any song into vocals, drums, bass, guitar, piano and other, so you can mute your part and play along. Free for Windows, runs entirely on your PC.">
-<meta property="og:title" content="stemma">
+<!-- the link preview (Open Graph, X/Twitter): the release's first Store
+     screenshot, at absolute URLs from the site's address -->
+<meta property="og:title" content="stemma: practice any song with the band">
 <meta property="og:description" content="Split any song into stems, mute your part, and play along. Free for Windows, runs entirely on your PC.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="https://cyanidesayonara.github.io/stemma/img/icon.png">
+<meta property="og:site_name" content="stemma">
+<!-- gen:meta -->
+<!-- /gen:meta -->
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="img/favicon.png">
 <link rel="stylesheet" href="palette.css">
 <link rel="stylesheet" href="style.css">
@@ -37,6 +42,7 @@
     <a href="#try">Try it</a>
     <a href="#features">Features</a>
     <a href="#new">What's new</a>
+    <a href="#faq">Questions</a>
     <button class="theme" type="button" aria-label="Switch to the light theme" title="Switch theme">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>
     </button>
@@ -162,6 +168,36 @@
 <!-- gen:whatsnew --><!-- /gen:whatsnew -->
   </ul>
   <p class="note"><a href="https://github.com/cyanidesayonara/stemma/releases">Every release</a></p>
+</section>
+
+<section id="faq" aria-labelledby="faq-title">
+  <h2 id="faq-title">Questions</h2>
+  <div class="faq">
+    <details>
+      <summary>What do I need to run it?</summary>
+      <p>A 64-bit PC with Windows 10 (version 1809 or later) or Windows 11. stemma itself is about 225 MB. The separation models download once, the first time you use each: about 67 MB for 2 stems, 180 MB for 4 stems and 120 MB for 6 stems, plus 83 MB for beat detection.</p>
+    </details>
+    <details>
+      <summary>How long does separating a song take?</summary>
+      <p>4- and 6-stem separation runs on the processor: on a recent laptop it takes roughly one to two and a half times the length of the song. The 2-stem mode (vocals and the backing track) is faster, and uses the graphics card when Windows supports it. Separation runs in the background, so you can keep practicing while it works, and each song is separated only once.</p>
+    </details>
+    <details>
+      <summary>Which files can I use?</summary>
+      <p>MP3, WAV and FLAC files, or a YouTube link. You can export your own mix, a single stem or a loop as WAV or MP3.</p>
+    </details>
+    <details>
+      <summary>Where are my songs and stems kept?</summary>
+      <p>On your PC, by default in <code>%LOCALAPPDATA%\stemma</code>. You can choose another folder in Edit &gt; Preferences. Nothing is uploaded anywhere.</p>
+    </details>
+    <details>
+      <summary>Is it really free?</summary>
+      <p>Yes. There are no ads, no account and no subscription, and the source code is open under the MIT licence.</p>
+    </details>
+    <details>
+      <summary>Windows warned me about the zip. Is it safe?</summary>
+      <p>The portable zip is not code-signed, so Windows SmartScreen may show a warning: choose More info, then Run anyway. The Microsoft Store version installs without the warning. Each release lists SHA-256 checksums for its downloads.</p>
+    </details>
+  </div>
 </section>
 
 <section class="private" aria-labelledby="private-title">

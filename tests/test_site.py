@@ -329,3 +329,41 @@ def test_worklet_clamps_a_loop_past_the_end():
 @needs_node
 def test_worklet_reports_carry_the_load_id():
     assert _scenario("gens")["gens"] == [1]
+
+
+# ---- link previews and download stats ---------------------------------------
+
+release_stats = _load("release_stats")
+
+
+def test_link_preview_uses_absolute_urls_for_the_first_screenshot(tmp_path):
+    out = tmp_path / "site"
+    build_site.build(ROOT, _version(), "2026-11-19", out,
+                     site_url="https://stemma.example")
+    page = (out / "index.html").read_text(encoding="utf-8")
+    first = build_site.screenshots(ROOT)[0][0]
+    image = f"https://stemma.example/img/shots/{first}"
+    assert f'<meta property="og:image" content="{image}">' in page
+    assert f'<meta name="twitter:image" content="{image}">' in page
+    assert '<link rel="canonical" href="https://stemma.example/">' in page
+    assert (out / "img" / "shots" / first).is_file()
+
+
+def test_release_stats_count_only_the_installable_downloads():
+    releases = [
+        {"tag_name": "v3.0.0", "published_at": "2026-11-20T10:00:00Z",
+         "assets": [
+             {"name": "stemma.zip", "download_count": 4},
+             {"name": "stemma.msix", "download_count": 9},
+             {"name": "SHA256SUMS.txt", "download_count": 50},
+         ]},
+        {"tag_name": "v3.0.1-beta.1", "prerelease": True,
+         "published_at": "2026-11-21T10:00:00Z",
+         "assets": [{"name": "stemma.zip", "download_count": 1}]},
+    ]
+    rows = release_stats.summarise(releases)
+    assert [r["total"] for r in rows] == [13, 1]
+    table = release_stats.markdown(rows)
+    assert "| v3.0.0 | 2026-11-20 | 4 | 9 | 13 |" in table
+    assert "v3.0.1-beta.1 (prerelease)" in table
+    assert table.endswith("| **All releases** | | 5 | 9 | **14** |")
