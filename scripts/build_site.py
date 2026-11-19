@@ -95,6 +95,18 @@ def screenshots(source: Path) -> list[tuple[str, str]]:
     return shots
 
 
+def screenshot_alt(name: str) -> str:
+    """Alt text from an uncaptioned file name: 02_player_light.png ->
+    "stemma screenshot: player, light theme"."""
+    words = re.sub(r"^\d+_", "", Path(name).stem).split("_")
+    theme = [w for w in words if w in ("dark", "light")]
+    rest = " ".join(w for w in words if w not in ("dark", "light"))
+    text = f"stemma screenshot: {rest}" if rest else "stemma screenshot"
+    if theme:
+        text += f", {theme[0]} theme"
+    return text
+
+
 def whats_new_items(text: str) -> list[str]:
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     return [p for p in paragraphs if not WHATS_NEW_HEADING.match(p)]
@@ -111,7 +123,7 @@ def blocks(source: Path, version: str, released: str) -> dict[str, str]:
         raise SystemExit(f"store/listing.yaml has no whats_new for {version}")
     figures = []
     for name, caption in screenshots(source):
-        alt = caption or "A stemma screenshot"
+        alt = caption or screenshot_alt(name)
         width, height = png_size(source / SHOTS / name)
         figures.append(
             f'  <figure><a href="img/shots/{_e(name)}"><img '

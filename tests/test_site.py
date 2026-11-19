@@ -23,7 +23,31 @@ def _load(name):
 site_palette = _load("site_palette")
 build_site = _load("build_site")
 
-HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(")
+
+# store/listing.yaml as v2.6.0 shipped it: no store identity block
+OLD_LISTING = """\
+listing_version: "2.6.0"
+
+short_description: |
+  Practice any song: split it into stems, mute the part you play, slow it
+  down, and loop the hard bars.
+
+description: |
+  stemma turns any song into a practice tool.
+
+features:
+  - "Split any song into vocals, drums, bass, guitar, piano, and other"
+
+search_terms:
+  - stem splitter
+
+whats_new:
+  "2.6.0": |
+    What's new in version 2.6.0
+
+    Faster 2-stem separation -- with GPU acceleration when available.
+"""
 
 
 def _png(path: Path, width: int, height: int) -> None:
@@ -66,7 +90,7 @@ def test_palette_matches_the_app_themes():
 @pytest.mark.parametrize("name", ["style.css", "demo.js", "site.js"])
 def test_site_sources_use_palette_variables_only(name):
     text = (ROOT / "site" / name).read_text(encoding="utf-8")
-    assert HEX.findall(text) == []
+    assert COLOUR.findall(text) == []
 
 
 def test_build_fills_every_block_and_links_resolve(tmp_path):
@@ -97,6 +121,28 @@ def test_release_without_captions_lists_every_screenshot(tmp_path):
     assert build_site.screenshots(source) == [
         ("01_one.png", ""), ("02_two.png", ""),
     ]
+
+
+def test_builds_from_an_older_release_listing(tmp_path):
+    source = _release(tmp_path, captions=False)
+    (source / "store" / "listing.yaml").write_text(OLD_LISTING,
+                                                   encoding="utf-8")
+    out = tmp_path / "site"
+    build_site.build(source, "2.6.0", "2026-07-31T19:48:21Z", out)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert "Practice any song: split it into stems" in page
+    assert "Faster 2-stem separation – with GPU" in page
+    assert "July 31, 2026" in page
+    assert 'alt="stemma screenshot: one"' in page
+
+
+def test_uncaptioned_alt_text_names_the_view_and_theme():
+    assert build_site.screenshot_alt("02_player_light.png") == (
+        "stemma screenshot: player, light theme"
+    )
+    assert build_site.screenshot_alt("01_empty_dark.png") == (
+        "stemma screenshot: empty, dark theme"
+    )
 
 
 def test_unknown_version_fails(tmp_path):

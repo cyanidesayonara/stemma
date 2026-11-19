@@ -198,6 +198,33 @@
     });
   }
 
+  // Every run of the transport plays into its own set of gains, one per
+  // stem, feeding the mute/volume buses. Pausing or seeking fades that set
+  // out and disconnects it, which silences the notes already scheduled
+  // (a pad holds a whole bar) without touching the mixer's own state.
+  var voice = null;
+
+  function openVoice() {
+    voice = {};
+    STEMS.concat([{ id: "click" }]).forEach(function (s) {
+      var g = ctx.createGain();
+      g.connect(buses[s.id]);
+      voice[s.id] = g;
+    });
+  }
+
+  function closeVoice() {
+    if (!voice) { return; }
+    var old = voice;
+    voice = null;
+    Object.keys(old).forEach(function (id) {
+      old[id].gain.setTargetAtTime(0, ctx.currentTime, 0.008);
+    });
+    setTimeout(function () {
+      Object.keys(old).forEach(function (id) { old[id].disconnect(); });
+    }, 150);
+  }
+
   function setupAudio() {
     ctx = new AudioCtx();
     master = ctx.createGain();
@@ -256,7 +283,7 @@
 
   var play = {
     drums: function (n, t) {
-      var out = buses.drums;
+      var out = voice.drums;
       if (n.kind === "kick") {
         var g = envGain(t, n.vel, 0.003, 0.02, 0.28);
         g.connect(out);
@@ -280,12 +307,12 @@
       filt.frequency.exponentialRampToValueAtTime(220, t + Math.max(0.1, d));
       var g = envGain(t, 0.45 * n.vel, 0.005, d * 0.6, 0.12);
       filt.connect(g);
-      g.connect(buses.bass);
+      g.connect(voice.bass);
       osc("sawtooth", freq(n.midi), t, t + d + 0.2, filt);
     },
     piano: function (n, t, d) {
       var g = envGain(t, 0.11 * n.vel, 0.004, 0, d + 0.25);
-      g.connect(buses.piano);
+      g.connect(voice.piano);
       osc("triangle", freq(n.midi), t, t + d + 0.35, g);
       osc("sine", freq(n.midi) * 2, t, t + d + 0.35, g, 3);
     },
@@ -296,7 +323,7 @@
       filt.frequency.exponentialRampToValueAtTime(700, t + 0.25);
       var g = envGain(t, 0.07 * n.vel, 0.002, 0, Math.max(0.2, d * 1.5));
       filt.connect(g);
-      g.connect(buses.guitar);
+      g.connect(voice.guitar);
       osc("square", freq(n.midi), t, t + d * 1.5 + 0.3, filt);
     },
     other: function (n, t, d) {
@@ -305,14 +332,14 @@
       filt.frequency.value = 1100;
       var g = envGain(t, 0.035 * n.vel, Math.min(0.35, d / 3), d * 0.55, 0.45);
       filt.connect(g);
-      g.connect(buses.other);
+      g.connect(voice.other);
       osc("sawtooth", freq(n.midi), t, t + d + 0.6, filt, -8);
       osc("sawtooth", freq(n.midi), t, t + d + 0.6, filt, 8);
     },
     vocals: function (n, t, d) {
       // a sawtooth through two "ah" formants, with a late vibrato
       var g = envGain(t, 0.22 * n.vel, 0.05, Math.max(0, d - 0.08), 0.12);
-      g.connect(buses.vocals);
+      g.connect(voice.vocals);
       var src = ctx.createOscillator();
       src.type = "sawtooth";
       src.frequency.setValueAtTime(freq(n.midi), t);
@@ -347,7 +374,7 @@
 
   function clickAt(t, accent) {
     var g = envGain(t, accent ? 0.5 : 0.3, 0.001, 0, 0.04);
-    g.connect(buses.click);
+    g.connect(voice.click);
     osc("square", accent ? 1800 : 1200, t, t + 0.06, g);
   }
 
@@ -403,6 +430,7 @@
     if (ctx.state === "suspended") { ctx.resume(); }
     state.playing = true;
     state.queue = [];
+    openVoice();
     state.nextTime = ctx.currentTime + 0.06;
     timer = setInterval(tick, 25);
     tick();
@@ -417,14 +445,7 @@
     // pick up where the ear is, not where the scheduler got to
     state.step = Math.floor(playhead()) % STEPS;
     state.queue = [];
-    if (ctx) {
-      STEMS.forEach(function (s) {
-        var g = buses[s.id].gain;
-        g.cancelScheduledValues(ctx.currentTime);
-        g.setTargetAtTime(0, ctx.currentTime, 0.01);
-      });
-      setTimeout(function () { if (!state.playing) { applyGains(); } }, 120);
-    }
+    closeVoice();
     playButton.setAttribute("aria-pressed", "false");
     playButton.setAttribute("aria-label", "Play");
     draw();
@@ -433,7 +454,12 @@
   function seek(step) {
     state.step = Math.max(0, Math.min(STEPS - 1, step));
     state.queue = [];
-    if (state.playing) { state.nextTime = ctx.currentTime + 0.03; }
+    if (state.playing) {
+      // the old position's notes stop; the new one starts clean
+      closeVoice();
+      openVoice();
+      state.nextTime = ctx.currentTime + 0.03;
+    }
     draw();
   }
 
@@ -537,7 +563,7 @@
       var env = ENV[s.id];
       var stride = Math.max(1, Math.floor(bins / span));
       for (var k = 0; k < bins; k += stride) {
-        var v = env[k] * state.volume[s.id] / 0.8;
+        var v = Math.min(1, env[k] * state.volume[s.id] / 0.8);
         var amp = Math.max(0.5, v * (laneH / 2 - 3));
         g2.fillRect(LABEL_W + (k / bins) * span, mid - amp, Math.max(1, barW * stride - 0.5), amp * 2);
       }
@@ -586,6 +612,7 @@
     return ev.clientX - r.left;
   }
   canvas.addEventListener("pointerdown", function (ev) {
+    if (ev.button !== 0) { return; }
     var step = xToStep(localX(ev), canvas.clientWidth);
     drag = { from: step, to: step, x: localX(ev) };
     canvas.setPointerCapture(ev.pointerId);
@@ -614,6 +641,11 @@
       drag = null;
       seek(Math.floor(xToStep(localX(ev), canvas.clientWidth)));
     }
+  });
+  // a touch the browser takes over (a scroll, a gesture) sets nothing
+  canvas.addEventListener("pointercancel", function () {
+    drag = null;
+    draw();
   });
 
   // ---- controls -----------------------------------------------------------
@@ -678,11 +710,15 @@
       if (Math.abs(parseFloat(o.value) - value) < 0.001) { best = o; }
     });
     if (!best) {
+      // a speed the list lacks: add it in order, labelled like the rest
       best = document.createElement("option");
       best.value = String(value);
       best.textContent = value.toFixed(2) + "x";
-      best.setAttribute("data-trainer", "");
-      speedSelect.appendChild(best);
+      var after = null;
+      Array.prototype.forEach.call(speedSelect.options, function (o) {
+        if (!after && parseFloat(o.value) > value) { after = o; }
+      });
+      speedSelect.insertBefore(best, after);
     }
     speedSelect.value = best.value;
   }
@@ -704,13 +740,16 @@
     state.looping = on && state.loopA !== null;
     loopButton.setAttribute("aria-pressed", String(state.looping));
   }
+  // with no loop yet, loop the bar under the playhead
+  function loopThisBar() {
+    if (state.loopA !== null) { return; }
+    var bar = Math.floor(playhead() / STEPS_PER_BAR) % BARS;
+    state.loopA = bar * STEPS_PER_BAR;
+    state.loopB = state.loopA + STEPS_PER_BAR;
+  }
+
   loopButton.addEventListener("click", function () {
-    if (state.loopA === null) {
-      // no loop yet: take the bar under the playhead
-      var bar = Math.floor(playhead() / STEPS_PER_BAR) % BARS;
-      state.loopA = bar * STEPS_PER_BAR;
-      state.loopB = state.loopA + STEPS_PER_BAR;
-    }
+    loopThisBar();
     setLooping(!state.looping);
     draw();
   });
@@ -724,7 +763,13 @@
 
   control("trainer").addEventListener("change", function (ev) {
     state.trainer = ev.target.checked;
-    if (state.trainer) { setSpeed(0.75); }
+    if (state.trainer) {
+      // the Trainer steps up on each repeat, so it needs a loop to repeat
+      loopThisBar();
+      setLooping(true);
+      setSpeed(0.75);
+      draw();
+    }
   });
 
   // the theme toggle repaints the lanes in the other palette
