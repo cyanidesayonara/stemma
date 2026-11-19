@@ -11,6 +11,7 @@ import tempfile
 import soundfile as sf
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -34,6 +35,7 @@ from src.app_settings import (
     open_settings,
     read_default_import_model,
 )
+from src.audio_io import audio_duration
 from src.crash_log import logger
 from src.downloader import (
     DownloadCancelled,
@@ -741,11 +743,15 @@ class ImportDialog(QDialog):
 
         Returns True to proceed, False to abort.
         """
+        # An MP3 is decoded in full to get its real length (#206), which
+        # takes about a second per five minutes of audio.
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            info = sf.info(audio_path)
-            duration = info.duration
+            duration = audio_duration(audio_path)
         except Exception:
             return True
+        finally:
+            QApplication.restoreOverrideCursor()
 
         needed = estimate_separation_memory(duration, is_6_stem)
         avail = available_memory_bytes()

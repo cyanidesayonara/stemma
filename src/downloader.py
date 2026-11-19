@@ -6,14 +6,13 @@ for subsequent import into the stemma library.
 
 import os
 import re
-import shutil
 import sys
 import time
 from typing import Callable
 
-import imageio_ffmpeg
 import yt_dlp
 
+from src.audio_io import ffmpeg_exe as _get_ffmpeg_exe
 from src.crash_log import logger
 from src.import_messages import strip_ansi
 
@@ -112,19 +111,6 @@ _YOUTUBE_PATTERN = re.compile(
     r"(?:(?:www|m|music)\.)*"
     r"(youtube\.com/(watch\?v=|shorts/|live/|embed/)|youtu\.be/)"
 )
-
-
-def _get_ffmpeg_exe() -> str | None:
-    """Return a path to an ffmpeg executable, or None if unavailable.
-
-    Prefers the binary bundled with imageio-ffmpeg so the app works
-    without the user installing ffmpeg separately. Falls back to
-    whatever is on PATH.
-    """
-    try:
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except RuntimeError:
-        return shutil.which("ffmpeg")
 
 
 def check_ffmpeg() -> bool:

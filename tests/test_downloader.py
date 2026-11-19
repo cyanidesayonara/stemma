@@ -188,22 +188,22 @@ class TestExtractMetadata:
 class TestCheckFFmpeg:
     """Test ffmpeg availability check."""
 
-    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+    @patch("src.audio_io.imageio_ffmpeg.get_ffmpeg_exe",
            return_value="/bundled/ffmpeg")
     def test_available_via_imageio(self, mock_get):
         """imageio-ffmpeg bundled binary satisfies the check."""
         assert check_ffmpeg() is True
 
-    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+    @patch("src.audio_io.imageio_ffmpeg.get_ffmpeg_exe",
            side_effect=RuntimeError("no binary"))
-    @patch("src.downloader.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("src.audio_io.shutil.which", return_value="/usr/bin/ffmpeg")
     def test_available_via_path_fallback(self, mock_which, mock_get):
         """Falls back to PATH when imageio-ffmpeg raises."""
         assert check_ffmpeg() is True
 
-    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+    @patch("src.audio_io.imageio_ffmpeg.get_ffmpeg_exe",
            side_effect=RuntimeError("no binary"))
-    @patch("src.downloader.shutil.which", return_value=None)
+    @patch("src.audio_io.shutil.which", return_value=None)
     def test_missing_when_both_unavailable(self, mock_which, mock_get):
         """Returns False only when neither source has ffmpeg."""
         assert check_ffmpeg() is False
@@ -289,7 +289,7 @@ class TestDownloadAudio:
         stem = os.path.splitext(output_path)[0]
         assert opts["outtmpl"] == stem
 
-    @patch("src.downloader.imageio_ffmpeg.get_ffmpeg_exe",
+    @patch("src.audio_io.imageio_ffmpeg.get_ffmpeg_exe",
            return_value="/bundled/ffmpeg")
     @patch("src.downloader.yt_dlp.YoutubeDL")
     def test_ffmpeg_location_passed_to_ytdlp(self, mock_ydl_class, mock_get,
