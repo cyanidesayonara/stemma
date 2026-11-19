@@ -127,6 +127,18 @@ Public download URL pattern (public repo):
 
 Example: `https://github.com/cyanidesayonara/stemma/releases/download/v3.0.0/stemma.msix`
 
+## Keeping the upload link private
+
+A staged draft's `FileUploadUrl` is a write-capable Azure blob SAS link:
+anyone holding it can replace the package and images Partner Center
+ingests at commit. This repository's Actions logs and artifacts are
+public, so the workflow never runs `msstore publish`, `submission get`,
+or `submission publish` with `--verbose` (msstore then logs the link),
+writes submission JSON only to files, and shows it in the log or the
+artifact only through `scripts/redact_submission.py`. Keep it that way
+when changing the workflow, and if a link ever does reach a log, delete
+that run (`gh run delete <id>`) before the link expires, about a day later.
+
 ## Partner Center credentials (GitHub Actions)
 
 Repository secrets for `partner-center-submit.yml`:
@@ -139,7 +151,7 @@ Repository secrets for `partner-center-submit.yml`:
 
 Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.0.0`), check the staged draft, then **`submit`**. Do not submit a workflow-staged draft from Partner Center. Manual MSIX upload remains a fallback if automation fails.
 
-**Not automated (manual in Partner Center when they change):** Store listing screenshots (`assets/store_listing/screenshots/`), poster/box/tile art (`assets/store_listing/*.png`, regenerate with `scripts/generate_store_listing_assets.py`), and any category or age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, 30, 32, and 36 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
+**Listing images are staged by `update_draft`:** the screenshots in `assets/store_listing/screenshots/` (in `captions.txt` order) and the tile, box, and poster art in `assets/store_listing/` (regenerate with `scripts/generate_store_listing_assets.py`). `scripts/stage_store_images.py` marks the Store's current images of those types (screenshots, Icon, StoreLogoSquare, StoreLogo9x16) `PendingDelete`, leaves any other type alone, adds these as `PendingUpload`, and builds the upload zip (the MSIX plus the images) that the workflow PUTs to the draft's `FileUploadUrl`; `submit` then ingests the package and images together. msstore's image model has no description field, so screenshot captions are not sent: add them in Partner Center after certification if wanted, as a separate submission made entirely there. **Not automated:** category and age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, 30, 32, and 36 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
 
 **Limitation:** `msstore publish` (MSIX package upload) is [documented as free-products-only](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview). If package upload fails with that error, the fallback is: upload `stemma.msix` manually in Partner Center first (that makes the pending draft), then run `update_metadata` and `submit`. This fallback is untested: package upload has worked so far, and how Partner Center commits a draft made partly in its own UI has not been tried.
 
