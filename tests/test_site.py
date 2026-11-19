@@ -276,7 +276,14 @@ def test_worklet_stretcher_matches_the_apps(tmp_path, speed):
 
     py = stretcher.read(len(js) + 1, source)
     # the JS resampler starts one sample ahead (read = 1)
-    assert np.max(np.abs(js[: len(js) - 1] - py[1:len(js)])) < 1e-4
+    js, py = js[: len(js) - 1], py[1:len(js)]
+    # Phase locking (#227) picks spectral peaks by comparing neighbouring
+    # bins, and the two FFTs round differently: where two bins are equal
+    # to float precision (a noiseless sine's flat floor, 100 dB down) they
+    # can pick differently, and a sample can part by up to ~1e-3. Overall
+    # the outputs agree to about 1e-5; a real porting slip is far louder.
+    assert np.max(np.abs(js - py)) < 2e-3
+    assert np.linalg.norm(js - py) / np.linalg.norm(py) < 1e-4
 
 
 @needs_node
