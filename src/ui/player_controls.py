@@ -216,6 +216,7 @@ class PlayerControls(QWidget):
         downloader = self._beat_model_downloader
         self._beat_model_downloader = None
         if downloader is not None:
+            safe_disconnect(downloader.progress)
             safe_disconnect(downloader.download_complete)
             safe_disconnect(downloader.error)
             downloader.cancel()
@@ -1295,10 +1296,28 @@ class PlayerControls(QWidget):
             worker.deleteLater()
 
     def _request_beat_model(self) -> None:
-        """Ask for the beat model once, then download it or fall back."""
+        """Ask for the beat model once, then download it or fall back.
+
+        The prompt opens on the next event-loop turn, so the song-load
+        handler that started detection finishes first (title, recordings,
+        waveform peaks) instead of waiting behind the modal prompt.
+        """
         if self._beat_model_downloader is not None or self._beat_model_asking:
             return  # already asking or downloading; pending args updated
         self._beat_model_asking = True
+        QTimer.singleShot(0, self._ask_for_beat_model)
+
+    def _ask_for_beat_model(self) -> None:
+        """Show the deferred beat-model prompt and act on the answer."""
+        if (
+            self._closing
+            or self._pending_detect_generation != self._detection_generation
+            or not self._player.stems
+        ):
+            # Closed or superseded before the prompt opened: ask on the
+            # next detection instead.
+            self._beat_model_asking = False
+            return
         try:
             accepted = self._ask_beat_model_download()
         finally:

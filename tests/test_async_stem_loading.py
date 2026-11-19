@@ -987,6 +987,7 @@ class TestDetectionGeneration:
 
         with patch.object(controls, "_run_detection") as run_detection:
             controls.start_detection(1.0, 2.0)
+            QApplication.processEvents()
             window._player._stems.clear()
             controls.set_stem_names([])
             downloader.download_complete.emit("beat_this.onnx")
@@ -1009,6 +1010,7 @@ class TestDetectionGeneration:
             "vocals": np.zeros((64, 2), dtype=np.float32),
         }
         controls.start_detection(3.0, 4.0)
+        QApplication.processEvents()
 
         with patch.object(controls, "start_detection") as restart:
             downloader.download_complete.emit("beat_this.onnx")

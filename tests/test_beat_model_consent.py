@@ -88,6 +88,7 @@ class TestBeatModelConsent:
             controls, "_ask_beat_model_download", return_value=True,
         ) as ask, patch.object(controls, "_run_detection"):
             controls.start_detection()
+            QApplication.processEvents()
 
         ask.assert_called_once()
         assert len(downloads) == 1
@@ -101,6 +102,7 @@ class TestBeatModelConsent:
             controls, "_ask_beat_model_download", return_value=False,
         ), patch.object(controls, "_run_detection") as run:
             controls.start_detection(1.0, 2.0)
+            QApplication.processEvents()
 
         assert downloads == []
         run.assert_called_once()
@@ -115,7 +117,9 @@ class TestBeatModelConsent:
             controls, "_ask_beat_model_download", return_value=False,
         ) as ask, patch.object(controls, "_run_detection") as run:
             controls.start_detection()
+            QApplication.processEvents()
             controls.start_detection()
+            QApplication.processEvents()
 
         ask.assert_called_once()
         assert downloads == []
@@ -129,8 +133,10 @@ class TestBeatModelConsent:
             controls, "_ask_beat_model_download", return_value=True,
         ) as ask, patch.object(controls, "_run_detection") as run:
             controls.start_detection()
+            QApplication.processEvents()
             downloads[0].error.emit("No connection")
             controls.start_detection()
+            QApplication.processEvents()
 
         ask.assert_called_once()
         assert len(downloads) == 1
@@ -146,9 +152,11 @@ class TestBeatModelConsent:
             controls, "_ask_beat_model_download", return_value=True,
         ) as ask, patch.object(controls, "_run_detection"):
             controls.start_detection()
+            QApplication.processEvents()
             manager.is_beat_model_downloaded.return_value = True
             downloads[0].download_complete.emit("beat_this.onnx")
             controls.start_detection()
+            QApplication.processEvents()
 
         ask.assert_called_once()
 
@@ -162,12 +170,82 @@ class TestBeatModelConsent:
             controls._song_info_bar, "show_detection_status",
         ) as status:
             controls.start_detection()
+            QApplication.processEvents()
             downloads[0].progress.emit(
                 42, "Downloading the beat detection model... 33 of 79 MB",
             )
 
         texts = [" ".join(map(str, c.args)) for c in status.call_args_list]
         assert any("42%" in text for text in texts)
+
+    def test_the_prompt_waits_for_the_load_handler(self, controls):
+        """The prompt opens after the caller returns, not inside it."""
+        controls.set_model_manager(_manager([]))
+
+        with patch.object(
+            controls, "_ask_beat_model_download", return_value=False,
+        ) as ask, patch.object(controls, "_run_detection"):
+            controls.start_detection()
+            ask.assert_not_called()
+            QApplication.processEvents()
+
+        ask.assert_called_once()
+
+    def test_a_request_during_the_prompt_uses_the_newest_range(
+        self, controls,
+    ):
+        controls.set_model_manager(_manager([]))
+
+        def answer_no():
+            # A loop change while the prompt is open.
+            controls.start_detection(3.0, 4.0)
+            return False
+
+        with patch.object(
+            controls, "_ask_beat_model_download", side_effect=answer_no,
+        ) as ask, patch.object(controls, "_run_detection") as run:
+            controls.start_detection(1.0, 2.0)
+            QApplication.processEvents()
+
+        ask.assert_called_once()
+        run.assert_called_once()
+        assert run.call_args.args[:2] == (3.0, 4.0)
+
+    def test_yes_after_a_request_during_the_prompt_downloads_once(
+        self, controls,
+    ):
+        downloads = []
+        controls.set_model_manager(_manager(downloads))
+
+        def answer_yes():
+            controls.start_detection(3.0, 4.0)
+            return True
+
+        with patch.object(
+            controls, "_ask_beat_model_download", side_effect=answer_yes,
+        ), patch.object(controls, "_run_detection") as run:
+            controls.start_detection(1.0, 2.0)
+            QApplication.processEvents()
+            assert len(downloads) == 1
+            downloads[0].download_complete.emit("beat_this.onnx")
+
+        run.assert_called_once()
+        assert run.call_args.args[:2] == (3.0, 4.0)
+        assert controls._beat_model_path == "beat_this.onnx"
+
+    def test_a_song_cleared_before_the_prompt_skips_it(self, controls):
+        controls.set_model_manager(_manager([]))
+
+        with patch.object(
+            controls, "_ask_beat_model_download", return_value=True,
+        ) as ask, patch.object(controls, "_run_detection") as run:
+            controls.start_detection()
+            controls._invalidate_detection()
+            QApplication.processEvents()
+
+        ask.assert_not_called()
+        run.assert_not_called()
+        assert not controls._beat_model_asking
 
     def test_prompt_names_size_host_and_purpose(self, controls):
         controls.set_model_manager(_manager([]))
