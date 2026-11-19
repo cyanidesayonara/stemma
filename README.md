@@ -9,6 +9,8 @@ Latest stable release: **v2.6.0**. The current `main` line targets
 
 ## Download
 
+Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
+
 **Microsoft Store (recommended):** [stemma on the Microsoft Store](https://apps.microsoft.com/detail/9p2w12l8f381)
 
 **Portable zip:** Download **stemma.zip** from the [latest GitHub Release](https://github.com/cyanidesayonara/stemma/releases/latest), extract anywhere, and run `stemma.exe`. No installation required. ONNX models download automatically on first import.
@@ -135,6 +137,7 @@ Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bi
 - [docs/store-release-pipeline.md](docs/store-release-pipeline.md): release
   and Microsoft Store operations
 - [docs/privacy-policy.md](docs/privacy-policy.md): Store privacy policy
+- [docs/website.md](docs/website.md): the GitHub Pages site and its deploy
 
 ## License
 
