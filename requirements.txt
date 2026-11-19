@@ -1,4 +1,8 @@
-PySide6>=6.6.0
+# Pin to the release lock's exact version. Qt releases change widget metrics
+# (6.12 narrowed spinboxes by 16 px) and native behavior, so a float makes CI
+# test a Qt that users never get. Move this pin together with the release
+# lock, and regenerate the widget snapshot goldens on that Qt.
+PySide6==6.11.1
 # DirectML supplies the onnxruntime import package and CPU fallback.
 # Do not co-install the conflicting plain onnxruntime distribution.
 onnxruntime-directml==1.24.4

@@ -5,3 +5,5 @@ pytest-timeout>=2.3.0
 ruff>=0.16.0
 pip-tools>=7.6.0
 PyYAML>=6.0
+# tests/test_dependency_locks.py parses requirement specifiers.
+packaging>=23.0
