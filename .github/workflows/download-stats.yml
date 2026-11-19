@@ -4,6 +4,9 @@ name: Download stats
 # run's summary (Actions > Download stats > the latest run). It only reads
 # GitHub's public per-asset download counts: nothing about visitors or
 # users is collected. Microsoft Store installs are in Partner Center.
+#
+# GitHub pauses scheduled workflows after 60 days without repository
+# activity; run it by hand (Run workflow) to get the numbers regardless.
 
 on:
   schedule:
@@ -19,6 +22,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:

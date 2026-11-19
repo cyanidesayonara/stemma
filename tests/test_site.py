@@ -345,6 +345,7 @@ def test_link_preview_uses_absolute_urls_for_the_first_screenshot(tmp_path):
     image = f"https://stemma.example/img/shots/{first}"
     assert f'<meta property="og:image" content="{image}">' in page
     assert f'<meta name="twitter:image" content="{image}">' in page
+    assert '<meta name="twitter:image:alt" content="' in page
     assert '<link rel="canonical" href="https://stemma.example/">' in page
     assert (out / "img" / "shots" / first).is_file()
 
@@ -360,10 +361,14 @@ def test_release_stats_count_only_the_installable_downloads():
         {"tag_name": "v3.0.1-beta.1", "prerelease": True,
          "published_at": "2026-11-21T10:00:00Z",
          "assets": [{"name": "stemma.zip", "download_count": 1}]},
+        # v1 shipped a single stemma.exe
+        {"tag_name": "v1.0.0", "published_at": "2026-03-24T10:00:00Z",
+         "assets": [{"name": "stemma.exe", "download_count": 4}]},
     ]
     rows = release_stats.summarise(releases)
-    assert [r["total"] for r in rows] == [13, 1]
+    assert [r["total"] for r in rows] == [13, 1, 4]
     table = release_stats.markdown(rows)
-    assert "| v3.0.0 | 2026-11-20 | 4 | 9 | 13 |" in table
+    assert "| v3.0.0 | 2026-11-20 | 4 | 9 | 0 | 13 |" in table
     assert "v3.0.1-beta.1 (prerelease)" in table
-    assert table.endswith("| **All releases** | | 5 | 9 | **14** |")
+    assert "| v1.0.0 | 2026-03-24 | 0 | 0 | 4 | 4 |" in table
+    assert table.endswith("| **All releases** | | 5 | 9 | 4 | **18** |")

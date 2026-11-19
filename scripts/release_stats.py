@@ -21,8 +21,9 @@ import sys
 import urllib.request
 
 REPOSITORY = "cyanidesayonara/stemma"
-# the downloads people install; checksums and other files are left out
-COUNTED = ("stemma.zip", "stemma.msix")
+# the downloads people install (stemma.exe was v1's single file);
+# checksums and other files are left out
+COUNTED = ("stemma.zip", "stemma.msix", "stemma.exe")
 
 
 def fetch_releases(repository: str = REPOSITORY) -> list[dict]:

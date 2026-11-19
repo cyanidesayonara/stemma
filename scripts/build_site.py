@@ -134,6 +134,7 @@ def share_meta(site_url: str, shot: str, alt: str, size: tuple[int, int]
         f'<meta property="og:image:height" content="{size[1]}">',
         f'<meta property="og:image:alt" content="{_e(alt)}">',
         f'<meta name="twitter:image" content="{_e(image)}">',
+        f'<meta name="twitter:image:alt" content="{_e(alt)}">',
     ])
 
 
