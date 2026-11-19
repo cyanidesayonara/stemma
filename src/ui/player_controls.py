@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -32,6 +33,7 @@ from src.beat_detector import (
     transpose_key,
 )
 from src.metronome import tap_tempo
+from src.model_manager import model_label
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.qt_signal_utils import safe_disconnect
 from src.ui.animated_arpeggio import AnimatedArpeggioWidget
@@ -146,6 +148,12 @@ class PlayerControls(QWidget):
         self._model_manager = None  # set via set_model_manager()
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
+        # Once the user says No to the beat model, or its download fails
+        # (offline), detection uses the librosa fallback for the rest of
+        # the session instead of asking or retrying on every song (#205,
+        # #188).
+        self._beat_model_unavailable = False
+        self._beat_model_asking = False
         self._pending_detect_args: tuple | None = None
         self._pending_detect_generation: int | None = None
         self._detection_generation = 0
@@ -1201,8 +1209,10 @@ class PlayerControls(QWidget):
         change.  Results are shown as suggestions only — the metronome
         BPM spinbox is *not* modified.
 
-        If the beat_this ONNX model has not been downloaded yet, it is
-        fetched first and detection resumes on completion.
+        If the beat_this ONNX model has not been downloaded yet, the user
+        is asked first; it is then fetched and detection resumes on
+        completion. A No or a failed download falls back to librosa for
+        the rest of the session.
         """
         if self._closing or not self._player.stems:
             return
@@ -1216,10 +1226,13 @@ class PlayerControls(QWidget):
         if (not _model_ready
                 and self._model_manager
                 and not self._model_manager.is_beat_model_downloaded()):
-            self._pending_detect_args = (start_sec, end_sec)
-            self._pending_detect_generation = generation
-            self._start_beat_model_download()
-            return
+            if self._beat_model_unavailable:
+                self._beat_model_path = None
+            else:
+                self._pending_detect_args = (start_sec, end_sec)
+                self._pending_detect_generation = generation
+                self._request_beat_model()
+                return
 
         self._run_detection(
             start_sec, end_sec, generation=generation,
@@ -1281,6 +1294,47 @@ class PlayerControls(QWidget):
             worker.setParent(None)
             worker.deleteLater()
 
+    def _request_beat_model(self) -> None:
+        """Ask for the beat model once, then download it or fall back."""
+        if self._beat_model_downloader is not None or self._beat_model_asking:
+            return  # already asking or downloading; pending args updated
+        self._beat_model_asking = True
+        try:
+            accepted = self._ask_beat_model_download()
+        finally:
+            self._beat_model_asking = False
+        if self._closing:
+            return
+        if accepted:
+            self._start_beat_model_download()
+            return
+        self._beat_model_unavailable = True
+        self._beat_model_path = None
+        self._resume_pending_detection()
+
+    def _ask_beat_model_download(self) -> bool:
+        """Ask before the first beat-model download; True to download.
+
+        Worded like the import dialog's model prompt (#200), plus the
+        host and what the model adds over the fallback.
+        """
+        manager = self._model_manager
+        size_mb = manager.download_size_mb("beat_this")
+        host = manager.beat_model_host()
+        reply = QMessageBox.question(
+            self,
+            "Download model",
+            f"stemma needs to download the {model_label('beat_this')} "
+            f"(about {size_mb} MB, from {host}) once. It finds the beats "
+            "and the first beat of each bar (downbeats) for the beat grid. "
+            "It stays on this PC for later songs.\n\n"
+            "Without it, tempo and key still work, but there are no "
+            "downbeats.\n\nDownload it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _start_beat_model_download(self) -> None:
         """Download beat_this.onnx, then resume detection."""
         if self._beat_model_downloader is not None:
@@ -1288,10 +1342,20 @@ class PlayerControls(QWidget):
         self._song_info_bar.show_detection_status("downloading model...")
 
         dl = self._model_manager.download_beat_model()
+        dl.progress.connect(self._on_beat_model_progress)
         dl.download_complete.connect(self._on_beat_model_ready)
         dl.error.connect(self._on_beat_model_error)
         self._beat_model_downloader = dl
         dl.start()
+
+    def _on_beat_model_progress(self, percent: int, _message: str) -> None:
+        """Show the download's progress in the detection readouts."""
+        downloader = self.sender()
+        if self._closing or downloader is not self._beat_model_downloader:
+            return
+        self._song_info_bar.show_detection_status(
+            "downloading model...", f"{percent}%",
+        )
 
     def _on_beat_model_ready(self, path: str) -> None:
         downloader = self.sender()
@@ -1299,24 +1363,21 @@ class PlayerControls(QWidget):
             return
         self._beat_model_downloader = None
         self._beat_model_path = path
-        args = self._pending_detect_args or (None, None)
-        generation = self._pending_detect_generation
-        self._pending_detect_args = None
-        self._pending_detect_generation = None
-        if (
-            generation != self._detection_generation
-            or not self._player.stems
-        ):
-            return
-        self.start_detection(*args, _model_ready=True)
+        self._resume_pending_detection()
 
     def _on_beat_model_error(self, msg: str) -> None:
         downloader = self.sender()
         if self._closing or downloader is not self._beat_model_downloader:
             return
         self._beat_model_downloader = None
-        # Fall through without the model — librosa fallback.
+        # Fall through without the model (librosa fallback), and do not
+        # retry this session: offline, each try costs a 30 s timeout.
+        self._beat_model_unavailable = True
         self._beat_model_path = None
+        self._resume_pending_detection()
+
+    def _resume_pending_detection(self) -> None:
+        """Run the detection that waited for the beat model, if current."""
         args = self._pending_detect_args or (None, None)
         generation = self._pending_detect_generation
         self._pending_detect_args = None

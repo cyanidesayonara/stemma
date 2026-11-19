@@ -234,6 +234,9 @@ def open_window(app, library, stemma_dir, settings_path, theme, size):
     apply_tooltip_palette(theme)
     window = MainWindow(library, MultiTrackPlayer(), ModelManager(stemma_dir))
     window.apply_theme(theme, get_colors(theme))
+    # Answer Yes to the beat-model prompt (#205): a modal prompt would
+    # stall an unattended render on a machine without the model.
+    window._player_controls._ask_beat_model_download = lambda: True
     window.resize(*size)
     window.show()
     pump(app, 0.4)

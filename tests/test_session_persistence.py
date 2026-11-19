@@ -76,6 +76,7 @@ def _make_song_with_stems(library, tmp_path, title="Test Song"):
 class _FakeBeatModelDownloader(QThread):
     """Cancellable downloader thread with the production signal contract."""
 
+    progress = Signal(int, str)
     download_complete = Signal(str)
     error = Signal(str)
 
@@ -224,6 +225,8 @@ class TestPlayerControlsShutdown:
         manager.beat_model_path.return_value = "beat_this.onnx"
         manager.is_beat_model_downloaded.return_value = False
         manager.download_beat_model.return_value = downloader
+        # Say Yes to the download prompt (#205, see test_beat_model_consent).
+        controls._ask_beat_model_download = lambda: True
         player._stems = {
             "vocals": np.zeros((100, 2), dtype=np.float32),
         }
