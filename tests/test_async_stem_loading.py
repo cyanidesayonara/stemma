@@ -83,6 +83,7 @@ class _FakeDetectionWorker(QObject):
 
 
 class _FakeBeatDownloader(QObject):
+    progress = Signal(int, str)
     download_complete = Signal(str)
     error = Signal(str)
 
@@ -977,6 +978,8 @@ class TestDetectionGeneration:
         manager.beat_model_path.return_value = "beat_this.onnx"
         manager.is_beat_model_downloaded.return_value = False
         manager.download_beat_model.return_value = downloader
+        # Say Yes to the download prompt (#205, see test_beat_model_consent).
+        controls._ask_beat_model_download = lambda: True
         controls.set_model_manager(manager)
         window._player._stems = {
             "vocals": np.zeros((64, 2), dtype=np.float32),
@@ -984,6 +987,7 @@ class TestDetectionGeneration:
 
         with patch.object(controls, "_run_detection") as run_detection:
             controls.start_detection(1.0, 2.0)
+            QApplication.processEvents()
             window._player._stems.clear()
             controls.set_stem_names([])
             downloader.download_complete.emit("beat_this.onnx")
@@ -999,11 +1003,14 @@ class TestDetectionGeneration:
         manager.beat_model_path.return_value = "beat_this.onnx"
         manager.is_beat_model_downloaded.return_value = False
         manager.download_beat_model.return_value = downloader
+        # Say Yes to the download prompt (#205, see test_beat_model_consent).
+        controls._ask_beat_model_download = lambda: True
         controls.set_model_manager(manager)
         window._player._stems = {
             "vocals": np.zeros((64, 2), dtype=np.float32),
         }
         controls.start_detection(3.0, 4.0)
+        QApplication.processEvents()
 
         with patch.object(controls, "start_detection") as restart:
             downloader.download_complete.emit("beat_this.onnx")

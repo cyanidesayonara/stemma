@@ -14,6 +14,7 @@ Supported models:
 import hashlib
 import os
 import urllib.request
+from urllib.parse import urlparse
 
 from PySide6.QtCore import QObject, QThread, Signal
 
@@ -429,6 +430,10 @@ class ModelManager(QObject):
     def beat_model_path(self) -> str:
         """Return the expected local path to the beat_this ONNX model."""
         return os.path.join(self.models_dir, _BEAT_THIS_FILE)
+
+    def beat_model_host(self) -> str:
+        """Return the host the beat_this model downloads from."""
+        return urlparse(_BEAT_THIS_URL).hostname or ""
 
     def is_beat_model_downloaded(self) -> bool:
         """Check that the beat_this model exists with its expected size."""
