@@ -63,5 +63,18 @@ def test_contact_sheet_groups_by_state(tmp_path):
     assert "loaded_dark_900x600.png" in html
 
 
+def test_contact_sheet_lists_the_about_dialog_last(tmp_path):
+    records = [
+        {"file": "about_dark.png", "state": "about",
+         "theme": "dark", "size": "540x280"},
+        {"file": "practice_dark_900x600.png", "state": "practice",
+         "theme": "dark", "size": "900x600"},
+    ]
+    html = open(write_index(str(tmp_path), records, "t"), encoding="utf-8").read()
+
+    assert html.index("<h2>practice</h2>") < html.index("<h2>about</h2>")
+    assert "about_dark.png" in html
+
+
 def test_parse_sizes():
     assert _parse_sizes("900x600,1920X1080") == ((900, 600), (1920, 1080))
