@@ -174,29 +174,47 @@ def _cards():
     ]
 
 
+def _shipped_cards():
+    return [card for card in _cards() if not card.get("coming")]
+
+
 def test_every_listed_feature_has_a_card():
     features = build_site.load_listing(
         ROOT / "store" / "listing.yaml"
     ).features
-    covered = {f for card in _cards() for f in card["covers"]}
+    covered = {f for card in _shipped_cards() for f in card["covers"]}
     assert set(features) <= covered, (
         "give these Store features a card in site/features.json: "
         f"{sorted(set(features) - covered)}"
     )
-    html_out = build_site.feature_cards(list(features))
+    html_out = build_site.feature_cards(list(features), _version())
     assert 'class="ficon"' in html_out
+    # two columns: an even number of cards, so the last row is full
+    assert html_out.count("<li") % 2 == 0
     assert html_out.count("<li") == len(_cards())
-    assert html_out.count('class="lead"') == 1
 
 
 def test_feature_cards_show_only_released_features():
-    first = _cards()[0]
-    # one of the lead card's features is missing from this release
+    first = _shipped_cards()[0]
+    # one of the first card's features is missing from this release
     released = first["covers"][1:] + ["A feature no card covers"]
-    html_out = build_site.feature_cards(released)
+    html_out = build_site.feature_cards(released, _version())
     assert first["title"] not in html_out
     for feature in released:
         assert build_site._e(feature) in html_out
+
+
+def test_coming_card_shows_until_its_version_ships():
+    coming = [card for card in _cards() if card.get("coming")]
+    assert coming, "no preview card to test"
+    card = coming[0]
+    before = build_site.feature_cards([], "3.0.0")
+    assert card["title"] in before
+    assert f"Coming in {card['coming']}" in before
+    # the preview comes after everything that ships today
+    assert before.rindex("<li") == before.index("<li class=\"coming\">")
+    assert card["title"] not in build_site.feature_cards([], card["coming"])
+    assert card["title"] not in build_site.feature_cards([], "10.0.0")
 
 
 @pytest.mark.parametrize(
@@ -207,6 +225,11 @@ def test_feature_icons_use_palette_variables_only(icon):
     assert COLOUR.findall(text) == []
     assert text.startswith('<svg class="ficon"')
     assert 'aria-hidden="true"' in text
+    # a filled shape with no colour class would fall back to black
+    for shape in re.findall(r"<(?:circle|rect|ellipse)[^>]*>", text):
+        classes = re.search(r'class="([^"]*)"', shape)
+        names = classes.group(1).split() if classes else []
+        assert any(n.startswith("f") or n == "ring" for n in names), shape
 
 
 def test_every_card_has_an_icon():

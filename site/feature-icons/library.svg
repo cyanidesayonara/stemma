@@ -11,7 +11,5 @@
   <rect class="fs" x="10" y="53" width="100" height="12" rx="3"/>
   <rect class="fg" x="16" y="57" width="4" height="4" rx="1"/>
   <path class="sm" d="M26 59 H52"/>
-  <rect class="fa shade pick" x="10" y="8" width="100" height="12" rx="3"/>
-  <path class="sa" d="M80 14 H100"/>
-  <path class="sa resume" d="M80 14 H92"/>
+  <g class="pick"><rect class="fa shade" x="10" y="8" width="100" height="12" rx="3"/><path class="sm" d="M80 14 H100"/><path class="sa resume" d="M80 14 H96"/></g>
 </svg>

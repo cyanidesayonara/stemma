@@ -371,7 +371,7 @@ ol.steps li::before {
 }
 
 /* the features as cards in two columns, each with a small animated
-   drawing of what it does; the first card spans both columns */
+   drawing of what it does; an even number, so the rows fill */
 ul.features {
   list-style: none;
   display: grid;
@@ -392,9 +392,19 @@ ul.features li {
   padding: 20px 22px;
 }
 
-ul.features li.lead { grid-column: 1 / -1; grid-template-columns: 168px minmax(0, 1fr); }
-ul.features li.lead .ficon { width: 168px; }
-ul.features li.lead h3 { font-size: 1.3rem; }
+ul.features .soon {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+ul.features li.coming { border-style: dashed; border-color: var(--surface2); }
 
 ul.features h3 { font-size: 1.1rem; margin: 0 0 6px; }
 ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
@@ -409,7 +419,7 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
 
 .ficon { display: block; width: 120px; height: auto; }
 
-.ficon path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.ficon path, .ficon .ring { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .ficon .thick { stroke-width: 3.5; }
 .ficon .bars { stroke-width: 2.6; }
 .ficon .lane { stroke-width: 1.8; }
@@ -470,10 +480,14 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
 .ficon .reveal { animation: fi-reveal 3s linear infinite; }
 .ficon .rsweep { animation: fi-rsweep 3s linear infinite; }
 .ficon .blink { animation: fi-blink 1s ease-in-out infinite alternate; }
-.ficon .lsweep { animation: fi-lsweep 4s linear infinite; }
+.ficon .lsweep { animation: fi-lsweep 2s linear infinite; }
 .ficon .dash { stroke-dasharray: 3 3; animation: fi-dash 0.6s linear infinite; }
 .ficon .pick { animation: fi-pick 6s step-end infinite; }
-.ficon .resume { transform-origin: 80px 14px; animation: fi-resume 6s linear infinite; }
+.ficon .resume { transform-origin: 80px 14px; animation: fi-resume 1.5s ease-out infinite; }
+.ficon .row { animation: fi-row 4s ease-in-out infinite; }
+.ficon .r1, .ficon .r2 { --to: 15px; }
+.ficon .r3 { --to: -30px; }
+.ficon .r4 { animation: none; }
 .ficon .key { transform-box: fill-box; animation: fi-key 3s ease-out infinite; }
 .ficon .k2 { animation-delay: -2.4s; }
 .ficon .k3 { animation-delay: -1.8s; }
@@ -483,7 +497,7 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
 @keyframes fi-pulse { 50% { transform: scaleY(0.45); } }
 @keyframes fi-flow { to { transform: translateX(-13px); } }
 @keyframes fi-slide { 30% { transform: translateY(-10px); } 70% { transform: translateY(6px); } }
-@keyframes fi-stretch { to { transform: scaleX(1.45); } }
+@keyframes fi-stretch { to { transform: scaleX(1.4); } }
 @keyframes fi-semis {
   0%, 15%, 50%, 65%, 100% { transform: translateY(0); }
   25%, 40% { transform: translateY(-14px); }
@@ -499,13 +513,14 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
 @keyframes fi-reveal { to { transform: translateX(84px); } }
 @keyframes fi-rsweep { to { transform: translateX(84px); } }
 @keyframes fi-blink { to { opacity: 0.35; } }
-@keyframes fi-lsweep { to { transform: translateX(108px); } }
+@keyframes fi-lsweep { to { transform: translateX(30px); } }
 @keyframes fi-dash { to { stroke-dashoffset: -6; } }
 @keyframes fi-pick {
   0% { transform: translateY(0); } 25% { transform: translateY(15px); }
   50% { transform: translateY(30px); } 75% { transform: translateY(45px); }
 }
-@keyframes fi-resume { 0% { transform: scaleX(0); } 25%, 100% { transform: scaleX(1); } }
+@keyframes fi-resume { 0% { transform: scaleX(0); } 70%, 100% { transform: scaleX(1); } }
+@keyframes fi-row { 0%, 20%, 100% { transform: none; } 40%, 80% { transform: translateY(var(--to)); } }
 @keyframes fi-key { 0% { transform: translateY(2px); opacity: 1; } 15%, 100% { transform: none; opacity: 0.6; } }
 
 /* only the cards on screen move (site.js marks them) */
@@ -517,6 +532,7 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
   .ficon .c2, .ficon .c3, .ficon .c4 { display: none; }
   .ficon .beat { opacity: 0.25; }
   .ficon .b1, .ficon .m1 { opacity: 1; }
+  .ficon .reveal, .ficon .rsweep { display: none; }
 }
 
 ul.news {
@@ -566,8 +582,6 @@ footer a { color: var(--subtext); }
   .rack { grid-template-columns: 1fr; }
   ol.steps { grid-template-columns: 1fr; }
   ul.features { grid-template-columns: 1fr; }
-  ul.features li.lead { grid-template-columns: 120px minmax(0, 1fr); }
-  ul.features li.lead .ficon { width: 120px; }
 }
 
 @media (max-width: 520px) {
@@ -575,7 +589,7 @@ footer a { color: var(--subtext); }
   .mark img { width: 150px; }
   .lanes-wrap canvas { height: 200px; }
   .stems { grid-template-columns: max-content auto auto minmax(40px, 1fr); }
-  ul.features li, ul.features li.lead { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
+  ul.features li { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
   .art { justify-self: start; padding: 8px 14px; }
 }
 

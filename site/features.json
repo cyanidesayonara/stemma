@@ -58,7 +58,7 @@
     {
       "id": "record",
       "title": "Record your take",
-      "body": "Record yourself over the backing track. Each take gets its own row in the mixer: set your interface's latency once, then nudge any take into line.",
+      "body": "Record yourself over the backing track, at full speed and in the original key. Each take gets its own row in the mixer: set your interface's latency once, then nudge any take into line.",
       "covers": [
         "Record your own take over the backing track",
         "Line up recorded takes with a latency offset and per-take nudge"
@@ -75,7 +75,7 @@
     {
       "id": "files",
       "title": "Bring a song, take your mix",
-      "body": "Import an MP3, WAV or FLAC file, or paste a YouTube link. Export the mix you hear, a single stem, or just the loop, as WAV or MP3.",
+      "body": "Open or drop in an MP3, WAV or FLAC file, or paste a YouTube link. Export the mix you hear, a single stem, or just the loop, as WAV or MP3.",
       "covers": [
         "Import an MP3, WAV, or FLAC file, or a YouTube link",
         "Export your mix, a single stem, or just the loop as WAV or MP3"
@@ -97,6 +97,13 @@
       "covers": [
         "Keyboard shortcuts for the whole practice loop"
       ]
+    },
+    {
+      "id": "setlists",
+      "coming": "3.1",
+      "title": "Setlists and a play queue",
+      "body": "Put songs into setlists for a lesson or a gig, tag them, and line up what plays next without reshuffling your library. Each song will show the loop, speed and pitch you left it at.",
+      "covers": []
     }
   ]
 }

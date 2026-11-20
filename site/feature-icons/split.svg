@@ -11,8 +11,8 @@
   <path class="sd" d="M42 36 H61"/>
   <path class="sb" d="M42 36 C52 36 52 58 61 58"/>
   <g clip-path="url(#fi-split-c)">
-  <path class="sv flow" d="M62 14 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
-  <path class="sd flow" d="M62 36 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
-  <path class="sb flow" d="M62 58 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  <path class="sv flow" d="M62 14 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  <path class="sd flow" d="M62 36 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  <path class="sb flow" d="M62 58 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
   </g>
 </svg>

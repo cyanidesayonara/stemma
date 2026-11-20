@@ -104,33 +104,50 @@ def screenshots(source: Path) -> list[tuple[str, str]]:
     return shots
 
 
-def feature_cards(released: list[str]) -> str:
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version)[:3])
+
+
+def feature_cards(released: list[str], version: str) -> str:
     """The Features section: a card per group of released Store features.
 
     A card in features.json shows only when every feature it covers is in
     the released listing, so the site never describes unreleased work; a
-    released feature no card covers still gets a plain card of its own.
+    released feature no card covers still gets a plain card of its own. A
+    card marked ``"coming": "X.Y"`` is a labelled preview of the next
+    version, shown only while the released version is older than that.
     """
     cards = json.loads(FEATURES.read_text(encoding="utf-8"))["cards"]
     shown = set(released)
     covered: set[str] = set()
     items = []
     for card in cards:
+        coming = card.get("coming")
+        if coming:
+            if _version_key(version) < _version_key(coming):
+                items.append((card["id"], card["title"], card["body"],
+                              coming))
+            continue
         if not set(card["covers"]) <= shown:
             continue
         covered.update(card["covers"])
-        items.append((card["id"], card["title"], card["body"]))
+        items.append((card["id"], card["title"], card["body"], None))
     for feature in released:
         if feature not in covered:
-            items.append(("note", feature, ""))
+            items.append(("note", feature, "", None))
+    # the preview goes last, after everything that ships today
+    items.sort(key=lambda item: item[3] is not None)
     out = []
-    for i, (icon, title, body) in enumerate(items):
+    for icon, title, body, coming in items:
         svg = (FEATURE_ICONS / f"{icon}.svg").read_text(encoding="utf-8")
-        lead = ' class="lead"' if i == 0 and body else ""
-        text = f"<h3>{_e(title)}</h3>"
+        text = ""
+        if coming:
+            text += f'<span class="soon">Coming in {_e(coming)}</span>'
+        text += f"<h3>{_e(title)}</h3>"
         if body:
             text += f"<p>{_e(body)}</p>"
-        out.append(f'  <li{lead}><div class="art">{svg.strip()}</div>'
+        attrs = ' class="coming"' if coming else ""
+        out.append(f'  <li{attrs}><div class="art">{svg.strip()}</div>'
                    f'<div class="copy">{text}</div></li>')
     return "\n".join(out)
 
@@ -197,7 +214,7 @@ def blocks(source: Path, version: str, released: str,
         "version": _e(version),
         "released": _e(long_date(released)),
         "pitch": _e(listing.short_description),
-        "features": feature_cards(list(listing.features)),
+        "features": feature_cards(list(listing.features), version),
         "whatsnew": "\n".join(
             f"  <li>{_e(item)}</li>"
             for item in whats_new_items(listing.whats_new[version])
