@@ -26,6 +26,36 @@ def test_play_missing_file_is_noop() -> None:
     play_wav_async("/nonexistent/stemma/arpeggio.wav")
 
 
+def test_playback_module_is_visible_to_pyinstaller() -> None:
+    """The packaged build shipped without the playback module.
+
+    PyInstaller finds modules by their import statements and does not read
+    ``importlib.import_module("...")`` strings, so the 3.0.0 bundle had no
+    ``src.ui._wav_playback_impl``: every logo click raised inside the
+    widgets' guard and animated in silence, while the splash, which calls
+    winsound itself, still played. Any deferred import of a ``src`` module
+    has to stay a plain import statement.
+    """
+    import ast
+    import pathlib
+
+    src_dir = pathlib.Path(app_root()) / "src"
+    offenders = []
+    for path in src_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "import_module"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and str(node.args[0].value).startswith("src")
+            ):
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == []
+
+
 @pytest.mark.skipif(
     _SKIP_QT_MULTIMEDIA_CI,
     reason="Qt Multimedia hangs on GitHub Actions Windows runners",
@@ -91,7 +121,7 @@ class TestQtMultimediaOptional:
         try:
             with patch.object(builtins, "__import__", fake_import):
                 mod = importlib.import_module(impl_name)
-            assert mod.QSoundEffect is None
+                assert mod._sound_effect_class() is None
         finally:
             sys.modules.pop(impl_name, None)
             if saved_qtmm is not None:

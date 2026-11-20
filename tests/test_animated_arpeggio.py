@@ -227,3 +227,30 @@ class TestClickReplay:
         w.mousePressEvent(_left_mouse_press(10, 10))
         assert w._animating is True
         w._timer.stop()
+
+    def test_click_plays_the_jingle(self, app, monkeypatch):
+        """A click reaches the platform player with arpeggio.wav."""
+        from src.ui import _wav_playback_impl
+
+        played = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl", lambda path: played.append(path),
+        )
+        w = AnimatedArpeggioWidget(theme="dark")
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        w._timer.stop()
+        assert [p.name for p in played] == ["arpeggio.wav"]
+
+    def test_sound_starts_before_the_animation_clock(self, app, monkeypatch):
+        from src.ui import _wav_playback_impl
+
+        w = AnimatedArpeggioWidget(theme="dark")
+        clock_running = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl",
+            lambda path: clock_running.append(w._clock.isValid()),
+        )
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        w._timer.stop()
+        assert clock_running == [False]
+        assert w._clock.isValid()
