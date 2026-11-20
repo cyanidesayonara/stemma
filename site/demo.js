@@ -61,7 +61,9 @@
     song: null,       // the chosen entry from songs.json
     stems: [],        // its stems, in the app's order
     loaded: null,     // id of the song whose audio the engine holds
-    loading: null,    // {song, promise} while one is being decoded
+    pick: 0,          // counts song picks; a load or play started for an
+                      // earlier pick is stale and changes nothing
+    loading: null,    // {pick, promise} while the song is being decoded
     gen: 0,           // which load that is; the engine echoes it back
     wantPlay: false,  // what the play button shows
     playing: false,   // the engine is playing
@@ -212,16 +214,18 @@
   }
 
   // Decode the chosen song and hand its audio to the engine, transferred
-  // rather than copied. Asking twice for one song shares one load.
+  // rather than copied. Asking twice during one pick shares one load; a
+  // load for an earlier pick sends nothing and resolves "stale".
   function load(song) {
-    if (state.loading && state.loading.song === song) {
+    var pick = state.pick;
+    if (state.loading && state.loading.pick === pick) {
       return state.loading.promise;
     }
     setNote("Loading " + song.title + "...");
     var promise = ensureEngine().then(function () {
       return decode(song);
     }).then(function (audio) {
-      if (state.song !== song) { return false; }
+      if (state.pick !== pick) { return "stale"; }
       var sr = ctx.sampleRate;
       var transfer = [];
       Object.keys(audio.stems).forEach(function (id) {
@@ -243,18 +247,17 @@
       setNote("");
       return true;
     }).catch(function () {
-      if (state.song === song) {
-        setNote(window.AudioWorkletNode ? "The song could not be loaded." :
-          "This browser cannot play the demo.");
-      }
+      if (state.pick !== pick) { return "stale"; }
+      setNote(window.AudioWorkletNode ? "The song could not be loaded." :
+        "This browser cannot play the demo.");
       return false;
     }).then(function (ok) {
-      if (state.loading && state.loading.song === song) {
+      if (state.loading && state.loading.pick === pick) {
         state.loading = null;
       }
       return ok;
     });
-    state.loading = { song: song, promise: promise };
+    state.loading = { pick: pick, promise: promise };
     return promise;
   }
 
@@ -270,25 +273,29 @@
   // inside the user's gesture, before anything waits.
   function play() {
     var song = state.song;
+    var pick = state.pick;
     state.wantPlay = true;
     showPlaying();
     var ready = state.loaded === song.id ? ensureEngine() : load(song);
     // always resume: a suspend from the last pause may still be pending
     var resumed = ctx ? ctx.resume() : Promise.resolve();
     Promise.all([ready, resumed]).then(function (done) {
-      if (done[0] === false || state.song !== song || !state.wantPlay) {
-        if (done[0] === false) {
-          state.wantPlay = false;
-          showPlaying();
-        }
+      // another song was picked meanwhile: its own play is in charge
+      if (state.pick !== pick || done[0] === "stale") { return; }
+      if (done[0] === false) {
+        state.wantPlay = false;
+        showPlaying();
         return;
       }
+      // paused meanwhile, or an earlier click already started it
+      if (!state.wantPlay || state.playing) { return; }
       if (state.pos > 0) { seek(state.pos); }
       send({ type: "play" });
       state.playing = true;
       state.posAt = performance.now();
       requestAnimationFrame(frame);
     }, function () {
+      if (state.pick !== pick) { return; }
       state.wantPlay = false;
       showPlaying();
       setNote("This browser cannot play the demo.");
@@ -337,6 +344,7 @@
   function pick(song) {
     var resume = state.wantPlay;
     if (resume) { pause(); }
+    state.pick += 1;
     state.song = song;
     state.stems = songStems(song);
     state.loaded = null;
@@ -594,12 +602,23 @@
     draw();
   });
 
-  // the keys the app uses: Left and Right move 5 s, Home goes to the start
+  // as the app: Left and Right (and Down and Up) move 5 s; Page Down and
+  // Page Up move 15 s; Home and End go to the start and the end
   canvas.addEventListener("keydown", function (ev) {
     if (!state.song || ev.altKey || ev.ctrlKey || ev.metaKey) { return; }
     var here = playhead();
     if (ev.key === "ArrowLeft") {
       seek(here - SEEK_STEP);
+    } else if (ev.key === "ArrowDown") {
+      seek(here - SEEK_STEP);
+    } else if (ev.key === "ArrowUp") {
+      seek(here + SEEK_STEP);
+    } else if (ev.key === "PageDown") {
+      seek(here - 3 * SEEK_STEP);
+    } else if (ev.key === "PageUp") {
+      seek(here + 3 * SEEK_STEP);
+    } else if (ev.key === "End") {
+      seek(state.song.duration);
     } else if (ev.key === "ArrowRight") {
       seek(here + SEEK_STEP);
     } else if (ev.key === "Home") {

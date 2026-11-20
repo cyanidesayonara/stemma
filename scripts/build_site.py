@@ -55,7 +55,6 @@ FEATURE_ICONS = SITE / "feature-icons"
 # the Pages workflow passes the real one (a custom domain included)
 DEFAULT_SITE_URL = "https://cyanidesayonara.github.io/stemma/"
 SHOTS = Path("assets") / "store_listing" / "screenshots"
-STORE_URL = "https://apps.microsoft.com/detail/9p2w12l8f381"
 
 # each page and the blocks it must carry
 PAGES = {
@@ -205,7 +204,17 @@ def theme_color() -> str:
     ])
 
 
-def json_ld(version: str, description: str) -> str:
+def store_url(source: Path) -> str:
+    """The public Store listing URL, from the release's listing.yaml; from
+    this checkout's when that release predates the store block."""
+    for checkout in (source, ROOT):
+        store = load_listing(checkout / "store" / "listing.yaml").store
+        if store is not None:
+            return store.url
+    raise SystemExit("store/listing.yaml has no store url")
+
+
+def json_ld(version: str, description: str, download_url: str) -> str:
     """A schema.org SoftwareApplication record for the released app."""
     record = {
         "@context": "https://schema.org",
@@ -215,7 +224,7 @@ def json_ld(version: str, description: str) -> str:
         "applicationCategory": "MultimediaApplication",
         "softwareVersion": version,
         "description": description,
-        "downloadUrl": STORE_URL,
+        "downloadUrl": download_url,
         "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
     }
     text = json.dumps(record, ensure_ascii=False, indent=2)
@@ -275,7 +284,8 @@ def blocks(source: Path, version: str, released: str,
         ),
         "themecolor": theme_color(),
         "jsonld": json_ld(version,
-                          " ".join(listing.short_description.split())),
+                          " ".join(listing.short_description.split()),
+                          store_url(source)),
         # the demo ships with the site, from this checkout
         "credits": demo_credits(json.loads(
             (SITE / "demo" / "songs.json").read_text(encoding="utf-8")

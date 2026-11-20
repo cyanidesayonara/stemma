@@ -342,7 +342,8 @@ def test_head_carries_theme_colours_and_the_app_record(tmp_path):
     assert record["softwareVersion"] == version
     assert record["applicationCategory"] == "MultimediaApplication"
     assert record["offers"]["price"] == "0"
-    assert record["downloadUrl"] == build_site.STORE_URL
+    store = build_site.load_listing(ROOT / "store" / "listing.yaml").store
+    assert record["downloadUrl"] == store.url
     assert '<link rel="apple-touch-icon" href="img/icon.png">' in page
 
 
@@ -500,6 +501,27 @@ def test_demo_lanes_and_rows_follow_each_songs_stems():
         assert found["songs"][song["id"]] == song["stems"]
     # the Trainer steps one preset per repeat, as the app does
     assert found["trainer"] == [0.75, 0.85, 1.0]
+
+
+@needs_node
+@pytest.mark.parametrize("scenario, last", [
+    ("switch-twice", 2),   # A playing, then B and C at once: C plays
+    ("switch-back", 0),    # A playing, then B and back to A: A plays
+])
+def test_demo_stale_load_does_not_cancel_the_current_play(scenario, last):
+    done = subprocess.run(
+        [NODE, str(ROOT / "tests" / "js" / "page_harness.js"),
+         str(ROOT / "site" / "demo.js"), str(DEMO / "songs.json"), scenario],
+        capture_output=True, text=True, check=True, timeout=60,
+    )
+    found = json.loads(done.stdout)
+    first = _songs()[0]["id"]
+    # one load for the first play and one for the song picked last: the
+    # song between them sends nothing, and nothing is loaded twice
+    assert found["loads"] == [first, _songs()[last]["id"]]
+    assert found["playAfterLastLoad"] is True
+    assert found["pressed"] == "true"
+    assert found["suspends"] == 0
 
 
 @needs_node

@@ -25,6 +25,13 @@
       var other = theme === "dark" ? "light" : "dark";
       button.setAttribute("aria-label", "Switch to the " + other + " theme");
     }
+    // the browser bar follows the theme shown, picked or the system's: the
+    // page background, read from the palette
+    var bar = getComputedStyle(root).getPropertyValue("--mantle").trim();
+    if (bar) {
+      document.querySelectorAll('meta[name="theme-color"]').forEach(
+        function (meta) { meta.setAttribute("content", bar); });
+    }
     document.dispatchEvent(new CustomEvent("stemma-theme"));
   }
 

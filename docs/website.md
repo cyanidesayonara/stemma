@@ -102,7 +102,8 @@ the next play starts from 0:00. After a pause has faded out the page
 suspends the audio context, and a song switch waits for the fade-out
 before the new song loads. On the lanes, a tap seeks, a sideways drag sets
 a loop, and a vertical swipe scrolls the page; with the lanes focused,
-Left and Right move 5 seconds and Home goes to the start, as in the app.
+Left and Right (and Down and Up) move 5 seconds as in the app, Page Down
+and Page Up move 15, and Home and End go to the start and the end.
 
 ### The songs
 
