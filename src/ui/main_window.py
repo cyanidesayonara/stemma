@@ -825,7 +825,7 @@ class MainWindow(QMainWindow):
             f'<p><a style="color:{accent};" '
             f'href="https://github.com/cyanidesayonara/stemma">'
             f"Source code on GitHub</a></p>"
-            f"<p>MIT License &middot; Made by Santtu Nykänen</p>"
+            f"<p>MIT License<br>Made by Santtu&nbsp;Nykänen</p>"
         )
         info.setOpenExternalLinks(True)
         info.setWordWrap(True)

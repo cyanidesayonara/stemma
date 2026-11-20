@@ -73,7 +73,7 @@ def test_main_window_carries_no_author_line(window):
 
 def test_about_dialog_credits_the_author(window):
     dlg = window._build_about_dialog()
-    text = dlg.info_label.text()
+    text = dlg.info_label.text().replace("&nbsp;", " ")
     assert "Made by Santtu Nykänen" in text
     assert text.count("Nykänen") == 1
     dlg.deleteLater()
