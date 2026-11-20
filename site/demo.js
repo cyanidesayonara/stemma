@@ -1,14 +1,50 @@
-/* The "Try the mixer" demo: free-to-use songs, each separated into six
-   stems by stemma itself, played with the app's practice controls (mute,
-   solo, volume, A-B loop, Loop Trainer, speed, pitch, metronome) over its
+/* The "Try the mixer" demo: free-to-use songs, each separated into stems by
+   stemma itself, played with the app's practice controls (mute, solo,
+   volume, A-B loop, Loop Trainer, speed, pitch, metronome) over its
    stacked, stem-coloured waveform lanes.
 
    The audio runs in stretch-worklet.js, which mixes the stems and changes
    speed and pitch live the way the app does. The tempo, key, beats and
    chords come from the app's own detector, run on each clip by
-   scripts/make_demo_songs.py and stored in demo/songs.json. */
+   scripts/make_demo_songs.py and stored in demo/songs.json. A song may
+   have any of the six stems (a 4-stem song has vocals, drums, bass and
+   other); the lanes and the mixer rows follow the song. */
 (function () {
   "use strict";
+
+  // the app's stems, in its order (src/ui/main_window.py ALL_STEM_NAMES)
+  var STEMS = [
+    { id: "vocals", label: "Vocals" },
+    { id: "drums", label: "Drums" },
+    { id: "bass", label: "Bass" },
+    { id: "other", label: "Other" },
+    { id: "guitar", label: "Guitar" },
+    { id: "piano", label: "Piano" }
+  ];
+  // the app's speeds (src/player.py SPEED_PRESETS); the Loop Trainer
+  // steps through them, one per repeat, up to 1.0x
+  var SPEED_PRESETS = [0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0];
+  var TRAINER_START = 0.75;
+  var SEEK_STEP = 5;   // seconds, as the app's Left and Right keys
+
+  // the stems a song has, in the app's order
+  function songStems(song) {
+    var have = (song && song.stems) || [];
+    return STEMS.filter(function (s) { return have.indexOf(s.id) >= 0; });
+  }
+
+  // the next speed the Trainer steps to, or null at 1.0x
+  function nextTrainerSpeed(speed) {
+    for (var i = 0; i < SPEED_PRESETS.length; i++) {
+      var p = SPEED_PRESETS[i];
+      if (p > speed + 1e-6 && p <= 1 + 1e-6) { return p; }
+    }
+    return null;
+  }
+
+  // for tests/test_site.py, which runs this file in Node
+  window.stemmaDemo = { STEMS: STEMS, SPEED_PRESETS: SPEED_PRESETS,
+    songStems: songStems, nextTrainerSpeed: nextTrainerSpeed };
 
   var cockpit = document.getElementById("cockpit");
   var canvas = document.getElementById("lanes");
@@ -19,22 +55,16 @@
   var AudioCtx = window.AudioContext || window.webkitAudioContext;
   var NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A",
     "Bb", "B"];
-  var STEMS = [
-    { id: "vocals", label: "Vocals" },
-    { id: "drums", label: "Drums" },
-    { id: "bass", label: "Bass" },
-    { id: "other", label: "Other" },
-    { id: "guitar", label: "Guitar" },
-    { id: "piano", label: "Piano" }
-  ];
 
   var state = {
     songs: [],
     song: null,       // the chosen entry from songs.json
+    stems: [],        // its stems, in the app's order
     loaded: null,     // id of the song whose audio the engine holds
+    loading: null,    // {song, promise} while one is being decoded
     gen: 0,           // which load that is; the engine echoes it back
-    loading: false,
-    playing: false,
+    wantPlay: false,  // what the play button shows
+    playing: false,   // the engine is playing
     speed: 1,
     pitch: 0,
     click: false,
@@ -56,7 +86,7 @@
 
   var ctx = null;
   var node = null;
-  var decoded = {};   // song id -> {stems, length}
+  var engineReady = null;
 
   function readVar(name) {
     return getComputedStyle(document.documentElement)
@@ -64,7 +94,7 @@
   }
 
   function audible(id) {
-    var anySolo = STEMS.some(function (s) { return state.solo[s.id]; });
+    var anySolo = state.stems.some(function (s) { return state.solo[s.id]; });
     if (anySolo) { return state.solo[id]; }
     return !state.mute[id];
   }
@@ -75,7 +105,7 @@
 
   function sendGains() {
     var gains = {};
-    STEMS.forEach(function (s) {
+    state.stems.forEach(function (s) {
       gains[s.id] = audible(s.id) ? state.volume[s.id] : 0;
     });
     send({ type: "gains", gains: gains });
@@ -92,41 +122,72 @@
     send({ type: "params", speed: state.speed, semis: state.pitch });
   }
 
-  // ---- loading ------------------------------------------------------------
+  // ---- the engine ---------------------------------------------------------
   function setNote(text) {
     readouts.status.textContent = text;
   }
 
+  // Create the audio context at once (inside the click that asked for it,
+  // so iOS lets it play), and load the worklet.
   function ensureEngine() {
-    if (ctx) { return Promise.resolve(); }
+    if (engineReady) { return engineReady; }
     if (!AudioCtx || !window.AudioWorkletNode) {
       return Promise.reject(new Error("no worklet"));
     }
+    // iOS: play as media, so the demo is heard with the ringer muted
+    try {
+      if (navigator.audioSession) { navigator.audioSession.type = "playback"; }
+    } catch (e) {}
     ctx = new AudioCtx();
-    return ctx.audioWorklet.addModule("stretch-worklet.js").then(function () {
-      node = new AudioWorkletNode(ctx, "stem-player", {
-        numberOfInputs: 0, outputChannelCount: [2] });
-      var master = ctx.createGain();
-      master.gain.value = 0.9;
-      node.connect(master);
-      master.connect(ctx.destination);
-      node.port.onmessage = function (ev) {
-        var m = ev.data;
-        // reports about an earlier load (another song, still pausing) do
-        // not move this one
-        if (m.gen !== state.gen || state.loaded !== state.song.id) { return; }
-        if (m.type === "pos") {
-          state.pos = m.frame / ctx.sampleRate;
-          state.posAt = performance.now();
-        } else if (m.type === "wrap") {
-          onWrap();
-        }
-      };
-    });
+    engineReady = ctx.audioWorklet.addModule("stretch-worklet.js")
+      .then(function () {
+        node = new AudioWorkletNode(ctx, "stem-player", {
+          numberOfInputs: 0, outputChannelCount: [2] });
+        var master = ctx.createGain();
+        master.gain.value = 0.9;
+        node.connect(master);
+        master.connect(ctx.destination);
+        node.port.onmessage = onEngineMessage;
+      });
+    return engineReady;
   }
 
+  function onEngineMessage(ev) {
+    var m = ev.data;
+    if (m.type === "stopped") {
+      // a pause has faded out: let the audio thread rest until the next
+      // play (not when this is the song before a switch, or play was
+      // pressed again meanwhile)
+      if (!state.wantPlay) { suspend(); }
+      return;
+    }
+    // reports about an earlier load (another song, still fading) do not
+    // move this one
+    if (m.gen !== state.gen || state.loaded !== state.song.id) { return; }
+    if (m.type === "pos") {
+      state.pos = m.frame / ctx.sampleRate;
+      state.posAt = performance.now();
+      if (!state.playing) { draw(); }
+    } else if (m.type === "wrap") {
+      onWrap();
+    } else if (m.type === "ended") {
+      state.wantPlay = false;
+      state.playing = false;
+      state.pos = 0;
+      showPlaying();
+      draw();
+      suspend();
+    }
+  }
+
+  function suspend() {
+    if (ctx && ctx.state !== "closed") { ctx.suspend(); }
+  }
+
+  // Fetch and decode a song's stems (the MP3s are HTTP-cached, so a song
+  // decoded again later costs little). The page keeps no copy: the
+  // samples move to the worklet.
   function decode(song) {
-    if (decoded[song.id]) { return Promise.resolve(decoded[song.id]); }
     return Promise.all(song.stems.map(function (id) {
       return fetch("demo/" + song.id + "/" + id + ".mp3")
         .then(function (r) {
@@ -140,84 +201,108 @@
       }));
       var stems = {};
       buffers.forEach(function (b, i) {
+        // slices: the worklet takes ownership of these copies
         var left = b.getChannelData(0).slice(0, length);
         var right = (b.numberOfChannels > 1 ? b.getChannelData(1) :
           b.getChannelData(0)).slice(0, length);
         stems[song.stems[i]] = [left, right];
       });
-      decoded[song.id] = { stems: stems, length: length };
-      return decoded[song.id];
+      return { stems: stems, length: length };
     });
   }
 
-  // Hand the chosen song's audio to the engine (copies, so a song can be
-  // handed over again after switching back to it).
+  // Decode the chosen song and hand its audio to the engine, transferred
+  // rather than copied. Asking twice for one song shares one load.
   function load(song) {
-    state.loading = true;
+    if (state.loading && state.loading.song === song) {
+      return state.loading.promise;
+    }
     setNote("Loading " + song.title + "...");
-    return ensureEngine().then(function () {
+    var promise = ensureEngine().then(function () {
       return decode(song);
     }).then(function (audio) {
       if (state.song !== song) { return false; }
       var sr = ctx.sampleRate;
-      var stems = {};
       var transfer = [];
       Object.keys(audio.stems).forEach(function (id) {
-        var l = audio.stems[id][0].slice();
-        var r = audio.stems[id][1].slice();
-        stems[id] = [l, r];
-        transfer.push(l.buffer, r.buffer);
+        transfer.push(audio.stems[id][0].buffer, audio.stems[id][1].buffer);
       });
-      sendGains();
       state.gen += 1;
-      send({ type: "load", gen: state.gen, stems: stems,
+      // the engine holds this back until a playing song has faded out
+      send({ type: "load", gen: state.gen, stems: audio.stems,
         length: audio.length,
         beats: song.beats.map(function (t) { return Math.round(t * sr); }),
         downbeats: song.downbeats.map(function (t) {
           return Math.round(t * sr);
         }) }, transfer);
+      sendGains();
       sendParams();
       sendLoop();
       send({ type: "click", on: state.click });
       state.loaded = song.id;
-      state.loading = false;
       setNote("");
       return true;
     }).catch(function () {
-      state.loading = false;
-      setNote(window.AudioWorkletNode ? "The song could not be loaded." :
-        "This browser cannot play the demo.");
+      if (state.song === song) {
+        setNote(window.AudioWorkletNode ? "The song could not be loaded." :
+          "This browser cannot play the demo.");
+      }
       return false;
+    }).then(function (ok) {
+      if (state.loading && state.loading.song === song) {
+        state.loading = null;
+      }
+      return ok;
     });
+    state.loading = { song: song, promise: promise };
+    return promise;
   }
 
   // ---- transport ----------------------------------------------------------
   var playButton = control("play");
 
   function showPlaying() {
-    playButton.setAttribute("aria-pressed", String(state.playing));
-    playButton.setAttribute("aria-label", state.playing ? "Pause" : "Play");
+    playButton.setAttribute("aria-pressed", String(state.wantPlay));
+    playButton.setAttribute("aria-label", state.wantPlay ? "Pause" : "Play");
   }
 
+  // Called from a click: the context is created or resumed right here,
+  // inside the user's gesture, before anything waits.
   function play() {
     var song = state.song;
+    state.wantPlay = true;
+    showPlaying();
     var ready = state.loaded === song.id ? ensureEngine() : load(song);
-    Promise.resolve(ready).then(function (ok) {
-      if (ok === false || state.song !== song) { return; }
-      if (ctx.state === "suspended") { ctx.resume(); }
+    // always resume: a suspend from the last pause may still be pending
+    var resumed = ctx ? ctx.resume() : Promise.resolve();
+    Promise.all([ready, resumed]).then(function (done) {
+      if (done[0] === false || state.song !== song || !state.wantPlay) {
+        if (done[0] === false) {
+          state.wantPlay = false;
+          showPlaying();
+        }
+        return;
+      }
       if (state.pos > 0) { seek(state.pos); }
       send({ type: "play" });
       state.playing = true;
       state.posAt = performance.now();
-      showPlaying();
       requestAnimationFrame(frame);
+    }, function () {
+      state.wantPlay = false;
+      showPlaying();
+      setNote("This browser cannot play the demo.");
     });
   }
 
   function pause() {
-    send({ type: "pause" });
-    state.playing = false;
     state.pos = playhead();
+    state.wantPlay = false;
+    if (state.playing) {
+      // the engine fades out, then says "stopped", and the context rests
+      send({ type: "pause" });
+    }
+    state.playing = false;
     showPlaying();
     draw();
   }
@@ -242,16 +327,18 @@
     return Math.min(p, end);
   }
 
+  // the loop came round again: the Trainer steps up one preset
   function onWrap() {
-    if (state.trainer && state.looping && state.speed < 1) {
-      setSpeed(Math.min(1, Math.round((state.speed + 0.05) * 100) / 100));
-    }
+    if (!state.trainer || !state.looping) { return; }
+    var next = nextTrainerSpeed(state.speed);
+    if (next !== null) { setSpeed(next); }
   }
 
   function pick(song) {
-    var wasPlaying = state.playing;
-    if (state.playing) { pause(); }
+    var resume = state.wantPlay;
+    if (resume) { pause(); }
     state.song = song;
+    state.stems = songStems(song);
     state.loaded = null;
     state.pos = 0;
     state.loopA = null;
@@ -260,10 +347,11 @@
     Array.prototype.forEach.call(picker.children, function (b) {
       b.setAttribute("aria-pressed", String(b.dataset.id === song.id));
     });
+    buildRows();
     credit.innerHTML = "";
     var text = document.createElement("span");
-    text.textContent = "“" + song.title + "” by " + (song.credit_as || song.artist) +
-      ", ";
+    text.textContent = "“" + song.title + "” by " +
+      (song.credit_as || song.artist) + ", ";
     var lic = document.createElement("a");
     lic.href = song.licence_url;
     lic.textContent = song.licence;
@@ -275,9 +363,11 @@
     credit.appendChild(document.createTextNode(" ("));
     credit.appendChild(src);
     credit.appendChild(document.createTextNode("). A " +
-      Math.round(song.duration) + "-second clip, separated by stemma."));
+      Math.round(song.duration) + "-second clip in " + state.stems.length +
+      " stems, separated by stemma."));
+    canvas.setAttribute("aria-valuemax", String(Math.round(song.duration)));
     draw();
-    if (wasPlaying) { play(); }
+    if (resume) { play(); }
   }
 
   // ---- readouts -----------------------------------------------------------
@@ -313,6 +403,7 @@
     readouts[el.getAttribute("data-readout")] = el;
   });
 
+  var spokenSecond = -1;
   function updateReadouts(pos) {
     var song = state.song;
     readouts.key.textContent = keyName(song.key);
@@ -322,6 +413,15 @@
     readouts.time.textContent = clock(pos) + " / " + clock(song.duration);
     readouts.loop.textContent = state.loopA === null ? "No loop set" :
       "A " + clock(state.loopA) + "  B " + clock(state.loopB);
+    // the canvas is a position slider for assistive technology; update it
+    // once a second, not every frame
+    var second = Math.floor(pos);
+    if (second !== spokenSecond) {
+      spokenSecond = second;
+      canvas.setAttribute("aria-valuenow", String(second));
+      canvas.setAttribute("aria-valuetext",
+        clock(pos) + " of " + clock(song.duration));
+    }
   }
 
   // ---- the lanes ----------------------------------------------------------
@@ -377,20 +477,22 @@
     var h = dims.h;
     var pos = playhead();
     var song = state.song;
+    var lanes = state.stems;
     g2.clearRect(0, 0, w, h);
-    var laneH = (h - 8) / STEMS.length;
+    var laneH = (h - 8) / Math.max(1, lanes.length);
     g2.fillStyle = colors.grid;
     song.downbeats.forEach(function (t) {
       g2.fillRect(Math.round(timeToX(t, w)), 0, 1, h);
     });
     var span = w - LABEL_W - 8;
-    STEMS.forEach(function (s, i) {
-      var peaks = song.peaks[s.id] || [];
+    var font = getComputedStyle(document.body).fontFamily;
+    lanes.forEach(function (s, i) {
+      var peaks = (song.peaks && song.peaks[s.id]) || [];
       var mid = 4 + laneH * i + laneH / 2;
       var on = audible(s.id);
       g2.globalAlpha = on ? 1 : 0.22;
       g2.fillStyle = colors[s.id];
-      var barW = span / peaks.length;
+      var barW = span / Math.max(1, peaks.length);
       var scale = state.volume[s.id] / 0.8;
       for (var k = 0; k < peaks.length; k++) {
         var v = Math.min(1, peaks[k] / 99 * scale);
@@ -400,23 +502,24 @@
       }
       g2.globalAlpha = on ? 1 : 0.5;
       g2.fillStyle = on ? colors[s.id] : colors.label;
-      g2.font = "600 11px " + getComputedStyle(document.body).fontFamily;
+      g2.font = "600 11px " + font;
       g2.textBaseline = "middle";
       g2.fillText(s.label, 8, mid);
     });
     g2.globalAlpha = 1;
-    var a = drag ? Math.min(drag.from, drag.to) : state.loopA;
-    var z = drag ? Math.max(drag.from, drag.to) : state.loopB;
+    var showDrag = drag && drag.active;
+    var a = showDrag ? Math.min(drag.from, drag.to) : state.loopA;
+    var z = showDrag ? Math.max(drag.from, drag.to) : state.loopB;
     if (a !== null && z !== null && z > a) {
       var xa = timeToX(a, w);
       var xz = timeToX(z, w);
-      g2.globalAlpha = state.looping || drag ? 0.16 : 0.08;
+      g2.globalAlpha = state.looping || showDrag ? 0.16 : 0.08;
       g2.fillStyle = colors.loop;
       g2.fillRect(xa, 0, xz - xa, h);
       g2.globalAlpha = 1;
       g2.fillRect(xa, 0, 2, h);
       g2.fillRect(xz - 2, 0, 2, h);
-      g2.font = "700 10px " + getComputedStyle(document.body).fontFamily;
+      g2.font = "700 10px " + font;
       g2.textBaseline = "top";
       g2.fillRect(xa, 0, 16, 14);
       g2.fillRect(xz - 16, 0, 16, 14);
@@ -434,40 +537,55 @@
     if (state.playing) { requestAnimationFrame(frame); }
   }
 
-  // click to jump, drag to loop
+  // Tap or click to jump; drag sideways to loop. A vertical swipe is left
+  // to the browser (touch-action: pan-y), so the page still scrolls.
   var drag = null;
+  var SLOP = 8;
   function localX(ev) {
     return ev.clientX - canvas.getBoundingClientRect().left;
   }
   canvas.addEventListener("pointerdown", function (ev) {
     if (ev.button !== 0 || !state.song) { return; }
     var t = xToTime(localX(ev), canvas.clientWidth);
-    drag = { from: t, to: t, x: localX(ev) };
-    canvas.setPointerCapture(ev.pointerId);
+    drag = { from: t, to: t, x: ev.clientX, y: ev.clientY, active: false,
+      moved: false };
+    if (ev.pointerType === "mouse") { canvas.setPointerCapture(ev.pointerId); }
   });
   canvas.addEventListener("pointermove", function (ev) {
     if (!drag) { return; }
+    var dx = Math.abs(ev.clientX - drag.x);
+    var dy = Math.abs(ev.clientY - drag.y);
+    if (!drag.active) {
+      if (dx < SLOP && dy < SLOP) { return; }
+      drag.moved = true;
+      // mostly sideways: a loop; otherwise it is a scroll, not ours
+      if (dx > dy * 1.5) {
+        drag.active = true;
+        canvas.setPointerCapture(ev.pointerId);
+      } else {
+        drag = null;
+        return;
+      }
+    }
     drag.to = xToTime(localX(ev), canvas.clientWidth);
     if (!state.playing) { draw(); }
   });
   canvas.addEventListener("pointerup", function (ev) {
     if (!drag) { return; }
-    drag.to = xToTime(localX(ev), canvas.clientWidth);
-    var moved = Math.abs(localX(ev) - drag.x) > 6;
-    var from = Math.min(drag.from, drag.to);
-    var to = Math.max(drag.from, drag.to);
+    var d = drag;
     drag = null;
-    if (moved) {
+    if (d.active) {
+      d.to = xToTime(localX(ev), canvas.clientWidth);
       // snap the loop to the song's beats, at least a second long
-      var a = nearestBeat(from);
-      var z = nearestBeat(to);
+      var a = nearestBeat(Math.min(d.from, d.to));
+      var z = nearestBeat(Math.max(d.from, d.to));
       if (z - a < 1) { z = Math.min(state.song.duration, a + 2); }
       state.loopA = a;
       state.loopB = z;
       setLooping(true);
-      if (state.trainer) { setSpeed(0.75); }
+      if (state.trainer) { setSpeed(TRAINER_START); }
       seek(a);
-    } else {
+    } else if (!d.moved) {
       seek(xToTime(localX(ev), canvas.clientWidth));
     }
   });
@@ -476,83 +594,90 @@
     draw();
   });
 
+  // the keys the app uses: Left and Right move 5 s, Home goes to the start
+  canvas.addEventListener("keydown", function (ev) {
+    if (!state.song || ev.altKey || ev.ctrlKey || ev.metaKey) { return; }
+    var here = playhead();
+    if (ev.key === "ArrowLeft") {
+      seek(here - SEEK_STEP);
+    } else if (ev.key === "ArrowRight") {
+      seek(here + SEEK_STEP);
+    } else if (ev.key === "Home") {
+      seek(0);
+    } else {
+      return;
+    }
+    ev.preventDefault();
+  });
+
   // ---- controls -----------------------------------------------------------
   function control(act) {
     return cockpit.querySelector('[data-act="' + act + '"]');
   }
 
+  // one mixer row per stem the song has
   var stemsBox = document.getElementById("stems");
-  STEMS.forEach(function (s) {
-    var name = document.createElement("span");
-    name.className = "name";
-    name.textContent = s.label;
-    name.style.color = "var(--stem-" + s.id + ")";
-    var mute = document.createElement("button");
-    mute.type = "button";
-    mute.textContent = "Mute";
-    mute.setAttribute("aria-pressed", "false");
-    mute.setAttribute("aria-label", "Mute " + s.label);
-    var solo = document.createElement("button");
-    solo.type = "button";
-    solo.textContent = "Solo";
-    solo.setAttribute("aria-pressed", "false");
-    solo.setAttribute("aria-label", "Solo " + s.label);
-    var vol = document.createElement("input");
-    vol.type = "range";
-    vol.min = "0";
-    vol.max = "1";
-    vol.step = "0.01";
-    vol.value = String(state.volume[s.id]);
-    vol.setAttribute("aria-label", s.label + " volume");
-    mute.addEventListener("click", function () {
-      state.mute[s.id] = !state.mute[s.id];
-      mute.setAttribute("aria-pressed", String(state.mute[s.id]));
+  function buildRows() {
+    stemsBox.innerHTML = "";
+    state.stems.forEach(function (s) {
+      var name = document.createElement("span");
+      name.className = "name";
+      name.textContent = s.label;
+      name.style.color = "var(--stem-" + s.id + ")";
+      var mute = toggle("Mute", s, state.mute);
+      var solo = toggle("Solo", s, state.solo);
+      var vol = document.createElement("input");
+      vol.type = "range";
+      vol.min = "0";
+      vol.max = "1";
+      vol.step = "0.01";
+      vol.value = String(state.volume[s.id]);
+      vol.setAttribute("aria-label", s.label + " volume");
+      vol.addEventListener("input", function () {
+        state.volume[s.id] = parseFloat(vol.value);
+        sendGains();
+        draw();
+      });
+      [name, mute, solo, vol].forEach(function (el) {
+        stemsBox.appendChild(el);
+      });
+    });
+  }
+
+  function toggle(word, stem, flags) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = word;
+    b.setAttribute("aria-pressed", String(flags[stem.id]));
+    b.setAttribute("aria-label", word + " " + stem.label);
+    b.addEventListener("click", function () {
+      flags[stem.id] = !flags[stem.id];
+      b.setAttribute("aria-pressed", String(flags[stem.id]));
       sendGains();
       draw();
     });
-    solo.addEventListener("click", function () {
-      state.solo[s.id] = !state.solo[s.id];
-      solo.setAttribute("aria-pressed", String(state.solo[s.id]));
-      sendGains();
-      draw();
-    });
-    vol.addEventListener("input", function () {
-      state.volume[s.id] = parseFloat(vol.value);
-      sendGains();
-      draw();
-    });
-    [name, mute, solo, vol].forEach(function (el) { stemsBox.appendChild(el); });
-  });
+    return b;
+  }
 
   playButton.setAttribute("aria-pressed", "false");
   playButton.addEventListener("click", function () {
-    if (state.playing) { pause(); } else { play(); }
+    if (!state.song) { return; }
+    if (state.wantPlay) { pause(); } else { play(); }
   });
 
   var speedSelect = control("speed");
   function setSpeed(value) {
     state.speed = value;
-    var best = null;
     Array.prototype.forEach.call(speedSelect.options, function (o) {
-      if (Math.abs(parseFloat(o.value) - value) < 0.001) { best = o; }
+      if (Math.abs(parseFloat(o.value) - value) < 0.001) {
+        speedSelect.value = o.value;
+      }
     });
-    if (!best) {
-      // a speed the list lacks: add it in order, labelled like the rest
-      best = document.createElement("option");
-      best.value = String(value);
-      best.textContent = value.toFixed(2) + "x";
-      var after = null;
-      Array.prototype.forEach.call(speedSelect.options, function (o) {
-        if (!after && parseFloat(o.value) > value) { after = o; }
-      });
-      speedSelect.insertBefore(best, after);
-    }
-    speedSelect.value = best.value;
     sendParams();
+    draw();
   }
   speedSelect.addEventListener("change", function () {
-    state.speed = parseFloat(speedSelect.value);
-    sendParams();
+    setSpeed(parseFloat(speedSelect.value));
   });
 
   control("pitch").addEventListener("change", function (ev) {
@@ -590,6 +715,7 @@
   }
 
   loopButton.addEventListener("click", function () {
+    if (!state.song) { return; }
     loopThisBar();
     setLooping(!state.looping);
     draw();
@@ -604,12 +730,14 @@
 
   control("trainer").addEventListener("change", function (ev) {
     state.trainer = ev.target.checked;
+    if (!state.song) { return; }
     if (state.trainer) {
       // the Trainer steps up on each repeat, so it needs a loop to repeat
       loopThisBar();
       setLooping(true);
-      setSpeed(0.75);
-      draw();
+      setSpeed(TRAINER_START);
+    } else {
+      setSpeed(1);
     }
   });
 
