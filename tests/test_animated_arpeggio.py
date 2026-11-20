@@ -1,4 +1,4 @@
-"""Tests for the animated footer arpeggio logo widget."""
+"""Tests for the animated arpeggio logo widget."""
 
 import os
 

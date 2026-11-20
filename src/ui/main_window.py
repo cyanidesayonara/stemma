@@ -86,7 +86,17 @@ from src.version import __version__
 logger = logging.getLogger("stemma")
 
 ALL_STEM_NAMES = ("vocals", "drums", "bass", "other", "guitar", "piano")
-_FIRST_RUN_SIZE = QSize(1280, 820)
+# First-run client size, picked from renders of a six-stem song. 820 tall
+# shows the waveform at its height cap, the practice cards, and all six stem
+# rows with no scrolling. 1360 wide leaves the player about 1070 px beside a
+# library of about 290: below about 1030 the three practice cards wrap to two
+# rows, which costs the waveform about 100 px.
+_FIRST_RUN_SIZE = QSize(1360, 820)
+# Room left around a first-run window that the target does not fit: the
+# width goes almost edge to edge so the cards stay on one row; the height
+# keeps clear of the title bar and taskbar.
+_FIRST_RUN_SIDE_MARGIN = 16
+_FIRST_RUN_HEIGHT_SHARE = 0.92
 
 
 def loop_export_frames(
@@ -293,6 +303,12 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._player_controls)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
+        # Dragging the handle right stops at the player's minimum width,
+        # set by the transport row that the arpeggio logo closes. As a
+        # collapsible child the whole player could vanish behind the
+        # library instead.
+        splitter.setCollapsible(1, False)
+        self._splitter = splitter
 
         self.setCentralWidget(splitter)
         self.setStatusBar(None)  # No global status bar
@@ -776,6 +792,16 @@ class MainWindow(QMainWindow):
 
     def _on_about(self) -> None:
         """Show the About dialog with an interactive animated logo."""
+        dlg = self._build_about_dialog()
+        dlg.logo.play_intro(with_sound=False)
+        dlg.exec()
+
+    def _build_about_dialog(self) -> QDialog:
+        """Build the About dialog; ``dlg.logo`` is its clickable logo.
+
+        The author credit lives here, as on the website's footer, rather
+        than as a line along the bottom of the main window.
+        """
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
         dlg.setFixedSize(540, 280)
@@ -799,7 +825,7 @@ class MainWindow(QMainWindow):
             f'<p><a style="color:{accent};" '
             f'href="https://github.com/cyanidesayonara/stemma">'
             f"Source code on GitHub</a></p>"
-            f"<p>MIT License</p>"
+            f"<p>MIT License &middot; Made by Santtu Nykänen</p>"
         )
         info.setOpenExternalLinks(True)
         info.setWordWrap(True)
@@ -810,22 +836,30 @@ class MainWindow(QMainWindow):
         right.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
 
         outer.addLayout(right)
-        logo.play_intro(with_sound=False)
-        dlg.exec()
+        dlg.logo = logo
+        dlg.info_label = info
+        return dlg
 
     def _apply_first_run_size(self) -> None:
-        """Open roomy on first run: up to 1280 x 820, within the screen.
+        """Open at _FIRST_RUN_SIZE on first run, or as much as fits.
 
-        Qt's size hint opened a window whose footer and lower mixer rows
-        were hidden until it was enlarged (#159). The minimum stays at
-        900 x 600 for small screens.
+        Qt's size hint opened a window whose lower mixer rows were hidden
+        until it was enlarged (#159). On a screen the target does not fit
+        (1366 x 768, or 1920 x 1080 at 125 %) the window takes nearly the
+        full width, so the practice cards stay on one row, and 92 % of the
+        height. The minimum stays at 900 x 600 for small screens.
         """
         screen = self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
             return
         area = screen.availableGeometry()
-        width = max(900, min(_FIRST_RUN_SIZE.width(), int(area.width() * 0.9)))
-        height = max(600, min(_FIRST_RUN_SIZE.height(), int(area.height() * 0.9)))
+        width = max(900, min(
+            _FIRST_RUN_SIZE.width(), area.width() - _FIRST_RUN_SIDE_MARGIN,
+        ))
+        height = max(600, min(
+            _FIRST_RUN_SIZE.height(),
+            int(area.height() * _FIRST_RUN_HEIGHT_SHARE),
+        ))
         self.resize(width, height)
         # Centre the frame, not just the client area, and never put the
         # title bar above the screen (a short, scaled screen can be less

@@ -17,7 +17,6 @@ import numpy as np
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
     QScrollArea,
@@ -36,7 +35,6 @@ from src.metronome import tap_tempo
 from src.model_manager import model_label
 from src.player import SPEED_PRESETS, MultiTrackPlayer
 from src.qt_signal_utils import safe_disconnect
-from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.control_primitives import format_time as _format_time
 from src.ui.control_primitives import show_preset_value
@@ -169,17 +167,6 @@ class PlayerControls(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-
-    # Below this height the footer (copyright and logo) gives its 44 px to
-    # the mixer: at a 900x600 window only one stem row was visible (#186).
-    _FOOTER_MIN_HEIGHT = 680
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        room = self.height() >= self._FOOTER_MIN_HEIGHT
-        if room != self._footer_room:
-            self._footer_room = room
-            self._footer_widget.setVisible(room)
 
     def _cleanup_peak_thread(self) -> None:
         """Wait for any pending peak computation before destruction."""
@@ -327,21 +314,10 @@ class PlayerControls(QWidget):
         self._transport_bar.setVisible(False)
         layout.addWidget(self._transport_bar)
 
-        self._footer_widget = QWidget()
-        self._footer_widget.setObjectName("footer")
-        self._footer_widget.setFixedHeight(44)
-        footer_layout = QHBoxLayout(self._footer_widget)
-        footer_layout.setContentsMargins(0, 5, 0, 2)
-        self._copyright_label = QLabel("© 2026 Santtu Nykänen")
-        self._copyright_label.setObjectName("copyright")
-        self._copyright_label.setFixedHeight(36)
-        self._copyright_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        footer_layout.addWidget(self._copyright_label)
-        footer_layout.addStretch()
-        self._arpeggio_label = AnimatedArpeggioWidget(self._theme)
-        footer_layout.addWidget(self._arpeggio_label)
-        layout.addWidget(self._footer_widget)
-        self._footer_room = True
+        # The small arpeggio logo sits at the transport's right end. Its fixed
+        # width is part of the transport row's minimum, so it is what stops
+        # the library splitter from squeezing the player side any narrower.
+        self._arpeggio_label = self._transport_bar.logo
 
         self._bind_component_aliases()
         self._connect_component_signals()
