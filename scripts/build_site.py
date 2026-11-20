@@ -7,7 +7,7 @@ listing uses, so the site always says what the released app does:
     version      the released version ("3.0.0")
     released     the release date ("November 19, 2026")
     pitch        the Store short description
-    features     the Store product features
+    features     cards for the Store product features (site/features.json)
     whatsnew     the Store "What's new" for that version, one item per paragraph
     shots       every Store screenshot, with its caption
     meta        link-preview tags, with the first screenshot as the image
@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import html
+import json
 import re
 import shutil
 import sys
@@ -43,6 +44,9 @@ sys.path.insert(0, str(ROOT))
 from src.store_listing import load_listing, png_size  # noqa: E402
 
 SITE = ROOT / "site"
+# the feature cards and their icons: read at build, not published as files
+FEATURES = SITE / "features.json"
+FEATURE_ICONS = SITE / "feature-icons"
 # where the site is published, for the absolute URLs link previews need;
 # the Pages workflow passes the real one (a custom domain included)
 DEFAULT_SITE_URL = "https://cyanidesayonara.github.io/stemma/"
@@ -98,6 +102,54 @@ def screenshots(source: Path) -> list[tuple[str, str]]:
     if not shots:
         raise SystemExit(f"no screenshots in {folder}")
     return shots
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version)[:3])
+
+
+def feature_cards(released: list[str], version: str) -> str:
+    """The Features section: a card per group of released Store features.
+
+    A card in features.json shows only when every feature it covers is in
+    the released listing, so the site never describes unreleased work; a
+    released feature no card covers still gets a plain card of its own. A
+    card marked ``"coming": "X.Y"`` is a labelled preview of the next
+    version, shown only while the released version is older than that.
+    """
+    cards = json.loads(FEATURES.read_text(encoding="utf-8"))["cards"]
+    shown = set(released)
+    covered: set[str] = set()
+    items = []
+    for card in cards:
+        coming = card.get("coming")
+        if coming:
+            if _version_key(version) < _version_key(coming):
+                items.append((card["id"], card["title"], card["body"],
+                              coming))
+            continue
+        if not set(card["covers"]) <= shown:
+            continue
+        covered.update(card["covers"])
+        items.append((card["id"], card["title"], card["body"], None))
+    for feature in released:
+        if feature not in covered:
+            items.append(("note", feature, "", None))
+    # the preview goes last, after everything that ships today
+    items.sort(key=lambda item: item[3] is not None)
+    out = []
+    for icon, title, body, coming in items:
+        svg = (FEATURE_ICONS / f"{icon}.svg").read_text(encoding="utf-8")
+        text = ""
+        if coming:
+            text += f'<span class="soon">Coming in {_e(coming)}</span>'
+        text += f"<h3>{_e(title)}</h3>"
+        if body:
+            text += f"<p>{_e(body)}</p>"
+        attrs = ' class="coming"' if coming else ""
+        out.append(f'  <li{attrs}><div class="art">{svg.strip()}</div>'
+                   f'<div class="copy">{text}</div></li>')
+    return "\n".join(out)
 
 
 def screenshot_alt(name: str) -> str:
@@ -162,9 +214,7 @@ def blocks(source: Path, version: str, released: str,
         "version": _e(version),
         "released": _e(long_date(released)),
         "pitch": _e(listing.short_description),
-        "features": "\n".join(
-            f"  <li>{_e(item)}</li>" for item in listing.features
-        ),
+        "features": feature_cards(list(listing.features), version),
         "whatsnew": "\n".join(
             f"  <li>{_e(item)}</li>"
             for item in whats_new_items(listing.whats_new[version])
@@ -208,7 +258,8 @@ def build(source: Path, version: str, released: str, out: Path,
     values = blocks(source, version, released, site_url)
     if out.exists():
         shutil.rmtree(out)
-    shutil.copytree(SITE, out)
+    shutil.copytree(SITE, out, ignore=shutil.ignore_patterns(
+        FEATURES.name, FEATURE_ICONS.name))
     for name, want in PAGES.items():
         page = (out / name).read_text(encoding="utf-8")
         check_markers(name, page, want)

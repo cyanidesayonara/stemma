@@ -1,0 +1,8 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<g class="key k1"><rect class="fs sm" x="8" y="22" width="44" height="18" rx="4"/><text class="ft keycap" x="30" y="34.5" text-anchor="middle">Space</text></g>
+  <g class="key k2"><rect class="fs sm" x="58" y="22" width="16" height="18" rx="4"/><text class="ft keycap" x="66" y="34.5" text-anchor="middle">L</text></g>
+  <g class="key k3"><rect class="fs sm" x="80" y="22" width="16" height="18" rx="4"/><text class="ft keycap" x="88" y="34.5" text-anchor="middle">M</text></g>
+  <g class="key k4"><rect class="fs sm" x="20" y="46" width="16" height="16" rx="4"/><path class="st" d="M30.5 50 L25.5 54 L30.5 58"/></g>
+  <g class="key k5"><rect class="fs sm" x="40" y="46" width="16" height="16" rx="4"/><path class="st" d="M45.5 50 L50.5 54 L45.5 58"/></g>
+  <path class="sa" d="M102 18 V54"/><path class="sa" d="M102 18 l8 6 -8 6"/>
+</svg>

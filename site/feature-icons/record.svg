@@ -1,0 +1,8 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<path class="so bars faint" d="M34 15.5v13 M38.5 17v10 M43 17v10 M47.5 18.5v7 M52 18.5v7 M56.5 20v4 M61 17v10 M65.5 15.5v13 M70 20v4 M74.5 17v10 M79 20v4 M83.5 15.5v13 M88 18.5v7 M92.5 15.5v13 M97 15.5v13 M101.5 18.5v7 M106 18.5v7 M110.5 18.5v7 M115 20v4"/>
+  <path class="sr bars" d="M34 47.5v5 M38.5 45.5v9 M43 47.5v5 M47.5 41.5v17 M52 47.5v5 M56.5 43.5v13 M61 45.5v9 M65.5 45.5v9 M70 41.5v17 M74.5 47.5v5 M79 43.5v13 M83.5 45.5v9 M88 41.5v17 M92.5 43.5v13 M97 43.5v13 M101.5 47.5v5 M106 45.5v9 M110.5 47.5v5 M115 41.5v17"/>
+  <rect class="fbg reveal" x="32" y="38" width="90" height="26"/>
+  <path class="st rsweep" d="M33 12 V62"/>
+  <circle class="sr ring" cx="14" cy="50" r="10"/>
+  <circle class="fr blink" cx="14" cy="50" r="6.5"/>
+</svg>

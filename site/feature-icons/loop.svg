@@ -1,0 +1,14 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<path class="sa thick" d="M40 10 A20 20 0 1 1 22.7 20"/>
+  <path class="sa thick" d="M18 13.5 L22.7 20 L29.5 17"/>
+  <g class="orbit"><circle class="fr" cx="40" cy="10" r="3.5"/></g>
+  <text class="ft lap l1" x="40" y="33.5" text-anchor="middle">0.75x</text>
+  <text class="ft lap l2" x="40" y="33.5" text-anchor="middle">0.85x</text>
+  <text class="ft lap l3" x="40" y="33.5" text-anchor="middle">1.0x</text>
+  <rect class="fa shade" x="82" y="20" width="24" height="32"/>
+  <path class="so bars" d="M72 29v14 M76.4 29v14 M80.8 33v6 M85.2 27v18 M89.6 31v10 M94 33v6 M98.4 31v10 M102.8 33v6 M107.2 29v14 M111.6 27v18 M116 31v10"/>
+  <path class="sr" d="M82 18 V54 M106 18 V54"/>
+  <text class="fr tag" x="82" y="15" text-anchor="middle">A</text>
+  <text class="fr tag" x="106" y="15" text-anchor="middle">B</text>
+  <path class="st sweep" d="M82 20 V52"/>
+</svg>
