@@ -44,6 +44,26 @@ function player(seconds) {
   return p;
 }
 
+// play `seconds`, keeping the left channel and the largest step between
+// neighbouring samples (a hard cut in a 0.48 tone of 220-370 Hz is a step
+// of up to 0.48; the tone itself steps less than 0.03)
+function record(p, seconds) {
+  const out = [[new Float32Array(128), new Float32Array(128)]];
+  const blocks = Math.round(SR * seconds / 128);
+  const left = new Float32Array(blocks * 128);
+  for (let b = 0; b < blocks; b++) {
+    p.process([], out);
+    left.set(out[0][0], b * 128);
+    out[0][0].fill(0);
+    out[0][1].fill(0);
+  }
+  let step = 0;
+  for (let i = 1; i < left.length; i++) {
+    step = Math.max(step, Math.abs(left[i] - left[i - 1]));
+  }
+  return { left, step };
+}
+
 function run(p, seconds) {
   const out = [[new Float32Array(128), new Float32Array(128)]];
   let peak = 0;
@@ -102,7 +122,10 @@ if (scenario === "stretch") {
   results.moved = run(p, 1);
   loop(p, 6, 8, false);
   p.message({ type: "seek", frame: 9 * SR });
-  results.wrapToStart = run(p, 1.5);
+  results.toTheEnd = run(p, 1.5);
+  // the clip stopped at its end; play again, then turn the loop back on
+  p.message({ type: "play" });
+  p.message({ type: "seek", frame: 5.5 * SR });
   loop(p, 6, 8, true);
   results.loopBackOn = run(p, 3);
   p.message({ type: "params", speed: 0.75, semis: 0 });
@@ -160,6 +183,47 @@ if (scenario === "stretch") {
   results.stretched = run(p, 3);
   results.loopB = p.loopB;
   results.length = len;
+} else if (scenario === "end") {
+  // no loop: playback stops at the end of the clip, faded, and the next
+  // play starts from 0:00
+  for (const speed of [1, 0.75]) {
+    const p = player(3);
+    p.message({ type: "params", speed, semis: 0 });
+    p.message({ type: "seek", frame: 2.5 * SR });
+    p.message({ type: "play" });
+    const heard = record(p, 1.5);
+    const found = {
+      ended: p.sent.filter((m) => m.type === "ended").length,
+      wraps: p.sent.filter((m) => m.type === "wrap").length,
+      playing: p.playing,
+      heard: p.heard,
+      step: heard.step,
+      // the last second should be silence: the clip ran out before it
+      tail: Math.max(...heard.left.subarray(heard.left.length - SR / 2)
+        .map(Math.abs)),
+    };
+    p.message({ type: "play" });
+    run(p, 0.25);
+    found.heardAfterReplay = p.heard / SR;
+    results["speed" + speed] = found;
+  }
+} else if (scenario === "load-in-fade") {
+  // a song switch while playing: pause, then load the next song and play
+  // it, back to back, as the page sends them
+  const p = player(10);
+  p.message({ type: "play" });
+  run(p, 0.5);
+  const next = player(10);
+  p.message({ type: "pause" });
+  p.message({ type: "load", gen: 2, stems: next.stems, length: next.length,
+    beats: [], downbeats: [] });
+  p.message({ type: "play" });
+  results.genAtOnce = p.gen;
+  const heard = record(p, 0.5);
+  results.gen = p.gen;
+  results.playing = p.playing;
+  results.step = heard.step;
+  results.stopped = p.sent.filter((m) => m.type === "stopped").length;
 } else if (scenario === "gens") {
   const p = player(5);
   p.message({ type: "play" });

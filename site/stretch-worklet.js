@@ -18,11 +18,17 @@
    Every buffer is allocated up front: nothing allocates on the audio
    thread while it plays, so the garbage collector never interrupts it.
 
+   With no A-B loop, playback stops at the end of the clip: the last
+   samples fade out, and the next play starts from 0:00. A song loaded
+   while one is playing waits for the playing one to fade out, and so do
+   the messages after it, so a song switch never clicks.
+
    Messages in:  load {gen, stems, length, beats, downbeats}, play, pause,
                  seek {frame}, gains {gains}, loop {on, a, b},
                  params {speed, semis}, click {on}
    Messages out: pos {gen, frame}, wrap {gen} (when the listener hears the
-                 loop start again) */
+                 loop start again), ended {gen} (the clip played to its
+                 end and stopped), stopped {gen} (a pause has faded out) */
 
 const N_FFT = 2048;
 const HOP = 512;
@@ -429,10 +435,23 @@ class StemPlayer extends AudioWorkletProcessor {
     this.clickPhase = -1;
     this.clickFreq = 1000;
     this.blocks = 0;
+    this.queue = null;          // a load and what followed it, held back
+                                // until the playing song has faded out
     this.port.onmessage = (ev) => this.message(ev.data);
   }
 
   message(m) {
+    if (this.queue) {
+      this.queue.push(m);
+      return;
+    }
+    if (m.type === "load" && this.playing) {
+      // fade the playing song out first; the swap happens at the fade's end
+      this.queue = [m];
+      this.pausing = true;
+      if (this.fadeOut === 0) { this.fadeOut = FADE; }
+      return;
+    }
     if (m.type === "load") {
       this.gen = m.gen;
       this.stems = m.stems;
@@ -510,12 +529,32 @@ class StemPlayer extends AudioWorkletProcessor {
   loopStart() { return this.loopOn ? this.loopA : 0; }
   loopEnd() { return this.loopOn ? this.loopB : this.length; }
 
-  // Mix up to `count` source frames from this.src into this.pullBuf.
+  // Stop playing, and apply any messages held back behind a fade.
+  halt() {
+    this.playing = false;
+    this.pausing = false;
+    const queue = this.queue;
+    this.queue = null;
+    if (queue) {
+      for (const m of queue) { this.message(m); }
+    }
+  }
+
+  // Mix up to `count` source frames from this.src into this.pullBuf; past
+  // the end of the clip, with no loop, that is silence.
   pull(count) {
     const L = this.pullBuf[0];
     const R = this.pullBuf[1];
-    let end = this.loopEnd();
+    const end = this.loopEnd();
     if (this.src >= end) {
+      if (!this.loopOn) {
+        const n = Math.max(1, count);
+        L.fill(0, 0, n);
+        R.fill(0, 0, n);
+        this.got.frame = this.length;
+        this.got.count = n;
+        return this.got;
+      }
       this.src = this.loopStart();
       this.wrapped = true;
     }
@@ -551,7 +590,7 @@ class StemPlayer extends AudioWorkletProcessor {
       if (e < 1) { L[i] *= e; R[i] *= e; }
     }
     this.src = start + n;
-    if (this.src >= end) {
+    if (this.src >= end && this.loopOn) {
       this.src = this.loopStart();
       this.wrapped = true;
     }
@@ -628,6 +667,9 @@ class StemPlayer extends AudioWorkletProcessor {
     const before = this.heard;
     this.jumped = false;
     this.renderBlock(buf, n);
+    // the listener has heard the clip's last (faded) sample, with no loop
+    const ended = !this.loopOn && this.heard >= this.length;
+    if (ended) { this.heard = this.length; }
     // the listener heard the song move back, and no jump moved it: a wrap
     const wrapped = !this.jumped && this.heard < before - 1;
     this.clickBeats(before, this.heard, wrapped);
@@ -643,17 +685,28 @@ class StemPlayer extends AudioWorkletProcessor {
       if (out[1]) { out[1][i] = buf[1][i] * e; }
     }
     if (wrapped) { this.port.postMessage({ type: "wrap", gen: this.gen }); }
-    if (this.fadeOut > 0) {
+    if (ended) {
+      // stop, ready to play again from the start
+      this.port.postMessage({ type: "ended", gen: this.gen });
+      this.jump(0, true);
+      this.halt();
+    } else if (this.fadeOut > 0) {
       this.fadeOut = Math.max(0, this.fadeOut - n);
       if (this.fadeOut === 0) {
-        if (this.jumpTo >= 0) {
-          this.jump(this.jumpTo, true);
+        if (this.queue) {
+          // a load was waiting for the fade: stop, then load
+          this.port.postMessage({ type: "stopped", gen: this.gen });
+          this.halt();
         } else {
-          this.fadeIn = FADE;   // a pause called off mid-fade comes back in
-        }
-        if (this.pausing) {
-          this.pausing = false;
-          this.playing = false;
+          if (this.jumpTo >= 0) {
+            this.jump(this.jumpTo, true);
+          } else {
+            this.fadeIn = FADE; // a pause called off mid-fade comes back in
+          }
+          if (this.pausing) {
+            this.port.postMessage({ type: "stopped", gen: this.gen });
+            this.halt();
+          }
         }
       }
     } else if (this.fadeIn > 0) {

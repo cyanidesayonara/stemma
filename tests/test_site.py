@@ -327,6 +327,33 @@ def test_worklet_clamps_a_loop_past_the_end():
 
 
 @needs_node
+def test_worklet_stops_at_the_end_of_the_clip_without_a_loop():
+    for name, found in _scenario("end").items():
+        speed = float(name.removeprefix("speed"))
+        assert found["ended"] == 1, speed
+        assert found["wraps"] == 0, speed
+        assert found["playing"] is False, speed
+        # ready to play again from 0:00, and it does
+        assert found["heard"] == 0, speed
+        # 0.25 s of listening is 0.25 s of song at 1.0x, less when slower
+        assert found["heardAfterReplay"] == pytest.approx(0.25 * speed,
+                                                          abs=0.04)
+        # faded out, never cut: no step like a hard stop, then silence
+        assert found["step"] < 0.1, (speed, found["step"])
+        assert found["tail"] == 0, speed
+
+
+@needs_node
+def test_worklet_loads_a_new_song_only_after_the_fade_out():
+    found = _scenario("load-in-fade")
+    assert found["genAtOnce"] == 1
+    assert found["gen"] == 2
+    assert found["playing"] is True
+    assert found["stopped"] == 1
+    assert found["step"] < 0.1, found["step"]
+
+
+@needs_node
 def test_worklet_reports_carry_the_load_id():
     assert _scenario("gens")["gens"] == [1]
 
