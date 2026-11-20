@@ -6,11 +6,13 @@ file and separated stems are stored.
 """
 
 import json
+import logging
 import os
 import re
 import shutil
+import time
 import uuid
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict, fields, replace
 from datetime import datetime, timezone
 
 from src.separation_state import (
@@ -21,6 +23,79 @@ from src.separation_state import (
 
 _EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
 _GENERATED_SONG_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+# A song id that can name a folder directly below songs/ (no separators,
+# drive letters, or leading dot), so a stale path can be rebased onto it.
+_REBASABLE_SONG_ID_RE = re.compile(r"^[\w-][\w.-]*$")
+_STAGED_REMOVAL_RE = re.compile(r"^\.remove-(.+)-[0-9a-f]{32}$")
+
+# An antivirus scan or a sync client can hold library.json for a moment;
+# that is not damage, so the read is retried before giving up.
+_READ_ATTEMPTS = 5
+_READ_RETRY_DELAY_S = 0.2
+_sleep = time.sleep
+
+# Same logger as src.crash_log, which this module cannot import (it pulls
+# in Qt through src.data_paths).
+logger = logging.getLogger("stemma")
+
+
+class LibraryReadOnlyError(OSError):
+    """The index could not be read safely, so this session cannot save."""
+
+
+@dataclass(frozen=True)
+class LibraryRecovery:
+    """What startup had to do because the library index was not healthy.
+
+    ``kind`` is ``"corrupt"`` (unparseable index moved aside and the
+    library rebuilt from the song folders), ``"partial"`` (some entries
+    were unusable; a copy of the index was kept and the rest loaded), or
+    ``"unreadable"`` (the index could not be read or backed up, so it was
+    left untouched and nothing is saved this session). ``path`` is the
+    backup, or for ``"unreadable"`` the untouched index itself.
+    """
+
+    kind: str
+    path: str
+
+    @property
+    def backup_path(self) -> str:
+        """Where the original index can be found."""
+        return self.path
+
+    @property
+    def message(self) -> str:
+        """Readable text for the one-time notice at startup."""
+        # File name and folder on separate lines: a whole path is too long
+        # for the dialog and wraps after the drive letter.
+        name = os.path.basename(self.path)
+        folder = os.path.dirname(self.path)
+        if self.kind == "corrupt":
+            return (
+                "stemma could not read its library index, so the library "
+                "was rebuilt from the song folders. Your audio and stems "
+                "are safe, but song titles and artists may need "
+                "re-entering.\n\n"
+                f"The damaged index was kept as {name} in:\n{folder}"
+            )
+        if self.kind == "partial":
+            return (
+                "Some entries in the library index were damaged. stemma "
+                "kept the rest and recovered what it could from the song "
+                "folders, so some titles and artists may need "
+                "re-entering.\n\n"
+                f"A copy of the original index was kept as {name} in:\n"
+                f"{folder}"
+            )
+        return (
+            "stemma could not read the library index safely. Another "
+            "program, such as antivirus or a sync tool, may be using it.\n\n"
+            "Songs are listed from their folders for now, with folder "
+            "names as titles, and library changes are not saved this "
+            "session. Close stemma and open it again to load your titles "
+            "and artists.\n\n"
+            f"The index ({name}) was not changed. It is in:\n{folder}"
+        )
 
 
 @dataclass
@@ -78,6 +153,8 @@ class SongLibrary:
         self._songs_dir = os.path.join(data_dir, "songs")
         self._json_path = os.path.join(data_dir, "library.json")
         self._songs: list[Song] = []
+        self._writable = True
+        self._recovery: LibraryRecovery | None = None
 
         os.makedirs(self._songs_dir, exist_ok=True)
         self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
@@ -91,6 +168,24 @@ class SongLibrary:
     def songs(self) -> list[Song]:
         """Return a shallow copy of the song list."""
         return list(self._songs)
+
+    @property
+    def writable(self) -> bool:
+        """False when the index could not be read safely this session."""
+        return self._writable
+
+    @property
+    def recovery(self) -> LibraryRecovery | None:
+        """How startup recovered a damaged index, or None if it was fine."""
+        return self._recovery
+
+    def _require_writable(self) -> None:
+        if not self._writable:
+            raise LibraryReadOnlyError(
+                "The library index could not be read when stemma started, "
+                "so library changes cannot be saved. Close stemma and open "
+                "it again."
+            )
 
     def get_song(self, song_id: str) -> Song | None:
         """Return the song with *song_id*, or ``None`` if not found."""
@@ -206,6 +301,7 @@ class SongLibrary:
         Returns:
             The newly created :class:`Song`.
         """
+        self._require_writable()
         song_id = uuid.uuid4().hex[:12]
         song_dir = os.path.join(self._songs_dir, song_id)
         try:
@@ -254,6 +350,7 @@ class SongLibrary:
         if song is None:
             raise KeyError(f"Song '{song_id}' not found")
 
+        self._require_writable()
         self._require_safe_song_dir(song.stems_path)
         song_index = self._songs.index(song)
         staged_dir = None
@@ -283,8 +380,49 @@ class SongLibrary:
             raise
 
         if staged_dir is not None:
-            self._require_safe_song_dir(staged_dir)
-            shutil.rmtree(staged_dir)
+            # The removal is already saved; a file another program holds
+            # must not turn it into an error. The staged folder is left
+            # for discard_staged_removals at the next startup.
+            try:
+                self._require_safe_song_dir(staged_dir)
+                shutil.rmtree(staged_dir)
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Could not delete removed song folder %s: %s",
+                    staged_dir, exc,
+                )
+
+    def discard_staged_removals(self) -> None:
+        """Delete folders left behind by removals whose delete failed.
+
+        Only ``songs/.remove-<id>-<hex>`` folders whose song is no longer in
+        a cleanly read index are touched; a damaged or unreadable index
+        leaves them alone, since one may still be needed for recovery.
+        """
+        if not self._writable or self._recovery is not None:
+            return
+        known = {song.id for song in self._songs}
+        try:
+            entries = os.listdir(self._songs_dir)
+        except OSError:
+            return
+        for entry in entries:
+            match = _STAGED_REMOVAL_RE.fullmatch(entry)
+            if match is None or match.group(1) in known:
+                continue
+            path = os.path.join(self._songs_dir, entry)
+            if (
+                not self._is_safe_song_dir(path)
+                or os.path.islink(path)
+                or not os.path.isdir(path)
+            ):
+                continue
+            try:
+                shutil.rmtree(path)
+            except OSError as exc:
+                logger.warning(
+                    "Could not delete removed song folder %s: %s", path, exc,
+                )
 
     def update_song(self, song_id: str, **fields: str) -> Song:
         """Update one or more fields on an existing song.
@@ -307,6 +445,7 @@ class SongLibrary:
             for key, value in fields.items()
             if key in _EDITABLE_METADATA_FIELDS
         }
+        self._require_writable()
         previous = {key: getattr(song, key) for key in updates}
         for key, value in updates.items():
             setattr(song, key, value)
@@ -324,57 +463,175 @@ class SongLibrary:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        """Read the JSON index from disk.
+        """Read the JSON index from disk, recovering what it can.
 
-        If the file is corrupted, malformed, unreadable, or not valid
-        UTF-8, the bad index is preserved as ``library.json.bak`` and the
-        library is rebuilt by scanning ``songs/`` so imported stems that
-        still exist on disk are recovered instead of silently orphaned.
+        Three cases are kept apart, because only one of them is damage:
+
+        - The file cannot be opened (an antivirus scan or a sync client
+          holding it). The read is retried; if it still fails, the index is
+          left exactly as it is, the songs are listed from their folders
+          for this session, and nothing is saved until stemma restarts.
+          Rewriting it here would replace good titles with folder names.
+        - The file is not valid JSON or UTF-8. It is moved aside under a
+          timestamped name, so an earlier backup is never overwritten, and
+          the library is rebuilt from ``songs/``.
+        - Some entries are unusable. A copy of the index is kept under a
+          timestamped name before an index without them is written.
+
+        A song whose stored path points outside this data folder (the
+        folder was moved or copied, or migrated from the legacy ``data/``)
+        is rebased onto ``songs/<id>`` when that folder exists here.
         """
         try:
-            with open(self._json_path, encoding="utf-8") as f:
-                data = json.load(f)
+            raw = self._read_index_bytes()
+        except OSError as exc:
+            logger.warning(
+                "Library index %s could not be read; leaving it untouched "
+                "and not saving this session: %s", self._json_path, exc,
+            )
+            self._songs = self._rebuild_from_disk()
+            self._enter_read_only()
+            return
+
+        try:
+            data = json.loads(raw.decode("utf-8-sig"))
             if not isinstance(data, list):
                 raise ValueError("library index must be a list")
-            loaded = []
-            dropped = False
-            for entry in data:
-                try:
-                    loaded.append(Song.from_dict(entry))
-                except (TypeError, KeyError):
-                    dropped = True
-            self._songs = [
-                song for song in loaded
-                if self._is_safe_song_dir(song.stems_path)
-                and self._recover_staged_removal(song)
-            ]
-            if dropped:
-                # Keep the original index, and recover the folders of the
-                # entries that could not be read.
-                try:
-                    shutil.copyfile(
-                        self._json_path, self._json_path + ".bak",
-                    )
-                except OSError:
-                    pass  # The rows that parsed are kept either way.
-                known = {song.id for song in self._songs}
-                self._songs.extend(
-                    song for song in self._rebuild_from_disk()
-                    if song.id not in known
-                )
-                self._save()
-        except (
-            json.JSONDecodeError, TypeError, KeyError,
-            OSError, UnicodeDecodeError, ValueError,
-        ):
-            # Preserve the corrupt index for post-mortem instead of
-            # destroying it, then recover what we can from disk.
+        except ValueError as exc:  # JSON and UTF-8 decode errors included
+            logger.warning(
+                "Library index %s is damaged: %s", self._json_path, exc,
+            )
+            self._recover_corrupt_index()
+            return
+
+        self._load_entries(data)
+
+    def _read_index_bytes(self) -> bytes:
+        """Read library.json, retrying while another program holds it."""
+        for attempt in range(_READ_ATTEMPTS):
             try:
-                os.replace(self._json_path, self._json_path + ".bak")
+                with open(self._json_path, "rb") as f:
+                    return f.read()
             except OSError:
-                pass
-            self._songs = self._rebuild_from_disk()
+                if attempt == _READ_ATTEMPTS - 1:
+                    raise
+                _sleep(_READ_RETRY_DELAY_S)
+        raise AssertionError("unreachable")
+
+    def _load_entries(self, data: list) -> None:
+        """Turn parsed rows into songs, keeping a backup if any is lost."""
+        loaded: list[Song] = []
+        lost = False
+        rebased = False
+        for entry in data:
+            try:
+                song = Song.from_dict(entry)
+            except (TypeError, KeyError):
+                lost = True
+                continue
+            if not self._is_safe_song_dir(song.stems_path):
+                moved = self._rebased(song)
+                if moved is None:
+                    lost = True
+                    continue
+                song = moved
+                rebased = True
+            if self._recover_staged_removal(song):
+                loaded.append(song)
+        self._songs = loaded
+
+        if lost:
+            backup = self._backup_path("partial")
+            try:
+                shutil.copyfile(self._json_path, backup)
+            except OSError as exc:
+                # Without a copy, writing an index that leaves rows out
+                # would lose them for good.
+                logger.warning(
+                    "Could not back up library index to %s: %s", backup, exc,
+                )
+                self._enter_read_only()
+                return
+            self._recovery = LibraryRecovery("partial", backup)
+            known = {song.id for song in self._songs}
+            self._songs.extend(
+                song for song in self._rebuild_from_disk()
+                if song.id not in known
+            )
+            self._save_quietly()
+        elif rebased:
+            self._save_quietly()
+
+    def _rebased(self, song: Song) -> Song | None:
+        """Return *song* with its paths moved under this songs root.
+
+        Used when the stored path is outside the root, as after the data
+        folder was moved or copied. Returns None when ``songs/<id>`` does
+        not exist here or the id could not name a folder below songs/.
+        """
+        if not _REBASABLE_SONG_ID_RE.fullmatch(song.id):
+            return None
+        new_dir = os.path.join(self._songs_dir, song.id)
+        if not self._is_safe_song_dir(new_dir) or not os.path.isdir(new_dir):
+            return None
+        original = song.original_path
+        if original:
+            candidate = os.path.join(new_dir, os.path.basename(original))
+            was_inside = (
+                self._normalized_path(os.path.dirname(original))
+                == self._normalized_path(song.stems_path)
+            )
+            if was_inside or os.path.isfile(candidate):
+                original = candidate
+        logger.info(
+            "Rebased song %s from %s to %s",
+            song.id, song.stems_path, new_dir,
+        )
+        return replace(song, stems_path=new_dir, original_path=original)
+
+    def _recover_corrupt_index(self) -> None:
+        """Move an unparseable index aside, then rebuild from the folders."""
+        backup = self._backup_path("corrupt")
+        try:
+            os.replace(self._json_path, backup)
+        except OSError:
+            try:
+                shutil.copyfile(self._json_path, backup)
+            except OSError as exc:
+                logger.warning(
+                    "Could not back up damaged library index to %s: %s",
+                    backup, exc,
+                )
+                self._songs = self._rebuild_from_disk()
+                self._enter_read_only()
+                return
+        self._recovery = LibraryRecovery("corrupt", backup)
+        self._songs = self._rebuild_from_disk()
+        self._save_quietly()
+
+    def _enter_read_only(self) -> None:
+        self._writable = False
+        self._recovery = LibraryRecovery("unreadable", self._json_path)
+
+    def _backup_path(self, tag: str) -> str:
+        """Return a backup name next to the index that does not exist yet."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = f"{self._json_path}.{tag}-{stamp}"
+        path = base + ".bak"
+        counter = 2
+        while os.path.lexists(path):
+            path = f"{base}-{counter}.bak"
+            counter += 1
+        return path
+
+    def _save_quietly(self) -> None:
+        """Save during load; a failed write is retried by the next change."""
+        try:
             self._save()
+        except OSError as exc:
+            logger.warning(
+                "Could not save library index %s: %s", self._json_path, exc,
+            )
 
     def _rebuild_from_disk(self) -> list["Song"]:
         """Reconstruct library entries by scanning the songs directory.
@@ -402,7 +659,11 @@ class SongLibrary:
             ):
                 continue
             original = None
-            for fname in os.listdir(song_dir):
+            try:
+                names = os.listdir(song_dir)
+            except OSError:
+                continue
+            for fname in names:
                 if fname.startswith("original."):
                     original = os.path.join(song_dir, fname)
                     break
@@ -423,6 +684,7 @@ class SongLibrary:
 
     def _save(self) -> None:
         """Write the current song list to the JSON index atomically."""
+        self._require_writable()
         tmp_path = self._json_path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump([s.to_dict() for s in self._songs], f, indent=2)
