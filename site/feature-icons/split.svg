@@ -1,0 +1,18 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<defs><clipPath id="fi-split-c"><rect x="63" y="0" width="54" height="72"/></clipPath></defs>
+  <rect class="fm pulse" style="animation-delay:0.00s" x="6" y="26" width="3" height="20" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-0.17s" x="11" y="19" width="3" height="34" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-0.34s" x="16" y="23" width="3" height="26" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-0.51s" x="21" y="14" width="3" height="44" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-0.68s" x="26" y="21" width="3" height="30" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-0.85s" x="31" y="17" width="3" height="38" rx="1.5"/>
+  <rect class="fm pulse" style="animation-delay:-1.02s" x="36" y="27" width="3" height="18" rx="1.5"/>
+  <path class="sv" d="M42 36 C52 36 52 14 61 14"/>
+  <path class="sd" d="M42 36 H61"/>
+  <path class="sb" d="M42 36 C52 36 52 58 61 58"/>
+  <g clip-path="url(#fi-split-c)">
+  <path class="sv flow" d="M62 14 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  <path class="sd flow" d="M62 36 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  <path class="sb flow" d="M62 58 q3.25 -5 6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0 t6.5 0"/>
+  </g>
+</svg>

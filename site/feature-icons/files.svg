@@ -1,0 +1,16 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<path class="fs sm" d="M6 14 H24 L31 21 V58 H6 Z"/>
+  <path class="fs sm" d="M90 14 H108 L115 21 V58 H90 Z"/>
+  <text class="ft fmt f1" x="18" y="44" text-anchor="middle">MP3</text>
+  <text class="ft fmt f2" x="18" y="44" text-anchor="middle">WAV</text>
+  <text class="ft fmt f3" x="18" y="44" text-anchor="middle">FLAC</text>
+  <text class="ft fmt f1" x="102" y="44" text-anchor="middle">WAV</text>
+  <text class="ft fmt f2" x="102" y="44" text-anchor="middle">MP3</text>
+  <text class="ft fmt f3" x="102" y="44" text-anchor="middle">WAV</text>
+  <path class="sa dash" d="M35 36 H44"/>
+  <path class="sa dash" d="M77 36 H86"/>
+  <path class="sv" d="M49 24 H72"/>
+  <path class="sd" d="M49 32 H72"/>
+  <path class="sb" d="M49 40 H72"/>
+  <path class="sg" d="M49 48 H72"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<g class="stretch">
+    <path class="sa bars" d="M6 28v16 M10.5 19v34 M15 19v34 M19.5 28v16 M24 25v22 M28.5 19v34 M33 22v28 M37.5 19v34 M42 31v10 M46.5 19v34 M51 31v10 M55.5 22v28"/>
+  </g>
+  <path class="sm" d="M80 22 H114 M80 36 H114 M80 50 H114"/>
+  <g class="semis"><ellipse class="fv" cx="97" cy="36" rx="6" ry="4.5" transform="rotate(-20 97 36)"/></g>
+</svg>

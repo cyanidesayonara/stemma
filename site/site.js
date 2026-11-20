@@ -39,3 +39,20 @@
   if (system.addEventListener) { system.addEventListener("change", show); }
   show();
 })();
+
+/* The feature drawings animate only while their card is on screen. */
+(function () {
+  "use strict";
+
+  var cards = document.querySelectorAll("ul.features li");
+  if (!("IntersectionObserver" in window)) {
+    cards.forEach(function (card) { card.classList.add("live"); });
+    return;
+  }
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      entry.target.classList.toggle("live", entry.isIntersecting);
+    });
+  });
+  cards.forEach(function (card) { seen.observe(card); });
+})();
