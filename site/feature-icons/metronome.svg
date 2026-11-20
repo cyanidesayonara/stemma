@@ -1,0 +1,12 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<path class="fs sm" d="M40 64 L51 8 H69 L80 64 Z"/>
+  <g class="swing">
+    <path class="st thick" d="M60 56 V14"/>
+    <rect class="fa" x="55" y="24" width="10" height="7" rx="1.5"/>
+  </g>
+  <circle class="ft" cx="60" cy="56" r="3"/>
+  <circle class="fa beat m1" cx="90" cy="36" r="3.5"/>
+  <circle class="fa beat m2" cx="98" cy="36" r="2.6"/>
+  <circle class="fa beat m3" cx="106" cy="36" r="2.6"/>
+  <circle class="fa beat m4" cx="114" cy="36" r="2.6"/>
+</svg>

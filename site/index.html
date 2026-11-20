@@ -21,6 +21,8 @@
 <link rel="stylesheet" href="palette.css">
 <link rel="stylesheet" href="style.css">
 <script>
+  // scripts run: the feature drawings move only while on screen
+  document.documentElement.classList.add("js");
   // the theme the visitor picked last time, before the first paint
   try {
     var saved = localStorage.getItem("stemma-theme");
@@ -165,7 +167,7 @@
 
 <section aria-labelledby="shots-title">
   <h2 id="shots-title">Screenshots</h2>
-  <div class="grid">
+  <div class="shots">
 <!-- gen:shots --><!-- /gen:shots -->
   </div>
 </section>

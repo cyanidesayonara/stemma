@@ -1,0 +1,14 @@
+<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
+<path class="sm track" d="M18 10 V54"/>
+  <rect class="fv slide" style="animation-delay:0s" x="11" y="18.5" width="14" height="7" rx="2"/>
+  <circle class="fv" cx="18" cy="64" r="2.5"/>
+  <path class="sm track" d="M46 10 V54"/>
+  <rect class="fd slide" style="animation-delay:-0.9s" x="39" y="26.5" width="14" height="7" rx="2"/>
+  <circle class="fd" cx="46" cy="64" r="2.5"/>
+  <path class="sm track" d="M74 10 V54"/>
+  <rect class="fm" x="67" y="44.5" width="14" height="7" rx="2"/>
+  <rect class="fa" x="67" y="59" width="14" height="11" rx="2"/><text class="fon" x="74" y="67.5" text-anchor="middle">M</text>
+  <path class="sm track" d="M102 10 V54"/>
+  <rect class="fg slide" style="animation-delay:-1.7s" x="95" y="22.5" width="14" height="7" rx="2"/>
+  <circle class="fg" cx="102" cy="64" r="2.5"/>
+</svg>
