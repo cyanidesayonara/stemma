@@ -428,10 +428,14 @@ def test_card_contents_do_not_paint_the_page_background(qapp):
 
 
 def _stem_and_chord_lanes(controls) -> int:
-    """Height of the stem lanes plus the chord lane and the gap between."""
+    """Height of the section ruler, stem lanes, and chord lane, with the
+    gaps between them."""
     panel = controls.waveform_panel
     spacing = panel.frame.layout().spacing()
-    return panel.waveform.height() + spacing + panel.chord_lane.height()
+    return (
+        panel.section_ruler.height() + spacing + panel.waveform.height()
+        + spacing + panel.chord_lane.height()
+    )
 
 
 def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
