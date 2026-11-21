@@ -277,6 +277,8 @@ class MultiTrackPlayer(QObject):
         # against saving a full-length silent WAV when playback is
         # stopped before any input was captured (e.g. during count-in).
         self._recording_frames_captured: int = 0
+        # Why the last take failed to save; "" when none has failed.
+        self._take_save_error: str = ""
         self._input_device: int | None = None
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
@@ -632,15 +634,39 @@ class MultiTrackPlayer(QObject):
                 os.remove(path)  # a partial file would count as a take
             except OSError:
                 pass
-            self.recording_save_failed.emit(
+            self._take_save_error = (
                 "The take could not be saved. "
                 + describe_error(exc, "Saving a recording")
+            )
+            self.recording_save_failed.emit(
+                self._take_save_error
                 + " The take is kept in memory: press Stop again to save "
                 "it."
             )
             return None
         self._recording_buffer = None
+        self._take_save_error = ""
         return path
+
+    @property
+    def has_unsaved_take(self) -> bool:
+        """True while a take with captured input waits to be saved."""
+        return (
+            self._recording_buffer is not None
+            and self._recording_frames_captured > 0
+        )
+
+    @property
+    def take_save_error(self) -> str:
+        """Why the last take could not be saved ("" once one is saved)."""
+        return self._take_save_error
+
+    def discard_unsaved_take(self) -> None:
+        """Drop the take waiting to be saved (quit without it)."""
+        self.pause()
+        self._recording_buffer = None
+        self._recording_frames_captured = 0
+        self._take_save_error = ""
 
     def add_recording_stem(self, name: str, data: np.ndarray) -> None:
         """Add a recording take as a playable stem.
