@@ -3,6 +3,7 @@
 import hashlib
 import io
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -230,7 +231,7 @@ class TestDownloadFile:
         def publish(part, final):
             assert part == dest + ".part"
             assert not os.path.exists(final)
-            assert open(part, "rb").read() == body
+            assert Path(part).read_bytes() == body
             publications.append((part, final))
             real_replace(part, final)
 
@@ -250,7 +251,7 @@ class TestDownloadFile:
 
         assert publications == [(dest + ".part", dest)]
         assert os.path.isfile(dest)
-        assert open(dest, "rb").read() == body
+        assert Path(dest).read_bytes() == body
         assert not os.path.exists(dest + ".part")
         assert dl._current_partial_path is None
 
@@ -364,7 +365,7 @@ class TestDownloadFile:
                    return_value=_FakeResponse(b"fresh-bytes")):
             dl._download_file("http://x/m.onnx", dest, lambda d, t: None)
 
-        assert open(dest, "rb").read() == b"fresh-bytes"
+        assert Path(dest).read_bytes() == b"fresh-bytes"
         assert not os.path.exists(dest + ".part")
 
     def test_full_multi_artifact_download_completes(self, tmp_dir):
