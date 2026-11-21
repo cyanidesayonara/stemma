@@ -427,6 +427,13 @@ def test_card_contents_do_not_paint_the_page_background(qapp):
     rack.deleteLater()
 
 
+def _stem_and_chord_lanes(controls) -> int:
+    """Height of the stem lanes plus the chord lane and the gap between."""
+    panel = controls.waveform_panel
+    spacing = panel.frame.layout().spacing()
+    return panel.waveform.height() + spacing + panel.chord_lane.height()
+
+
 def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
     """A tall window should grow the waveform, not stretch the cards.
 
@@ -442,9 +449,11 @@ def test_spare_height_goes_to_the_waveform_not_the_cards(controls):
 
     waveform = controls._waveform_panel.waveform
     assert STACK_HEIGHT < waveform.height() <= STACK_MAX_HEIGHT
-    # The frame hugs the lanes; past the cap it must not grow on its own and
-    # leave empty bands above and below them.
-    assert controls._waveform_frame.height() <= waveform.height() + 12
+    # The frame hugs the lanes and the chord lane under them; past the cap
+    # it must not grow on its own and leave empty bands around them.
+    assert controls._waveform_frame.height() <= _stem_and_chord_lanes(
+        controls
+    ) + 12
 
     cards = (
         controls.practice_rack._loop_card,
@@ -483,7 +492,9 @@ def test_two_stem_songs_do_not_get_giant_lanes(controls):
 
     waveform = controls._waveform_panel.waveform
     assert waveform.height() <= STACK_HEIGHT
-    assert controls._waveform_frame.height() <= waveform.height() + 12
+    assert controls._waveform_frame.height() <= _stem_and_chord_lanes(
+        controls
+    ) + 12
     # With the waveform capped, the leftover height must collect below the
     # mixer rather than stretch the practice cards.
     cards = (
