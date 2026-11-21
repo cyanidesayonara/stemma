@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -152,7 +153,7 @@ class TestSongLibraryInit:
         lib = SongLibrary(data_dir=library_dir)
         bak = lib.recovery.backup_path
         assert os.path.basename(bak).startswith("library.json.corrupt-")
-        assert open(bak).read() == "{not valid json"
+        assert Path(bak).read_text(encoding="utf-8") == "{not valid json"
 
     def test_rebuilds_from_disk_when_index_corrupt(self, library_dir):
         """Songs whose dirs still hold an original.* file are recovered

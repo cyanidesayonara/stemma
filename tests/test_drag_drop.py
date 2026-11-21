@@ -35,6 +35,8 @@ def main_window(app):
     library = MagicMock()
     library.songs = []
     player = MagicMock()
+    # No take waits to be saved, so closing does not ask first.
+    player.has_unsaved_take = False
     # Saved to settings on close; a MagicMock here cannot be serialized.
     player.current_seconds = 0.0
     model_manager = MagicMock()

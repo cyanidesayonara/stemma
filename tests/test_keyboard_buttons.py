@@ -29,6 +29,7 @@ def window(app):
     library = MagicMock()
     library.songs = []
     player = MagicMock()
+    player.has_unsaved_take = False
     player.current_seconds = 0.0
     player.is_playing = False
     win = MainWindow(library, player, MagicMock())

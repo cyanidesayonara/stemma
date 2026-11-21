@@ -242,7 +242,10 @@ class TestDescribeError:
 
     def test_http_error(self):
         exc = urllib.error.HTTPError("http://x", 404, "Not Found", {}, None)
-        assert describe_error(exc) == MSG_HTTP_404
+        try:
+            assert describe_error(exc) == MSG_HTTP_404
+        finally:
+            exc.close()  # its temporary body file warned when collected
 
     def test_unknown_exception_falls_back_to_text(self):
         assert describe_error(ValueError("Sample rate mismatch")) == (

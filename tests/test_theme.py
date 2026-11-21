@@ -174,6 +174,7 @@ class TestThemeToggleButton:
         settings.setValue("theme", theme)
 
         player = MagicMock()
+        player.has_unsaved_take = False
         player.stems = {}
         player.muted_stems = set()
         player.soloed_stems = set()

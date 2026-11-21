@@ -53,6 +53,17 @@ def controls(qapp, player):
 
 
 @pytest.fixture
+def no_detection(controls, monkeypatch):
+    """Skip the beat/key detection a new stem set starts.
+
+    These tests load silent stems to check mute, solo, volume, and loop
+    state; detection on silence only warns (librosa tuning) and spends
+    a worker thread.
+    """
+    monkeypatch.setattr(controls, "start_detection", lambda *a, **k: None)
+
+
+@pytest.fixture
 def panel(qapp, library):
     return LibraryPanel(library)
 
@@ -123,6 +134,7 @@ class TestLibraryPanelSelectSong:
 # -----------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("no_detection")
 class TestStemRowSetters:
     def test_set_soloed(self, controls, player, tmp_path):
         audio = tmp_path / "stem.wav"
@@ -150,6 +162,7 @@ class TestStemRowSetters:
 # -----------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("no_detection")
 class TestRestoreStemState:
     def test_restores_mute_solo_volume(self, controls, player, tmp_path):
         audio = tmp_path / "stem.wav"
@@ -188,6 +201,7 @@ class TestRestoreStemState:
 # -----------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("no_detection")
 class TestRestoreLoopState:
     def test_restores_loop_points(self, controls, player, tmp_path):
         audio = tmp_path / "stem.wav"

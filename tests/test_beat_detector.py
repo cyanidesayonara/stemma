@@ -360,6 +360,40 @@ class TestDetectBeatsOnnx:
         assert bpm == pytest.approx(133.33, abs=0.3)
 
 
+class TestOnnxFailureIsLogged:
+    """A failing beat_this run fell back to librosa without a trace (#237)."""
+
+    def test_failure_is_logged_with_the_provider(
+        self, monkeypatch, tmp_path, caplog,
+    ):
+        model = tmp_path / "beat_this.onnx"
+        model.write_bytes(b"model")
+        session = SimpleNamespace(
+            get_providers=lambda: ["DmlExecutionProvider"],
+        )
+        monkeypatch.setattr(
+            "src.beat_detector.create_onnx_session", lambda _path: session,
+        )
+
+        def fail(_spec, _session):
+            raise RuntimeError("DML device removed")
+
+        monkeypatch.setattr("src.beat_detector._bt_chunked_inference", fail)
+        fallback = []
+        monkeypatch.setattr(
+            "src.beat_detector._detect_beats_librosa",
+            lambda *_a: fallback.append(1) or ([], [], 0.0),
+        )
+        audio = np.zeros(44100 * 6, dtype=np.float32)
+        audio[::4410] = 1.0
+        with caplog.at_level("WARNING", logger="stemma"):
+            detect_bpm_and_key({"mix": audio}, 44100, model_path=str(model))
+        assert fallback == [1]
+        assert "DmlExecutionProvider" in caplog.text
+        assert "librosa" in caplog.text
+        assert "DML device removed" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # BPM confidence
 # ---------------------------------------------------------------------------
