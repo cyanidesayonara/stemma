@@ -1,7 +1,0 @@
-<svg class="ficon" viewBox="0 0 120 72" width="120" height="72" aria-hidden="true" focusable="false">
-  <g class="row r1"><rect class="fs" x="14" y="8" width="80" height="12" rx="3"/><rect class="fv" x="20" y="12" width="4" height="4" rx="1"/><path class="sm" d="M30 14 H74"/></g>
-  <g class="row r2"><rect class="fs" x="14" y="23" width="80" height="12" rx="3"/><rect class="fd" x="20" y="27" width="4" height="4" rx="1"/><path class="sm" d="M30 29 H67"/></g>
-  <g class="row r3"><rect class="fs" x="14" y="38" width="80" height="12" rx="3"/><rect class="fb" x="20" y="42" width="4" height="4" rx="1"/><path class="sm" d="M30 44 H60"/></g>
-  <g class="row r4"><rect class="fs" x="14" y="53" width="80" height="12" rx="3"/><rect class="fg" x="20" y="57" width="4" height="4" rx="1"/><path class="sm" d="M30 59 H53"/></g>
-  <path class="sa" d="M104 14 V58 M98 52 L104 58 L110 52"/>
-</svg>
