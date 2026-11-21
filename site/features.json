@@ -97,13 +97,6 @@
       "covers": [
         "Keyboard shortcuts for the whole practice loop"
       ]
-    },
-    {
-      "id": "setlists",
-      "coming": "3.1",
-      "title": "Setlists and a play queue",
-      "body": "Put songs into setlists for a lesson or a gig, tag them, and line up what plays next without reshuffling your library. Each song will show the loop, speed and pitch you left it at.",
-      "covers": []
     }
   ]
 }

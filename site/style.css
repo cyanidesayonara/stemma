@@ -393,7 +393,7 @@ ol.steps li::before {
 }
 
 /* the features as cards in two columns, each with a small animated
-   drawing of what it does; an even number, so the rows fill */
+   drawing of what it does */
 ul.features {
   list-style: none;
   display: grid;
@@ -413,20 +413,6 @@ ul.features li {
   border-radius: var(--radius);
   padding: 20px 22px;
 }
-
-ul.features .soon {
-  display: inline-block;
-  margin: 0 0 6px;
-  padding: 1px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-}
-
-ul.features li.coming { border-style: dashed; border-color: var(--surface2); }
 
 ul.features h3 { font-size: 1.1rem; margin: 0 0 6px; }
 ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
@@ -506,10 +492,6 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
 .ficon .dash { stroke-dasharray: 3 3; animation: fi-dash 0.6s linear infinite; }
 .ficon .pick { animation: fi-pick 6s step-end infinite; }
 .ficon .resume { transform-origin: 80px 14px; animation: fi-resume 1.5s ease-out infinite; }
-.ficon .row { animation: fi-row 4s ease-in-out infinite; }
-.ficon .r1, .ficon .r2 { --to: 15px; }
-.ficon .r3 { --to: -30px; }
-.ficon .r4 { animation: none; }
 .ficon .key { transform-box: fill-box; animation: fi-key 3s ease-out infinite; }
 .ficon .k2 { animation-delay: -2.4s; }
 .ficon .k3 { animation-delay: -1.8s; }
@@ -542,7 +524,6 @@ ul.features p { margin: 0; color: var(--subtext); font-size: 0.97rem; }
   50% { transform: translateY(30px); } 75% { transform: translateY(45px); }
 }
 @keyframes fi-resume { 0% { transform: scaleX(0); } 70%, 100% { transform: scaleX(1); } }
-@keyframes fi-row { 0%, 20%, 100% { transform: none; } 40%, 80% { transform: translateY(var(--to)); } }
 @keyframes fi-key { 0% { transform: translateY(2px); opacity: 1; } 15%, 100% { transform: none; opacity: 0.6; } }
 
 /* only the cards on screen move (site.js marks them) */
