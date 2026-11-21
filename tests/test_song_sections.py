@@ -6,6 +6,7 @@ import pytest
 from src.song_sections import (
     MIN_SECTION_BARS,
     bar_grid,
+    confirm_boundaries,
     detect_sections,
     label_segments,
     merge_repeats,
@@ -139,6 +140,19 @@ class TestNovelty:
         assert pick_boundaries(scores) == [16]
 
 
+class TestConfirmBoundaries:
+    def test_a_real_step_is_kept(self):
+        rng = np.random.default_rng(0)
+        rows = np.vstack([
+            np.tile([1.0, 0.0], (16, 1)), np.tile([-1.0, 0.0], (16, 1)),
+        ]) + 0.05 * rng.standard_normal((32, 2))
+        assert confirm_boundaries(rows, [16]) == [16]
+
+    def test_random_bars_are_not_boundaries(self):
+        rows = np.random.default_rng(1).standard_normal((48, 6))
+        assert confirm_boundaries(rows, [8, 16, 24, 32, 40]) == []
+
+
 class TestLabels:
     def test_alike_segments_share_a_letter(self):
         a = np.tile([1.0, 0.0, 0.1], (8, 1))
@@ -197,6 +211,15 @@ class TestDetectSections:
         assert [(round(s, 1), label) for s, _, label in sections] == [
             (0.0, "A"), (19.2, "B"), (38.4, "A"),
         ]
+
+    @pytest.mark.parametrize("seed", range(6))
+    def test_white_noise_has_no_sections(self, seed):
+        """Bars that vary at random are not sections (#246 review)."""
+        audio = (
+            0.3 * np.random.default_rng(seed).standard_normal(SR * 120)
+        ).astype(np.float32)
+        downbeats = [i * BAR_S for i in range(60)]
+        assert detect_sections(audio, SR, [], downbeats) == []
 
     def test_a_song_that_never_changes_has_none(self):
         audio, beats, downbeats = _uniform_loop()

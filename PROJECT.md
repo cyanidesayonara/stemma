@@ -133,9 +133,12 @@ stemma/
   MFCC timbre, and loudness are averaged over four bars around each bar
   (so a section cycling through its progression reads as one steady
   thing) and scaled by single-bar spread; Foote checkerboard novelty on
-  the bars' Gaussian self-similarity matrix marks changes, kept at least
-  four bars apart and above an absolute floor, so a song that never
-  changes gets no sections rather than arbitrary ones
+  the bars' Gaussian self-similarity matrix proposes changes; each must
+  also move the bars on its two sides apart far more than chance, judged
+  against how closely bars match the bars they repeat, so random
+  bar-to-bar variation (white noise) gives no sections. Changes are kept
+  at least four bars apart and above an absolute floor, so a song that
+  never changes gets no sections rather than arbitrary ones
 - Boundaries are detected downbeats (every fourth beat when there are
   none), so a section loop starts and ends on bar lines
 - Labels are letters (A, B, A, B, C); sections whose mean features are

@@ -15,7 +15,11 @@ Method, kept to numpy and librosa:
    kernel along its diagonal (Foote novelty): the score peaks where the
    bars before and after a point are alike among themselves but unlike
    each other.
-3. Keep novelty peaks at least ``MIN_SECTION_BARS`` apart.
+3. Keep novelty peaks at least ``MIN_SECTION_BARS`` apart, and only
+   those where the bars on the two sides differ far more than chance
+   allows, judged by how closely bars match the bars they repeat
+   (``confirm_boundaries``), so random bar-to-bar variation is no
+   section.
 4. Give sections that sound alike the same letter (A, B, A, B, C, ...).
    Naming them verse or chorus would need far more than this knows, so
    the letters only say which sections repeat.
@@ -60,6 +64,17 @@ _CHROMA_WEIGHT = 1.0
 _TIMBRE_WEIGHT = 1.0
 _LOUDNESS_WEIGHT = 0.5
 _N_MFCC = 13
+# A novelty peak must also move the music this many times further than
+# chance (``boundary_contrast``), comparing up to 8 bars on each side, so
+# bars that vary at random do not split the song. On white noise the
+# strongest novelty peaks score about 1 to 3 (24 seeds of 2 minutes gave
+# no sections); the fixtures' real changes score 3.3 and up.
+_MIN_CONTRAST = 3.0
+_CONTRAST_BARS = 8
+_REPEAT_LAGS = (1, 2, 4, 8)
+# Least reference distance, in squared single-bar-spread units, so a song
+# whose bars repeat exactly (synthetic tones) cannot divide by ~0.
+_CONTRAST_REFERENCE_FLOOR = 1e-3
 # Squared feature distance that scores exp(-1) similarity. Distances are
 # in units of single-bar spread, and context-averaged bars of one section
 # sit well under a quarter of that apart.
@@ -128,36 +143,30 @@ def _smooth_bars(block: np.ndarray, width: int = _CONTEXT_BARS) -> np.ndarray:
     return (sums[width:width + n] - sums[:n]) / width
 
 
-def _context_features(raw: np.ndarray, weight: float) -> np.ndarray:
-    """Smooth per-bar features and scale them by the bar-to-bar spread.
+def _scaled(raw: np.ndarray, weight: float) -> np.ndarray:
+    """Centre per-bar features and scale them by the bar-to-bar spread.
 
-    Each column is centred and divided by its spread across *single*
-    bars, then by the square root of the column count, so a group's
-    squared distances average over its columns and *weight* sets its
-    share. Measured against single bars, a section's averaged features
-    move only when the music really changes: a song that repeats one
-    progression throughout stays near zero instead of having its noise
-    blown up to full scale.
+    Each column is divided by its spread across single bars, then by the
+    square root of the column count, so a group's squared distances
+    average over its columns and *weight* sets its share.
     """
-    smoothed = _smooth_bars(raw)
-    centred = smoothed - smoothed.mean(axis=0, keepdims=True)
+    centred = raw - raw.mean(axis=0, keepdims=True)
     spread = raw.std(axis=0, keepdims=True)
     centred = centred / np.where(spread < 1e-9, 1.0, spread)
     return centred * np.sqrt(weight / raw.shape[1])
 
 
-def bar_features(
+def single_bar_features(
     mono: np.ndarray,
     sr: int,
     bars: list[float],
     chroma: np.ndarray | None = None,
     hop_length: int = 4096,
-) -> np.ndarray:
-    """One row per bar: harmony, timbre, and loudness in context.
+) -> tuple[np.ndarray, np.ndarray]:
+    """One row per bar of harmony, timbre, and loudness, and column weights.
 
-    Each bar is averaged with its neighbours (``_CONTEXT_BARS``) and
-    scaled by how much single bars vary, so distances between rows are in
-    units of ordinary bar-to-bar variation (see ``_context_features``).
+    Rows are in units of single-bar spread (see ``_scaled``). The weights
+    are each column's share of the whole, summing to 1.
 
     *chroma* is the ``(12, n_frames)`` chroma at *hop_length* that chord
     detection already computed; it is computed here when not given.
@@ -179,19 +188,76 @@ def bar_features(
     frames = np.clip(frames, 0, n_frames)
 
     total = _CHROMA_WEIGHT + _TIMBRE_WEIGHT + _LOUDNESS_WEIGHT
-    return np.hstack([
-        _context_features(
-            _bar_means(chroma[:, :n_frames], frames), _CHROMA_WEIGHT / total,
-        ),
+    groups = (
+        (chroma[:, :n_frames], _CHROMA_WEIGHT),
         # The first coefficient is overall level, which loudness covers.
-        _context_features(
-            _bar_means(mfcc[1:, :n_frames], frames), _TIMBRE_WEIGHT / total,
-        ),
-        _context_features(
-            _bar_means(loudness[:, :n_frames], frames),
-            _LOUDNESS_WEIGHT / total,
-        ),
-    ])
+        (mfcc[1:, :n_frames], _TIMBRE_WEIGHT),
+        (loudness[:, :n_frames], _LOUDNESS_WEIGHT),
+    )
+    blocks, weights = [], []
+    for data, weight in groups:
+        blocks.append(_scaled(_bar_means(data, frames), weight / total))
+        weights.extend([weight / total / data.shape[0]] * data.shape[0])
+    return np.hstack(blocks), np.asarray(weights)
+
+
+def bar_features(
+    mono: np.ndarray,
+    sr: int,
+    bars: list[float],
+    chroma: np.ndarray | None = None,
+    hop_length: int = 4096,
+) -> np.ndarray:
+    """One row per bar: harmony, timbre, and loudness in context.
+
+    Each bar is averaged with its neighbours (``_CONTEXT_BARS``), in units
+    of single-bar spread. A section usually cycles through a progression,
+    so its single bars differ as much as bars of two sections do;
+    averaged, they look alike, and a song that repeats one progression
+    throughout stays near zero.
+    """
+    rows, _ = single_bar_features(mono, sr, bars, chroma, hop_length)
+    return _smooth_bars(rows)
+
+
+def repeat_distance(rows: np.ndarray) -> float:
+    """How far a bar usually is from the bar it repeats.
+
+    The median squared distance between single bars 1, 2, 4, or 8 bars
+    apart, whichever lag is closest: music repeats its progression every
+    few bars, so for it this is small; for bars that vary at random it is
+    twice their spread, whatever the lag.
+    """
+    lags = [lag for lag in _REPEAT_LAGS if lag < rows.shape[0]]
+    if not lags:
+        return 0.0
+    return min(
+        float(np.median(np.sum((rows[lag:] - rows[:-lag]) ** 2, axis=1)))
+        for lag in lags
+    )
+
+
+def boundary_contrast(
+    rows: np.ndarray, boundary: int, previous: int, following: int,
+    reference: float,
+) -> float:
+    """How far the music moves at *boundary*, against chance.
+
+    The squared distance between the mean of the single bars before the
+    line and after it (up to ``_CONTRAST_BARS`` each side, stopping at the
+    *previous* and *following* boundaries), divided by the distance two
+    such means would be apart if bars only varied as much as they do from
+    the bar they repeat (*reference*, from ``repeat_distance``). Bars that
+    vary at random score about 1; a real section change scores well
+    above.
+    """
+    span = min(_CONTRAST_BARS, boundary - previous, following - boundary)
+    if span < 1:
+        return 0.0
+    before = rows[boundary - span:boundary].mean(axis=0)
+    after = rows[boundary:boundary + span].mean(axis=0)
+    chance = max(reference, _CONTRAST_REFERENCE_FLOOR) / span
+    return float(np.sum((after - before) ** 2)) / chance
 
 
 def self_similarity(features: np.ndarray) -> np.ndarray:
@@ -312,8 +378,11 @@ def detect_sections(
     n_bars = len(bars) - 1
     if n_bars < _MIN_SONG_BARS:
         return []
-    features = bar_features(mono, sr, bars, chroma, hop_length)
-    boundaries = pick_boundaries(novelty(self_similarity(features)))
+    rows, _ = single_bar_features(mono, sr, bars, chroma, hop_length)
+    features = _smooth_bars(rows)
+    boundaries = confirm_boundaries(
+        rows, pick_boundaries(novelty(self_similarity(features))),
+    )
     if not boundaries:
         return []
     starts = [0] + boundaries
@@ -324,6 +393,29 @@ def detect_sections(
         for s, e, label in zip(starts, ends, labels)
     ])
     return sections if len(sections) > 1 else []
+
+
+def confirm_boundaries(rows: np.ndarray, candidates: list[int]) -> list[int]:
+    """Keep the candidates whose change clears ``_MIN_CONTRAST``.
+
+    Each is judged against its neighbours among the candidates still
+    kept, weakest dropped first, so dropping one widens the windows of
+    the boundaries beside it.
+    """
+    reference = repeat_distance(rows)
+    kept = sorted(candidates)
+    n_bars = rows.shape[0]
+    while kept:
+        edges = [0] + kept + [n_bars]
+        scores = [
+            boundary_contrast(rows, b, edges[i], edges[i + 2], reference)
+            for i, b in enumerate(kept)
+        ]
+        weakest = int(np.argmin(scores))
+        if scores[weakest] >= _MIN_CONTRAST:
+            break
+        del kept[weakest]
+    return kept
 
 
 def merge_repeats(
