@@ -11,6 +11,9 @@ listing uses, so the site always says what the released app does:
     whatsnew     the Store "What's new" for that version, one item per paragraph
     shots       every Store screenshot, with its caption
     meta        link-preview tags, with the first screenshot as the image
+    themecolor  the browser's theme colour, the app's mantle in each theme
+    jsonld      the schema.org SoftwareApplication record for search engines
+    credits     every mixer demo song, credited, from site/demo/songs.json
 
 The copy and the screenshots come from ``--from`` (a checkout of the released
 tag), while the pages, styles and script come from this checkout, so a site
@@ -42,6 +45,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.store_listing import load_listing, png_size  # noqa: E402
+from src.ui.styles import DARK_COLORS, LIGHT_COLORS  # noqa: E402
 
 SITE = ROOT / "site"
 # the feature cards and their icons: read at build, not published as files
@@ -56,7 +60,7 @@ SHOTS = Path("assets") / "store_listing" / "screenshots"
 PAGES = {
     "index.html": [
         "version", "released", "pitch", "features", "whatsnew", "shots",
-        "meta",
+        "meta", "themecolor", "jsonld", "credits",
     ],
 }
 
@@ -190,6 +194,60 @@ def share_meta(site_url: str, shot: str, alt: str, size: tuple[int, int]
     ])
 
 
+def theme_color() -> str:
+    """The browser chrome colour per theme: the page's background."""
+    return "\n".join([
+        '<meta name="theme-color" media="(prefers-color-scheme: dark)" '
+        f'content="{DARK_COLORS["mantle"]}">',
+        '<meta name="theme-color" media="(prefers-color-scheme: light)" '
+        f'content="{LIGHT_COLORS["mantle"]}">',
+    ])
+
+
+def store_url(source: Path) -> str:
+    """The public Store listing URL, from the release's listing.yaml; from
+    this checkout's when that release predates the store block."""
+    for checkout in (source, ROOT):
+        store = load_listing(checkout / "store" / "listing.yaml").store
+        if store is not None:
+            return store.url
+    raise SystemExit("store/listing.yaml has no store url")
+
+
+def json_ld(version: str, description: str, download_url: str) -> str:
+    """A schema.org SoftwareApplication record for the released app."""
+    record = {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "stemma",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "MultimediaApplication",
+        "softwareVersion": version,
+        "description": description,
+        "downloadUrl": download_url,
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+    }
+    text = json.dumps(record, ensure_ascii=False, indent=2)
+    # nothing in the record may close the script element early
+    text = text.replace("</", "<\\/")
+    return f'<script type="application/ld+json">\n{text}\n</script>'
+
+
+def demo_credits(songs: list[dict]) -> str:
+    """One line per demo song: title, the artist as the song asks to be
+    credited, licence and source. Static, so every song is credited, with
+    or without JavaScript."""
+    items = []
+    for song in songs:
+        who = song.get("credit_as") or song["artist"]
+        items.append(
+            f"      <li>\u201c{_e(song['title'])}\u201d by {_e(who)}, "
+            f'<a href="{_e(song["licence_url"])}">{_e(song["licence"])}</a>'
+            f' (<a href="{_e(song["source"])}">source</a>)</li>'
+        )
+    return "\n".join(items)
+
+
 def blocks(source: Path, version: str, released: str,
            site_url: str = DEFAULT_SITE_URL) -> dict[str, str]:
     listing = load_listing(source / "store" / "listing.yaml")
@@ -224,6 +282,14 @@ def blocks(source: Path, version: str, released: str,
             site_url, first, first_caption or screenshot_alt(first),
             png_size(source / SHOTS / first),
         ),
+        "themecolor": theme_color(),
+        "jsonld": json_ld(version,
+                          " ".join(listing.short_description.split()),
+                          store_url(source)),
+        # the demo ships with the site, from this checkout
+        "credits": demo_credits(json.loads(
+            (SITE / "demo" / "songs.json").read_text(encoding="utf-8")
+        )["songs"]),
     }
 
 

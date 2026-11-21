@@ -1,5 +1,6 @@
 """The website: palette held to the app, templates filled from a release."""
 
+import ast
 import importlib.util
 import json
 import re
@@ -267,11 +268,23 @@ def test_demo_songs_are_credited_and_freely_licensed():
         assert song["source"].startswith("https://")
 
 
-def test_demo_songs_have_every_stem_and_overview():
+def _app_order(name, module):
+    """A tuple constant from the app's source, read without importing Qt."""
+    text = (ROOT / module).read_text(encoding="utf-8")
+    found = re.search(rf"^{name} = \(([^)]*)\)", text, re.M)
+    return [ast.literal_eval(v.strip()) for v in found.group(1).split(",")
+            if v.strip()]
+
+
+APP_STEMS = _app_order("ALL_STEM_NAMES", "src/ui/main_window.py")
+
+
+def test_demo_songs_have_their_stems_and_overview():
     for song in _songs():
-        assert song["stems"] == [
-            "vocals", "drums", "bass", "other", "guitar", "piano",
-        ]
+        # any of the app's stems (a 4-stem song too), in the app's order
+        stems = song["stems"]
+        assert len(stems) >= 2, song["id"]
+        assert stems == [s for s in APP_STEMS if s in stems], song["id"]
         for stem in song["stems"]:
             path = DEMO / song["id"] / f"{stem}.mp3"
             assert path.is_file(), f"missing {path}"
@@ -293,6 +306,53 @@ def test_demo_song_timings_fit_the_clip():
             assert 0 <= start <= duration
             # spelled as demo.js's NOTE_NAMES, which it transposes
             assert chord == "N" or chord.rstrip("m") in NOTE_NAMES, chord
+
+
+def test_every_demo_song_is_credited_on_the_built_page(tmp_path):
+    out = tmp_path / "site"
+    build_site.build(ROOT, _version(), "2026-11-19", out)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    block = re.search(r"<!-- gen:credits -->(.*?)<!-- /gen:credits -->",
+                      page, re.S).group(1)
+    for song in _songs():
+        who = song.get("credit_as") or song["artist"]
+        line = next(li for li in block.splitlines()
+                    if f"\u201c{song['title']}\u201d" in li)
+        assert f"by {who}," in line
+        assert f'<a href="{song["licence_url"]}">{song["licence"]}</a>' in line
+        assert f'<a href="{song["source"]}">source</a>' in line
+
+
+def test_head_carries_theme_colours_and_the_app_record(tmp_path):
+    out = tmp_path / "site"
+    version = _version()
+    build_site.build(ROOT, version, "2026-11-19", out)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    palette = (ROOT / "site" / "palette.css").read_text(encoding="utf-8")
+    for scheme in ("dark", "light"):
+        colour = re.search(
+            rf'<meta name="theme-color" media="\(prefers-color-scheme: '
+            rf'{scheme}\)" content="(#[0-9a-f]{{6}})">', page).group(1)
+        assert f"--mantle: {colour};" in palette
+    record = json.loads(re.search(
+        r'<script type="application/ld\+json">(.*?)</script>', page, re.S
+    ).group(1))
+    assert record["@type"] == "SoftwareApplication"
+    assert record["name"] == "stemma"
+    assert record["softwareVersion"] == version
+    assert record["applicationCategory"] == "MultimediaApplication"
+    assert record["offers"]["price"] == "0"
+    store = build_site.load_listing(ROOT / "store" / "listing.yaml").store
+    assert record["downloadUrl"] == store.url
+    assert '<link rel="apple-touch-icon" href="img/icon.png">' in page
+
+
+def test_demo_speed_list_is_the_apps_presets():
+    page = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
+    select = re.search(r'<select data-act="speed">(.*?)</select>', page,
+                       re.S).group(1)
+    values = [float(v) for v in re.findall(r'value="([^"]+)"', select)]
+    assert values == _app_order("SPEED_PRESETS", "src/player.py")
 
 
 def test_demo_copy_is_published_with_the_site(tmp_path):
@@ -396,6 +456,72 @@ def test_worklet_clamps_a_loop_past_the_end():
     assert found["loopB"] == found["length"]
     assert not found["direct"]["nan"]
     assert not found["stretched"]["nan"]
+
+
+@needs_node
+def test_worklet_stops_at_the_end_of_the_clip_without_a_loop():
+    for name, found in _scenario("end").items():
+        speed = float(name.removeprefix("speed"))
+        assert found["ended"] == 1, speed
+        assert found["wraps"] == 0, speed
+        assert found["playing"] is False, speed
+        # ready to play again from 0:00, and it does
+        assert found["heard"] == 0, speed
+        # 0.25 s of listening is 0.25 s of song at 1.0x, less when slower
+        assert found["heardAfterReplay"] == pytest.approx(0.25 * speed,
+                                                          abs=0.04)
+        # faded out, never cut: no step like a hard stop, then silence
+        assert found["step"] < 0.1, (speed, found["step"])
+        assert found["tail"] == 0, speed
+
+
+@needs_node
+def test_worklet_loads_a_new_song_only_after_the_fade_out():
+    found = _scenario("load-in-fade")
+    assert found["genAtOnce"] == 1
+    assert found["gen"] == 2
+    assert found["playing"] is True
+    assert found["stopped"] == 1
+    assert found["step"] < 0.1, found["step"]
+
+
+@needs_node
+def test_demo_lanes_and_rows_follow_each_songs_stems():
+    done = subprocess.run(
+        [NODE, str(ROOT / "tests" / "js" / "demo_harness.js"),
+         str(ROOT / "site" / "demo.js"), str(DEMO / "songs.json")],
+        capture_output=True, text=True, check=True, timeout=60,
+    )
+    found = json.loads(done.stdout)
+    assert found["stems"] == APP_STEMS
+    assert found["presets"] == _app_order("SPEED_PRESETS", "src/player.py")
+    # a 4-stem song gets four lanes and rows, in the app's order
+    assert found["fourStem"] == ["vocals", "drums", "bass", "other"]
+    for song in _songs():
+        assert found["songs"][song["id"]] == song["stems"]
+    # the Trainer steps one preset per repeat, as the app does
+    assert found["trainer"] == [0.75, 0.85, 1.0]
+
+
+@needs_node
+@pytest.mark.parametrize("scenario, last", [
+    ("switch-twice", 2),   # A playing, then B and C at once: C plays
+    ("switch-back", 0),    # A playing, then B and back to A: A plays
+])
+def test_demo_stale_load_does_not_cancel_the_current_play(scenario, last):
+    done = subprocess.run(
+        [NODE, str(ROOT / "tests" / "js" / "page_harness.js"),
+         str(ROOT / "site" / "demo.js"), str(DEMO / "songs.json"), scenario],
+        capture_output=True, text=True, check=True, timeout=60,
+    )
+    found = json.loads(done.stdout)
+    first = _songs()[0]["id"]
+    # one load for the first play and one for the song picked last: the
+    # song between them sends nothing, and nothing is loaded twice
+    assert found["loads"] == [first, _songs()[last]["id"]]
+    assert found["playAfterLastLoad"] is True
+    assert found["pressed"] == "true"
+    assert found["suspends"] == 0
 
 
 @needs_node

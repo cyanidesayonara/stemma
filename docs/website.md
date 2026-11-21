@@ -52,6 +52,11 @@ the short description, features and What's new from its
 version people download, never main's unreleased work, and the release
 checklist that keeps the Store listing current keeps the site current too.
 
+A few blocks come from elsewhere: `themecolor` (the browser theme colour, the
+app's mantle per theme from `src/ui/styles.py`), `jsonld` (the schema.org
+SoftwareApplication record with the released version) and `credits` (the
+"Songs in this demo" list under the cockpit, from `site/demo/songs.json`).
+
 Preview locally (copy from this checkout):
 
 ```powershell
@@ -74,9 +79,11 @@ python scripts/build_site.py --from ../stemma-rel --version v2.6.0 --released 20
 
 ## The mixer demo
 
-The demo plays short clips of free-to-use songs, each separated into six
-stems by stemma itself (the 6-stem model), so visitors hear what the app
-really produces rather than studio multitracks. `site/demo.js` is the
+The demo plays short clips of free-to-use songs, each separated by stemma
+itself, so visitors hear what the app really produces rather than studio
+multitracks. A song may have any of the app's stems: `stems` in
+`songs.json` lists them (a 4-stem song has vocals, drums, bass and other),
+and the lanes and mixer rows follow it, in the app's order and colours. `site/demo.js` is the
 cockpit: a song picker, mute, solo and volume per stem, click-to-seek and
 drag-to-loop on stacked lanes, the Loop Trainer, speed, pitch and a
 metronome. `site/stretch-worklet.js` is the audio engine, an AudioWorklet
@@ -88,6 +95,16 @@ The key, chord, tempo and beat readouts are the app's own detector
 stored overview, so they show before any audio downloads; a song's stems
 (about 2-3 MB) load when it is first played.
 
+Only the playing song is decoded, and its samples move to the worklet
+rather than being copied; switching back to a song decodes it again from
+the HTTP cache. With no A-B loop, playback stops at the end of the clip and
+the next play starts from 0:00. After a pause has faded out the page
+suspends the audio context, and a song switch waits for the fade-out
+before the new song loads. On the lanes, a tap seeks, a sideways drag sets
+a loop, and a vertical swipe scrolls the page; with the lanes focused,
+Left and Right (and Down and Up) move 5 seconds as in the app, Page Down
+and Page Up move 15, and Home and End go to the start and the end.
+
 ### The songs
 
 | Song | Artist | Genre | Licence | Source |
@@ -98,8 +115,8 @@ stored overview, so they show before any audio downloads; a song's stems
 | Funkorama | Kevin MacLeod | Funk | CC BY 4.0 | [incompetech](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100474) |
 
 Only licences that allow derivative works without a non-commercial clause
-qualify (CC0, CC BY); `tests/test_site.py` enforces that and the credit the
-page shows beside the player for each song.
+qualify (CC0, CC BY); `tests/test_site.py` enforces that, the credit the
+page shows beside the player, and the static credits list under it.
 
 To add or remake a song: download it, separate it in stemma (or with the
 6-stem model), put its stem folder beside the others, add it to `SONGS` in
