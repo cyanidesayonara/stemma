@@ -110,6 +110,14 @@ class LibraryRecovery:
                 "Close stemma and open it again.\n\n"
                 f"The index ({name}) was not changed. It is in:\n{folder}"
             )
+        if self.kind == "held":
+            return (
+                "A song whose removal was interrupted could not be put "
+                "back, probably because another program is using its "
+                "files. It is kept in the library index and stemma will "
+                "try again the next time it starts.\n\n"
+                f"Do not delete this folder:\n{name}\n\nIt is in:\n{folder}"
+            )
         return (
             "stemma could not read the library index safely. Another "
             "program, such as antivirus or a sync tool, may be using it.\n\n"
@@ -183,6 +191,9 @@ class SongLibrary:
         self._held: list[dict] = []
         # Every song id the index named when it was read, shown or held.
         self._index_ids: set[str] = set()
+        # True only once library.json was read and parsed this launch;
+        # staged removal cleanup needs that to know what the index names.
+        self._index_read = False
 
         os.makedirs(self._songs_dir, exist_ok=True)
         self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
@@ -190,11 +201,17 @@ class SongLibrary:
         if os.path.isfile(self._json_path):
             self._load()
         else:
-            # A missing index next to song folders is lost metadata (for
-            # example a damaged index moved aside whose rewrite failed),
-            # not a new install: list the folders instead of writing [].
+            # A missing index next to anything in songs/ is lost metadata
+            # (for example a damaged index moved aside whose rewrite
+            # failed), not a new install: list the folders instead of
+            # writing []. Staged removal folders count too, since one may
+            # be the only copy of a song.
             self._songs = self._rebuild_from_disk()
-            if self._songs:
+            try:
+                has_entries = bool(os.listdir(self._songs_dir))
+            except OSError:
+                has_entries = True
+            if has_entries:
                 self._recovery = LibraryRecovery("missing", self._json_path)
             self._save()
 
@@ -426,16 +443,15 @@ class SongLibrary:
         """Delete folders left behind by removals whose delete failed.
 
         Only ``songs/.remove-<id>-<hex>`` folders whose id the index did not
-        name when it was read are touched, and only when that read was
-        clean: a damaged or unreadable index, or a removal that could not
-        be restored (a held row), leaves them all alone, since such a
-        folder can be the only copy of a song.
+        name when it was read are touched, and only when the index was
+        present and read cleanly: a missing, damaged or unreadable index
+        leaves them all alone, since such a folder can be the only copy of
+        a song. A held row (a removal that could not be restored) keeps
+        its own folder, because the index names its id, but does not
+        block cleanup of unrelated ones.
         """
-        if (
-            not self._writable
-            or self._recovery is not None
-            or self._held
-        ):
+        clean = self._recovery is None or self._recovery.kind == "held"
+        if not self._writable or not self._index_read or not clean:
             return
         known = self._index_ids | {song.id for song in self._songs}
         try:
@@ -588,6 +604,13 @@ class SongLibrary:
                 )
                 self._held.append(song.to_dict())
         self._songs = loaded
+        self._index_read = True
+        if self._held:
+            # Replaced below if rows were also lost: that notice matters
+            # more, and held rows are kept either way.
+            self._recovery = LibraryRecovery(
+                "held", self._staged_folder_of(self._held[0]["id"]),
+            )
 
         if lost:
             backup = self._backup_path("partial")
@@ -612,6 +635,20 @@ class SongLibrary:
             self._save_quietly()
         elif rebased:
             self._save_quietly()
+
+    def _staged_folder_of(self, song_id: str) -> str:
+        """Return the newest-named staged removal folder for *song_id*."""
+        prefix = f".remove-{song_id}-"
+        try:
+            names = sorted(
+                name for name in os.listdir(self._songs_dir)
+                if name.startswith(prefix)
+            )
+        except OSError:
+            names = []
+        if not names:
+            return os.path.join(self._songs_dir, prefix + "*")
+        return os.path.join(self._songs_dir, names[-1])
 
     def _rebased(self, song: Song) -> Song | None:
         """Return *song* with its paths moved under this songs root.

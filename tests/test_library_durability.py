@@ -582,3 +582,81 @@ def test_failed_import_rollback_survives_a_locked_folder(monkeypatch):
 
     stub._library.remove_song.assert_called_once_with("abc")
     stub._library_panel.refresh.assert_called()
+
+
+class TestReReviewFindings:
+
+    def test_missing_index_with_only_a_staged_folder_keeps_it(
+        self, tmp_path, source_audio,
+    ):
+        data_dir = str(tmp_path / "data")
+        lib = SongLibrary(data_dir)
+        song = lib.add_song("T", "A", source_audio, "htdemucs")
+        staged = os.path.join(
+            data_dir, "songs", f".remove-{song.id}-{'b' * 32}",
+        )
+        os.rename(song.stems_path, staged)
+        os.remove(os.path.join(data_dir, "library.json"))
+
+        relaunched = SongLibrary(data_dir)
+        relaunched.discard_staged_removals()
+
+        assert os.path.isdir(staged)
+        assert relaunched.recovery is not None
+        assert relaunched.recovery.kind == "missing"
+
+    def test_held_row_is_reported_with_its_folder(
+        self, tmp_path, source_audio, monkeypatch,
+    ):
+        helper = TestHeldStagedRemoval()
+        data_dir, _song, staged = helper._interrupted_removal(
+            tmp_path, source_audio,
+        )
+        helper._lock_staged(monkeypatch)
+
+        lib = SongLibrary(data_dir)
+
+        assert lib.recovery is not None
+        assert lib.recovery.kind == "held"
+        assert os.path.basename(staged) in lib.recovery.message
+
+    def test_held_row_does_not_block_unrelated_cleanup(
+        self, tmp_path, source_audio, monkeypatch,
+    ):
+        helper = TestHeldStagedRemoval()
+        data_dir, _song, staged = helper._interrupted_removal(
+            tmp_path, source_audio,
+        )
+        unrelated = os.path.join(
+            data_dir, "songs", f".remove-ffffffffffff-{'c' * 32}",
+        )
+        os.makedirs(unrelated)
+        real_replace = helper._lock_staged(monkeypatch)
+        lib = SongLibrary(data_dir)
+        monkeypatch.setattr(library_module.os, "replace", real_replace)
+
+        lib.discard_staged_removals()
+
+        assert os.path.isdir(staged)
+        assert not os.path.exists(unrelated)
+
+
+@pytest.mark.parametrize("method", [
+    "_discard_failed_import_song", "_on_model_download_finished",
+])
+def test_import_dialog_rollback_survives_a_locked_folder(
+    tmp_path, monkeypatch, method,
+):
+    from src.ui.import_dialog import ImportDialog
+
+    stub = MagicMock()
+    stub._import_song_id = "abc"
+    stub._model_path_for.return_value = str(tmp_path / "missing.onnx")
+    stub._library.remove_song.side_effect = PermissionError(32, "in use")
+
+    if method == "_discard_failed_import_song":
+        ImportDialog._discard_failed_import_song(stub)
+    else:
+        ImportDialog._on_model_download_finished(stub, "")
+
+    stub._library.remove_song.assert_called_once_with("abc")
