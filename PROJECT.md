@@ -35,7 +35,7 @@ future scope lives in `docs/ROADMAP.md`.
 
 | Component | Choice | Why |
 |---|---|---|
-| **Language** | Python 3.14 | Rich audio ecosystem |
+| **Language** | Python 3.12 for CI and releases (3.14 works for local development) | Rich audio ecosystem |
 | **GUI** | PySide6 (Qt 6) | Modern look, powerful widgets, LGPL |
 | **Inference** | ONNX Runtime DirectML | No PyTorch; shared DirectML-first session setup with CPU fallback |
 | **Stem Models** | HTDemucs v4 and MDX-Net ONNX | Downloaded and checksum-verified on first use |
