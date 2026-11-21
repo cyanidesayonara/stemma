@@ -173,8 +173,9 @@ class MultiTrackPlayer(QObject):
         position_changed(float): Current playback position in seconds.
         state_changed(bool): Emitted when playback starts or stops.
         play_finished(): Emitted when the end of the track is reached.
-        playback_failed(str): Emitted when opening the output device fails
-            (e.g. no device available). *str* is a short user-facing message.
+        playback_failed(str): Emitted when opening the output device fails or
+            the output device disconnects during playback. *str* is a short
+            user-facing message.
     """
 
     position_changed = Signal(float)
@@ -294,6 +295,8 @@ class MultiTrackPlayer(QObject):
         self._stream: sd.OutputStream | sd.Stream | None = None
         self._output_device: int | None = None
         self._suppress_next_count_in: bool = False
+        self._device_lost: bool = False
+        self._pending_status: Any = None
 
         # UI updater.
         self._timer = QTimer(self)
@@ -816,6 +819,8 @@ class MultiTrackPlayer(QObject):
         self._recording_buffer = None
         # The dropped take's reason must not surface on the next song.
         self._take_save_error = ""
+        self._device_lost = False
+        self._pending_status = None
         self._nudge_offsets.clear()
 
     def unload(self) -> None:
@@ -902,6 +907,7 @@ class MultiTrackPlayer(QObject):
                 channels=(input_ch, 2),
                 callback=self._full_duplex_callback,
                 device=(in_resolved, out_resolved),
+                finished_callback=self._on_stream_finished,
             )
         except (sd.PortAudioError, ValueError, OSError):
             return None
@@ -916,10 +922,46 @@ class MultiTrackPlayer(QObject):
             "samplerate": self._sample_rate,
             "channels": 2,
             "callback": self._audio_callback,
+            "finished_callback": self._on_stream_finished,
         }
         if self._output_device is not None:
             kwargs["device"] = self._output_device
         return sd.OutputStream(**kwargs)
+
+    def _on_stream_finished(self) -> None:
+        """Flag unexpected stream termination (e.g. unplugged output device).
+
+        PortAudio invokes this callback when a stream becomes inactive.
+        Normal EOF and explicit ``pause()`` / ``stop()`` clear
+        ``_is_playing`` first, so ``_is_playing`` still being True
+        means the stream ended unexpectedly.
+        """
+        if self._is_playing:
+            self._device_lost = True
+
+    def _close_stream(self) -> None:
+        """Stop and close the active PortAudio stream, ignoring device errors."""
+        stream = self._stream
+        self._stream = None
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except (sd.PortAudioError, OSError):
+            pass
+        try:
+            stream.close()
+        except (sd.PortAudioError, OSError):
+            pass
+
+    def _stream_inactive(self) -> bool:
+        """Return True if the open stream reports inactive or errors."""
+        if self._stream is None:
+            return False
+        try:
+            return self._stream.active is False
+        except (sd.PortAudioError, OSError):
+            return True
 
     def _disarm_recording_without_input(self) -> str:
         """Turn recording off for want of an input; return the message.
@@ -960,7 +1002,10 @@ class MultiTrackPlayer(QObject):
 
         # Emitted once playback runs: its slot opens a modal dialog, and a
         # nested event loop must not run while the player is half set up.
+        self._device_lost = False
+        self._pending_status = None
         unavailable = None
+        prev_suppress = self._suppress_next_count_in
         try:
             if self._stream is None and self._recording_armed:
                 self._stream = self._open_recording_stream()
@@ -968,6 +1013,12 @@ class MultiTrackPlayer(QObject):
                     unavailable = self._disarm_recording_without_input()
             if self._stream is None:
                 self._stream = self._open_output_stream()
+
+            if self._suppress_next_count_in:
+                self._suppress_next_count_in = False
+            else:
+                self._arm_count_in()
+            self._is_playing = True
             try:
                 self._stream.start()
             except (sd.PortAudioError, OSError):
@@ -975,16 +1026,18 @@ class MultiTrackPlayer(QObject):
                     raise
                 # The duplex stream opened but would not start: blame the
                 # input and play on without it.
-                self._stream.close()
-                self._stream = None
+                self._close_stream()
                 unavailable = self._disarm_recording_without_input()
                 self._stream = self._open_output_stream()
                 self._stream.start()
         except (sd.PortAudioError, OSError):
-            if self._stream is not None:
-                self._stream.close()
-                self._stream = None
+            self._is_playing = False
             self._recording = False
+            self._count_in_remaining = 0
+            self._count_in_phase = 0
+            self._count_in_beat = 0
+            self._suppress_next_count_in = prev_suppress
+            self._close_stream()
             self._discard_empty_recording()
             self.playback_failed.emit(
                 "No audio device is available, or playback failed to "
@@ -993,12 +1046,6 @@ class MultiTrackPlayer(QObject):
             )
             return
 
-        if self._suppress_next_count_in:
-            self._suppress_next_count_in = False
-        else:
-            self._arm_count_in()
-
-        self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
         if unavailable:
@@ -1016,12 +1063,10 @@ class MultiTrackPlayer(QObject):
 
         self._is_playing = False
         self._recording = False
+        self._device_lost = False
         self._count_in_remaining = 0
         self._count_in_beat = 0
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        self._close_stream()
 
         self._timer.stop()
         self.state_changed.emit(False)
@@ -1408,6 +1453,7 @@ class MultiTrackPlayer(QObject):
             return
         try:
             stream.stop()
+            self._device_lost = False
             stream.start()
         except (sd.PortAudioError, OSError):
             logger.warning(
@@ -1470,14 +1516,27 @@ class MultiTrackPlayer(QObject):
 
     def _emit_position(self) -> None:
         """Emit the current playback position for UI updates."""
+        if self._pending_status is not None:
+            status = self._pending_status
+            self._pending_status = None
+            logger.debug("PortAudio callback status: %s", status)
+
+        if self._is_playing and (
+            self._device_lost or self._stream_inactive()
+        ):
+            self._device_lost = False
+            logger.warning(
+                "Audio output stream stopped unexpectedly (device disconnected)."
+            )
+            self.pause()
+            self.playback_failed.emit("Audio device disconnected.")
+            return
+
         if not self._is_playing and self._timer.isActive():
             had_buffer = self._recording_buffer is not None
             self._recording = False
             self._timer.stop()
-            if self._stream is not None:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
+            self._close_stream()
             self.state_changed.emit(False)
             self.play_finished.emit()
             if had_buffer and self._recording_song_dir:
@@ -1744,6 +1803,8 @@ class MultiTrackPlayer(QObject):
         When A-B looping is active, playback wraps from loop_b back to loop_a
         instead of stopping at the end of the track.
         """
+        if status:
+            self._pending_status = status
         if not self._is_playing:
             outdata.fill(0.0)
             raise sd.CallbackStop
@@ -1795,6 +1856,7 @@ class MultiTrackPlayer(QObject):
                 self._current_frame = loop_a
             else:
                 outdata.fill(0.0)
+                self._is_playing = False
                 raise sd.CallbackStop
 
         # Clear the output buffer.
