@@ -2010,6 +2010,11 @@ class MainWindow(QMainWindow):
                 self._library.remove_song(song_id)
             except KeyError:
                 pass
+            except (OSError, ValueError) as exc:
+                # Still marked pending, so the next startup prune retries.
+                logger.warning(
+                    "Could not roll back failed import %s: %s", song_id, exc,
+                )
         self._library_panel.refresh()
         # A damaged model was deleted by the worker; offer a fresh import,
         # which asks to download it again.

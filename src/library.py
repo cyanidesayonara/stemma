@@ -39,6 +39,13 @@ _sleep = time.sleep
 logger = logging.getLogger("stemma")
 
 
+LIBRARY_READ_ONLY_MESSAGE = (
+    "The library index could not be read safely when stemma started, so "
+    "library changes cannot be saved this session. Close stemma and open "
+    "it again."
+)
+
+
 class LibraryReadOnlyError(OSError):
     """The index could not be read safely, so this session cannot save."""
 
@@ -86,6 +93,22 @@ class LibraryRecovery:
                 "re-entering.\n\n"
                 f"A copy of the original index was kept as {name} in:\n"
                 f"{folder}"
+            )
+        if self.kind == "missing":
+            return (
+                "stemma could not find its library index, so the library "
+                "was rebuilt from the song folders. Your audio and stems "
+                "are safe, but song titles and artists may need "
+                "re-entering.\n\n"
+                f"The new index ({name}) is in:\n{folder}"
+            )
+        if self.kind == "unsaved":
+            return (
+                "Some entries in the library index were damaged, and stemma "
+                "could not keep a backup copy of it. To avoid losing those "
+                "entries, library changes are not saved this session. "
+                "Close stemma and open it again.\n\n"
+                f"The index ({name}) was not changed. It is in:\n{folder}"
             )
         return (
             "stemma could not read the library index safely. Another "
@@ -155,6 +178,11 @@ class SongLibrary:
         self._songs: list[Song] = []
         self._writable = True
         self._recovery: LibraryRecovery | None = None
+        # Index rows kept on disk but not shown: songs whose interrupted
+        # removal could not be restored this launch (see _load_entries).
+        self._held: list[dict] = []
+        # Every song id the index named when it was read, shown or held.
+        self._index_ids: set[str] = set()
 
         os.makedirs(self._songs_dir, exist_ok=True)
         self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
@@ -162,6 +190,12 @@ class SongLibrary:
         if os.path.isfile(self._json_path):
             self._load()
         else:
+            # A missing index next to song folders is lost metadata (for
+            # example a damaged index moved aside whose rewrite failed),
+            # not a new install: list the folders instead of writing [].
+            self._songs = self._rebuild_from_disk()
+            if self._songs:
+                self._recovery = LibraryRecovery("missing", self._json_path)
             self._save()
 
     @property
@@ -181,11 +215,7 @@ class SongLibrary:
 
     def _require_writable(self) -> None:
         if not self._writable:
-            raise LibraryReadOnlyError(
-                "The library index could not be read when stemma started, "
-                "so library changes cannot be saved. Close stemma and open "
-                "it again."
-            )
+            raise LibraryReadOnlyError(LIBRARY_READ_ONLY_MESSAGE)
 
     def get_song(self, song_id: str) -> Song | None:
         """Return the song with *song_id*, or ``None`` if not found."""
@@ -395,13 +425,19 @@ class SongLibrary:
     def discard_staged_removals(self) -> None:
         """Delete folders left behind by removals whose delete failed.
 
-        Only ``songs/.remove-<id>-<hex>`` folders whose song is no longer in
-        a cleanly read index are touched; a damaged or unreadable index
-        leaves them alone, since one may still be needed for recovery.
+        Only ``songs/.remove-<id>-<hex>`` folders whose id the index did not
+        name when it was read are touched, and only when that read was
+        clean: a damaged or unreadable index, or a removal that could not
+        be restored (a held row), leaves them all alone, since such a
+        folder can be the only copy of a song.
         """
-        if not self._writable or self._recovery is not None:
+        if (
+            not self._writable
+            or self._recovery is not None
+            or self._held
+        ):
             return
-        known = {song.id for song in self._songs}
+        known = self._index_ids | {song.id for song in self._songs}
         try:
             entries = os.listdir(self._songs_dir)
         except OSError:
@@ -524,6 +560,8 @@ class SongLibrary:
         lost = False
         rebased = False
         for entry in data:
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+                self._index_ids.add(entry["id"])
             try:
                 song = Song.from_dict(entry)
             except (TypeError, KeyError):
@@ -538,6 +576,17 @@ class SongLibrary:
                 rebased = True
             if self._recover_staged_removal(song):
                 loaded.append(song)
+            else:
+                # Its only copy is a staged removal folder that could not
+                # be moved back (a lock, or two equally new candidates).
+                # Keep the row in every save so the next launch retries,
+                # and keep it out of the list so nothing acts on a folder
+                # that is not there.
+                logger.warning(
+                    "Could not restore song %s from an interrupted "
+                    "removal; keeping it for the next launch", song.id,
+                )
+                self._held.append(song.to_dict())
         self._songs = loaded
 
         if lost:
@@ -550,10 +599,12 @@ class SongLibrary:
                 logger.warning(
                     "Could not back up library index to %s: %s", backup, exc,
                 )
-                self._enter_read_only()
+                self._writable = False
+                self._recovery = LibraryRecovery("unsaved", self._json_path)
                 return
             self._recovery = LibraryRecovery("partial", backup)
             known = {song.id for song in self._songs}
+            known.update(entry["id"] for entry in self._held)
             self._songs.extend(
                 song for song in self._rebuild_from_disk()
                 if song.id not in known
@@ -687,7 +738,10 @@ class SongLibrary:
         self._require_writable()
         tmp_path = self._json_path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump([s.to_dict() for s in self._songs], f, indent=2)
+            json.dump(
+                [s.to_dict() for s in self._songs] + self._held,
+                f, indent=2,
+            )
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, self._json_path)

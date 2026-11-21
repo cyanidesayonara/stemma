@@ -454,3 +454,131 @@ def test_data_folder_change_says_songs_are_not_moved():
     text = data_dir_change_message(r"C:\old\stemma")
     assert "not moved" in text
     assert r"C:\old\stemma" in text
+
+
+class TestHeldStagedRemoval:
+    """A removal interrupted before its index save leaves the song's only
+    copy in songs/.remove-<id>-<hex>. If that cannot be restored at
+    startup, it must survive every later save and prune."""
+
+    def _interrupted_removal(self, tmp_path, source_audio):
+        data_dir = str(tmp_path / "data")
+        lib = SongLibrary(data_dir)
+        song = lib.add_song("Real Title", "Real Artist", source_audio,
+                            "htdemucs")
+        staged = os.path.join(
+            data_dir, "songs", f".remove-{song.id}-{'a' * 32}",
+        )
+        os.rename(song.stems_path, staged)
+        return data_dir, song, staged
+
+    def _lock_staged(self, monkeypatch):
+        real_replace = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if ".remove-" in str(src):
+                raise PermissionError(32, "in use")
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(library_module.os, "replace", replace)
+        return real_replace
+
+    def test_unrestorable_staged_folder_survives_prune_and_saves(
+        self, tmp_path, source_audio, monkeypatch,
+    ):
+        from src.ui.main_window import MainWindow
+
+        data_dir, song, staged = self._interrupted_removal(
+            tmp_path, source_audio,
+        )
+        real_replace = self._lock_staged(monkeypatch)
+        lib = SongLibrary(data_dir)
+        monkeypatch.setattr(library_module.os, "replace", real_replace)
+
+        stub = MagicMock()
+        stub._library = lib
+        MainWindow._prune_incomplete_songs(stub)
+        lib.add_song("Other", "Band", source_audio)
+
+        assert os.path.isdir(staged)
+        held = [e for e in _index(data_dir) if e["id"] == song.id]
+        assert [e["title"] for e in held] == ["Real Title"]
+
+        # Once the lock is gone, the next launch restores it.
+        relaunched = SongLibrary(data_dir)
+        restored = relaunched.get_song(song.id)
+        assert restored is not None
+        assert restored.title == "Real Title"
+        assert os.path.isdir(restored.stems_path)
+
+    def test_staged_folder_named_in_the_index_is_never_discarded(
+        self, tmp_path, source_audio, monkeypatch,
+    ):
+        data_dir, song, staged = self._interrupted_removal(
+            tmp_path, source_audio,
+        )
+        self._lock_staged(monkeypatch)
+        lib = SongLibrary(data_dir)
+
+        lib.discard_staged_removals()
+
+        assert os.path.isdir(staged)
+
+
+class TestRecoveryEdgeCases:
+
+    def test_failed_partial_backup_has_its_own_message(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        entry = _song_on_disk(data_dir)
+        original = json.dumps(["not a song", entry])
+        _write_index(data_dir, original)
+
+        def copyfile(*_a, **_k):
+            raise PermissionError(13, "denied")
+
+        monkeypatch.setattr(library_module.shutil, "copyfile", copyfile)
+
+        lib = SongLibrary(data_dir)
+
+        assert [s.title for s in lib.songs] == ["Kept"]
+        assert not lib.writable
+        assert lib.recovery.kind == "unsaved"
+        assert "folder names" not in lib.recovery.message
+        with open(os.path.join(data_dir, "library.json"),
+                  encoding="utf-8") as f:
+            assert f.read() == original
+
+    def test_missing_index_is_rebuilt_from_song_folders(self, tmp_path):
+        """A corrupt index moved aside whose rewrite failed leaves no
+        library.json; the next launch must not write an empty one."""
+        data_dir = str(tmp_path / "data")
+        _song_on_disk(data_dir)
+
+        lib = SongLibrary(data_dir)
+
+        assert [s.id for s in lib.songs] == ["0123456789ab"]
+        assert [e["id"] for e in _index(data_dir)] == ["0123456789ab"]
+        assert lib.recovery.kind == "missing"
+        assert "re-enter" in lib.recovery.message.lower()
+
+    def test_fresh_data_folder_reports_nothing(self, tmp_path):
+        lib = SongLibrary(str(tmp_path / "data"))
+
+        assert lib.songs == []
+        assert lib.recovery is None
+
+
+def test_failed_import_rollback_survives_a_locked_folder(monkeypatch):
+    from src.ui import main_window
+    from src.ui.main_window import MainWindow
+
+    monkeypatch.setattr(main_window, "QMessageBox", MagicMock())
+    stub = MagicMock()
+    stub._library.remove_song.side_effect = PermissionError(32, "in use")
+
+    MainWindow._on_separation_failed(stub, "abc", "Separation failed")
+
+    stub._library.remove_song.assert_called_once_with("abc")
+    stub._library_panel.refresh.assert_called()
