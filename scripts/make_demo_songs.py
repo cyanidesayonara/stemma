@@ -1,21 +1,22 @@
 """Make the website's mixer-demo songs from stemma's own separations.
 
-Each song in ``SONGS`` is a free-to-use track (CC0 or CC BY) separated into
-six stems by stemma itself (the htdemucs_6s model), so the demo plays what
-the app really produces. For each one this script:
+Each song in ``SONGS`` is a free-to-use track (CC0 or CC BY) with vocals,
+separated by stemma itself into six stems (the htdemucs_6s model) or four
+(htdemucs), so the demo plays what the app really produces. For each one
+this script:
 
 1. cuts a clip of whole bars, starting on a downbeat (``start`` in seconds,
    or picked here: the loudest stretch with every part playing),
 2. runs the app's detector (``src.beat_detector``) on the clip for the
    tempo, key, beats, downbeats and chords the demo shows,
-3. writes the six stems as MP3 to ``site/demo/<id>/`` and a waveform
+3. writes its stems as MP3 to ``site/demo/<id>/`` and a waveform
    overview, and lists every song in ``site/demo/songs.json``.
 
     python scripts/make_demo_songs.py STEMS_DIR
 
 ``STEMS_DIR`` holds one folder per song, named like its ``folder`` below,
-with ``vocals.wav``, ``drums.wav``, ``bass.wav``, ``guitar.wav``,
-``piano.wav`` and ``other.wav`` (what the app writes when it separates).
+with the WAVs the app writes when it separates: ``vocals``, ``drums``,
+``bass`` and ``other``, plus ``guitar`` and ``piano`` for six stems.
 The sources and their licences are in ``SONGS`` and on the page.
 """
 
@@ -35,11 +36,15 @@ sys.path.insert(0, str(ROOT))
 from src.beat_detector import detect_bpm_and_key  # noqa: E402
 
 OUT = ROOT / "site" / "demo"
+# the app's stem order (ALL_STEM_NAMES); a 4-stem song has the first four
 STEMS = ("vocals", "drums", "bass", "other", "guitar", "piano")
 CLIP_SECONDS = 40.0
 PEAKS = 480          # waveform overview points per stem
 EDGE_FADE = 0.02     # seconds faded at each end of a clip
 
+# Two songs in six stems, then four in four. ccMixter tracks are credited
+# with the attribution name each page sets (handle in brackets) and the
+# singer whose a cappella they build on, as the licence asks.
 SONGS = [
     {
         "id": "makes-shift-salvation",
@@ -54,42 +59,63 @@ SONGS = [
         "start": 179.82,
     },
     {
-        "id": "swansong",
-        "folder": "josh-woodward-swansong",
-        "title": "Swansong",
-        "artist": "Josh Woodward",
-        "genre": "Folk pop",
+        "id": "blue-part-ii",
+        "folder": "jimmy233-blue-part-ii",
+        "title": "Blue Part II",
+        "artist": "JCrews",
+        "credit_as": "JCrews (jimmy233) feat. Adisa McKenzie",
+        "genre": "Soul",
         "licence": "CC BY 3.0",
         "licence_url": "https://creativecommons.org/licenses/by/3.0/",
-        "source": "https://freemusicarchive.org/music/Josh_Woodward/"
-                  "Breadcrumbs/JoshWoodward-Breadcrumbs-01-Swansong/",
-        "start": 127.38,
+        "source": "https://ccmixter.org/files/jimmy233/58818",
+        "start": 192.0,
     },
     {
-        "id": "bossa-antigua",
-        "folder": "kevin-macleod-bossa-antigua",
-        "title": "Bossa Antigua",
-        "artist": "Kevin MacLeod",
-        "credit_as": "Kevin MacLeod (incompetech.com)",
-        "genre": "Bossa nova",
-        "licence": "CC BY 4.0",
-        "licence_url": "https://creativecommons.org/licenses/by/4.0/",
-        "source": "https://incompetech.com/music/royalty-free/"
-                  "index.html?isrc=USUAN1700069",
-        "start": 88.74,
+        "id": "free-music-and-free-beer",
+        "folder": "admiralbob77-free-music-and-free-beer-4",
+        "title": "Free Music and Free Beer",
+        "artist": "Admiral Bob",
+        "credit_as": "Admiral Bob (admiralbob77) feat. SackJo22",
+        "genre": "Blues",
+        "licence": "CC BY 3.0",
+        "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+        "source": "https://ccmixter.org/files/admiralbob77/38104",
+        "start": None,
     },
     {
-        "id": "funkorama",
-        "folder": "kevin-macleod-funkorama",
-        "title": "Funkorama",
-        "artist": "Kevin MacLeod",
-        "credit_as": "Kevin MacLeod (incompetech.com)",
-        "genre": "Funk",
+        "id": "girls-like-you",
+        "folder": "jeffspeed68-girls-like-you",
+        "title": "Girls Like You",
+        "artist": "Stefan Kartenberg",
+        "credit_as": "Stefan Kartenberg (JeffSpeed68) feat. Thespinwires",
+        "genre": "Garage rock",
+        "licence": "CC BY 3.0",
+        "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+        "source": "https://ccmixter.org/files/JeffSpeed68/44932",
+        "start": None,
+    },
+    {
+        "id": "let-it-in",
+        "folder": "josh-woodward-let-it-in",
+        "title": "Let It In",
+        "artist": "Josh Woodward",
+        "genre": "Funk rock",
         "licence": "CC BY 4.0",
         "licence_url": "https://creativecommons.org/licenses/by/4.0/",
-        "source": "https://incompetech.com/music/royalty-free/"
-                  "index.html?isrc=USUAN1100474",
-        "start": 38.04,
+        "source": "https://joshwoodward.com/song/LetItIn",
+        "start": None,
+    },
+    {
+        "id": "where-you-are-now",
+        "folder": "alexberoza-where-you-are-now",
+        "title": "Where You Are Now",
+        "artist": "AlexBeroza",
+        "credit_as": "AlexBeroza feat. WolfFly",
+        "genre": "Hard rock",
+        "licence": "CC BY 3.0",
+        "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+        "source": "https://ccmixter.org/files/AlexBeroza/33065",
+        "start": None,
     },
 ]
 
@@ -103,7 +129,11 @@ def beat_model() -> str | None:
 def load_stems(folder: Path) -> tuple[dict[str, np.ndarray], int]:
     stems = {}
     rate = 0
-    for name in STEMS:
+    present = [n for n in STEMS if (folder / f"{n}.wav").is_file()]
+    if present not in (list(STEMS[:4]), list(STEMS)):
+        raise SystemExit(f"{folder}: expected the 4 or 6 stems the app "
+                         f"writes, found {present or 'none'}")
+    for name in present:
         data, rate = sf.read(folder / f"{name}.wav", dtype="float32",
                              always_2d=True)
         stems[name] = data[:, :2] if data.shape[1] >= 2 else \
@@ -178,6 +208,9 @@ def make_song(song: dict, stems_dir: Path) -> dict:
     start = song["start"]
     if start is None:
         start = pick_start(stems, rate, whole.downbeat_times, CLIP_SECONDS)
+    elif whole.downbeat_times:
+        # a hand-picked start lands on the nearest bar line
+        start = min(whole.downbeat_times, key=lambda d: abs(d - start))
     end = whole_bars(whole.downbeat_times, start, CLIP_SECONDS)
     a, b = int(round(start * rate)), int(round(end * rate))
     clip = {n: s[a:b].copy() for n, s in stems.items()}
@@ -211,7 +244,7 @@ def make_song(song: dict, stems_dir: Path) -> dict:
         "beats": [round(t, 3) for t in found.beat_times],
         "downbeats": [round(t, 3) for t in found.downbeat_times],
         "chords": [[round(t, 3), c] for t, c in found.chord_sequence],
-        "stems": list(STEMS),
+        "stems": list(clip),
         "peaks": peaks,
     })
     return entry
