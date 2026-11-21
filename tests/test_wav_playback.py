@@ -26,6 +26,75 @@ def test_play_missing_file_is_noop() -> None:
     play_wav_async("/nonexistent/stemma/arpeggio.wav")
 
 
+def test_playback_module_is_visible_to_pyinstaller() -> None:
+    """The packaged build shipped without the playback module.
+
+    PyInstaller finds modules by their import statements and does not read
+    ``importlib.import_module("...")`` strings, so the 3.0.0 bundle had no
+    ``src.ui._wav_playback_impl``: every logo click raised inside the
+    widgets' guard and animated in silence, while the splash, which calls
+    winsound itself, still played. Any deferred import of a ``src`` module
+    has to stay a plain import statement.
+    """
+    import ast
+    import pathlib
+
+    src_dir = pathlib.Path(app_root()) / "src"
+    offenders = []
+    for path in src_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if _hides_a_src_import(node):
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == []
+
+
+_DYNAMIC_IMPORTERS = {"import_module", "__import__"}
+
+
+def _hides_a_src_import(node) -> bool:
+    """A dynamic import PyInstaller cannot see that may name a src module.
+
+    Covers ``importlib.import_module(...)``, a bare ``import_module(...)``
+    (``from importlib import import_module``) and ``__import__(...)``. A
+    constant name is flagged when it starts with ``src``; a computed one
+    (f-string, variable) is always flagged, since it could name anything.
+    """
+    import ast
+
+    if not isinstance(node, ast.Call) or not node.args:
+        return False
+    func = node.func
+    name = (
+        func.attr if isinstance(func, ast.Attribute)
+        else func.id if isinstance(func, ast.Name)
+        else None
+    )
+    if name not in _DYNAMIC_IMPORTERS:
+        return False
+    target = node.args[0]
+    if isinstance(target, ast.Constant) and isinstance(target.value, str):
+        return target.value.startswith("src")
+    return True
+
+
+@pytest.mark.parametrize("source, flagged", [
+    ('importlib.import_module("src.ui.x")', True),
+    ('import_module("src.ui.x")', True),
+    ('__import__("src.ui.x")', True),
+    ('import_module(f"src.ui.{name}")', True),
+    ('importlib.import_module(name)', True),
+    ('__import__(name)', True),
+    ('importlib.import_module("numpy")', False),
+    ('obj.load("src.ui.x")', False),
+])
+def test_dynamic_import_guard_shapes(source, flagged) -> None:
+    import ast
+
+    call = ast.parse(source, mode="eval").body
+    assert _hides_a_src_import(call) is flagged
+
+
 @pytest.mark.skipif(
     _SKIP_QT_MULTIMEDIA_CI,
     reason="Qt Multimedia hangs on GitHub Actions Windows runners",
@@ -91,13 +160,20 @@ class TestQtMultimediaOptional:
         try:
             with patch.object(builtins, "__import__", fake_import):
                 mod = importlib.import_module(impl_name)
-            assert mod.QSoundEffect is None
+                assert mod._sound_effect_class() is None
         finally:
             sys.modules.pop(impl_name, None)
             if saved_qtmm is not None:
                 sys.modules["PySide6.QtMultimedia"] = saved_qtmm
             if saved_impl is not None:
                 sys.modules[impl_name] = saved_impl
+                # The re-import also rebound the package attribute, which is
+                # what ``from src.ui import _wav_playback_impl`` reads; left
+                # alone, later tests patch one module and play through the
+                # other.
+                import src.ui
+
+                src.ui._wav_playback_impl = saved_impl
 
     def test_play_impl_uses_winsound_on_windows(self, tmp_path):
         """On Windows the Qt path is never reached, so a missing

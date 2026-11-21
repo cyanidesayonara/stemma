@@ -458,14 +458,17 @@ class AnimatedLogoWidget(QWidget):
     # -- public API ----------------------------------------------------------
 
     def play_intro(self, with_sound: bool = True) -> None:
-        """Start (or restart) the note/wave animation."""
+        """Start (or restart) the note/wave animation, and the chord."""
+        # Sound first: the first click loads the playback module, and a
+        # clock started before that would put the notes ahead of the chord.
+        # LOGO_AUDIO_VISUAL_LAG_MS then covers the output latency.
+        if with_sound and self._play_sound:
+            self._do_play_sound()
         self._static_t = _ANIM_END_MS
         self._clock.restart()
         self._animating = True
         self._timer.start(_FRAME_MS)
         self.update()
-        if with_sound and self._play_sound:
-            self._do_play_sound()
 
     def set_theme(self, theme: str) -> None:
         """Switch to the logo artwork and colours for *theme*."""

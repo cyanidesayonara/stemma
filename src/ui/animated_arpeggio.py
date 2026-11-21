@@ -1,8 +1,8 @@
-"""Animated footer arpeggio logo widget for stemma.
+"""Animated arpeggio logo widget for the right end of the transport row.
 
 Renders the arpeggio logo (staff, bass clef, coloured "stemma" letters)
 with animation: letters glow sequentially matching the Am7 arpeggio.
-Clickable as an Easter egg to replay with sound.
+Clickable as an Easter egg to replay with the arpeggio jingle.
 """
 
 import logging
@@ -38,9 +38,6 @@ _FADE_MS = 200
 _GLOW_DUR_MS = 300
 _ANIM_END_MS = 5 * _NOTE_SPACING_MS + _FADE_MS + _GLOW_DUR_MS
 _FRAME_MS = 33
-
-# Qt SFX output lags the animation clock slightly; pull visuals back to match.
-_AUDIO_VISUAL_LAG_MS = 48
 
 # (char, svg_x, svg_y, dark_color, light_color)
 _LETTERS = [
@@ -82,7 +79,7 @@ def _glow(elapsed: int, onset: int) -> float:
 
 
 class AnimatedArpeggioWidget(QWidget):
-    """Footer arpeggio logo with animated letter glow."""
+    """Small arpeggio logo with animated letter glow."""
 
     def __init__(self, theme: str = "dark", play_sound: bool = True) -> None:
         super().__init__()
@@ -105,13 +102,15 @@ class AnimatedArpeggioWidget(QWidget):
     # -- public API ----------------------------------------------------------
 
     def play_intro(self, with_sound: bool = True) -> None:
-        """Start (or restart) the letter glow animation."""
+        """Start (or restart) the letter glow animation, and the jingle."""
+        # Sound first, so loading the playback module on the first click
+        # cannot put the letters ahead of the jingle (see AnimatedLogoWidget).
+        if with_sound and self._play_sound:
+            self._do_play_sound()
         self._clock.restart()
         self._animating = True
         self._timer.start(_FRAME_MS)
         self.update()
-        if with_sound and self._play_sound:
-            self._do_play_sound()
 
     def set_theme(self, theme: str) -> None:
         """Rebuild base pixmap for *theme*."""

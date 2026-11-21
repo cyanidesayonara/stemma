@@ -1,39 +1,29 @@
-"""Logo SFX playback via Qt Multimedia (overlapping-friendly).
+"""Logo SFX playback: winsound on Windows, Qt Multimedia elsewhere.
 
-``sounddevice`` cannot open multiple simultaneous PortAudio output streams on
-many Windows setups (MME error when mixing with the main player).  Each
-``QSoundEffect`` instance can play independently on the main thread.
+On Windows each sound is played with ``winsound`` from memory on a daemon
+thread; it works in MSIX / Store builds, where ``QSoundEffect`` sometimes
+played nothing, and it never opens a PortAudio stream (``sounddevice``
+cannot open a second output stream beside the player on many Windows
+setups).
 
-Loaded only on first logo click so the splash screen can use ``winsound``
-first without initialising Qt Multimedia.
-
-Caches at most two ``QSoundEffect`` instances (``chord.wav`` and
-``arpeggio.wav``).  If Qt fails to load or play, falls back to
-``winsound`` on Windows when available.
-
-``QSoundEffect`` may report ``Loading`` briefly after ``setSource``; we poll
-status on the GUI thread until ``Ready`` or ``Error`` (avoids duplicate
-``statusChanged`` connections on rapid clicks).
+Elsewhere a ``QSoundEffect`` per file (at most two: ``chord.wav`` and
+``arpeggio.wav``) plays on the GUI thread. ``QSoundEffect`` may report
+``Loading`` briefly after ``setSource``; status is polled until ``Ready``
+or ``Error`` (avoids duplicate ``statusChanged`` connections on rapid
+clicks).
 """
 
 from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtWidgets import QApplication
 
-# QtMultimedia is optional. On Windows playback goes through winsound
-# (see play_impl), so the Qt path is only a fallback -- but importing it
-# at module scope made the whole module unimportable in the packaged
-# build, where QtMultimedia's backend DLLs are not collected. That
-# ImportError propagated out of play_wav_async into the callers'
-# exception guard, so logo clicks animated in silence.
-try:
+if TYPE_CHECKING:
     from PySide6.QtMultimedia import QSoundEffect
-except ImportError:  # pragma: no cover - depends on the bundle
-    QSoundEffect = None
 
 try:
     import winsound
@@ -65,14 +55,32 @@ def _play_winsound_fallback(path: Path) -> None:
         pass
 
 
+def _sound_effect_class():
+    """Return ``QSoundEffect``, or None when Qt Multimedia is unavailable.
+
+    Imported only on the path that uses it. On Windows playback goes
+    through winsound, so Qt Multimedia is never loaded there: importing it
+    at module scope cost about 170 ms on the first logo click (the sound
+    then lagged the animation), made the whole module unimportable in a
+    bundle without the Qt Multimedia backend, and hangs on GitHub Actions
+    Windows runners.
+    """
+    try:
+        from PySide6.QtMultimedia import QSoundEffect
+    except ImportError:  # pragma: no cover - depends on the bundle
+        return None
+    return QSoundEffect
+
+
 def _try_play_effect(eff: QSoundEffect, path: Path) -> None:
     """Play when ``Ready``; on ``Error`` or timeout, use ``winsound``."""
+    status = type(eff).Status
 
     def poll(attempt: int) -> None:
         st = eff.status()
-        if st == QSoundEffect.Status.Ready:
+        if st == status.Ready:
             eff.play()
-        elif st == QSoundEffect.Status.Error:
+        elif st == status.Error:
             _play_winsound_fallback(path)
         elif attempt < _POLL_MAX_ATTEMPTS:
             nxt = attempt + 1
@@ -84,9 +92,9 @@ def _try_play_effect(eff: QSoundEffect, path: Path) -> None:
             _play_winsound_fallback(path)
 
     st = eff.status()
-    if st == QSoundEffect.Status.Ready:
+    if st == status.Ready:
         eff.play()
-    elif st == QSoundEffect.Status.Error:
+    elif st == status.Error:
         _play_winsound_fallback(path)
     else:
         poll(0)
@@ -103,7 +111,8 @@ def play_impl(path: Path) -> None:
         _play_winsound_fallback(path)
         return
 
-    if QSoundEffect is None:
+    sound_effect = _sound_effect_class()
+    if sound_effect is None:
         # No Qt multimedia in this build and no winsound (non-Windows):
         # nothing can play, but the caller's animation still runs.
         return
@@ -114,7 +123,7 @@ def play_impl(path: Path) -> None:
 
     key = str(path)
     if key not in _cache:
-        eff = QSoundEffect(app)
+        eff = sound_effect(app)
         eff.setSource(QUrl.fromLocalFile(key))
         _cache[key] = eff
     _try_play_effect(_cache[key], path)

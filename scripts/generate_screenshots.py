@@ -365,7 +365,7 @@ WORDMARK_HEIGHT = 56
 
 
 def _draw_wordmark(painter, left: float, top: float) -> None:
-    """Draw the stemma arpeggio wordmark, the logo the app footer shows."""
+    """Draw the stemma arpeggio wordmark, the logo at the end of the app's transport row."""
     for path in _WORDMARK_FONTS:
         if os.path.isfile(path):
             QFontDatabase.addApplicationFont(path)

@@ -186,6 +186,25 @@ def stage_practice(app, window) -> None:
 
 
 STATES = ("empty", "loaded", "practice")
+# Contact-sheet sections: the window states, then the About dialog (one
+# fixed size, captured once per theme).
+SECTIONS = STATES + ("about",)
+
+
+def capture_about(app, window, out_dir: str, theme: str) -> dict:
+    """Render the About dialog (logo, author credit) without running it."""
+    dialog = window._build_about_dialog()
+    dialog.show()
+    pump(app, 0.3)
+    name = f"about_{theme}.png"
+    dialog.grab().save(os.path.join(out_dir, name))
+    dialog.close()
+    size = dialog.size()
+    print("wrote", name)
+    return {
+        "file": name, "state": "about", "theme": theme,
+        "size": f"{size.width()}x{size.height()}",
+    }
 
 
 def start_app(data_dir: str):
@@ -307,6 +326,8 @@ def render(out_dir, sizes, themes, stem_count) -> list[dict]:
                 })
                 print("wrote", name)
 
+            if (width, height) == sizes[0]:
+                records.append(capture_about(app, window, out_dir, theme))
             close_window(app, window)
     return records
 
@@ -322,7 +343,7 @@ def write_index(out_dir: str, records: list[dict], title: str) -> str:
         "figcaption{font-size:12px;color:#aaa}</style>",
         f"<h1>{html.escape(title)}</h1>",
     ]
-    for state in STATES:
+    for state in SECTIONS:
         rows = [r for r in records if r["state"] == state]
         if not rows:
             continue

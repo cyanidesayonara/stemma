@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.animated_arpeggio import AnimatedArpeggioWidget
 from src.ui.control_primitives import (
     add_volume_presets,
     fix_button_size,
@@ -45,7 +46,7 @@ def _record_icon(colors: dict[str, str]):
 
 
 class TransportBar(QWidget):
-    """Playback, recording, and master-volume controls."""
+    """Playback, recording, and master-volume controls, closed by the logo."""
 
     play_pause_requested = Signal()
     stop_requested = Signal()
@@ -132,6 +133,14 @@ class TransportBar(QWidget):
         transport.addWidget(self._master_volume_combo)
 
         transport.addStretch()
+
+        # The small arpeggio logo closes the row on the right, where a
+        # footer row of its own used to cost the mixer 44 px of height.
+        # Its fixed width keeps the row from being squeezed: it is the
+        # right-hand stop when the library splitter is dragged across.
+        self._logo = AnimatedArpeggioWidget()
+        self._logo.setAccessibleName("stemma logo")
+        transport.addWidget(self._logo)
         layout.addLayout(transport)
 
     @property
@@ -161,6 +170,10 @@ class TransportBar(QWidget):
     @property
     def master_volume_combo(self) -> QComboBox:
         return self._master_volume_combo
+
+    @property
+    def logo(self) -> AnimatedArpeggioWidget:
+        return self._logo
 
     @property
     def play_icon(self):
