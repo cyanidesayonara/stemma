@@ -4,7 +4,7 @@
 
 Pushing a version tag matching `v*` triggers `.github/workflows/release.yml`:
 
-1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v3.0.0` becomes app `3.0.0` and MSIX `3.0.0.0`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
+1. **Sync versions** -- `scripts/sync_release_version.ps1` sets `src/version.py` and `msix/AppxManifest.xml` Identity `Version` from the tag (`v3.0.0` becomes app `3.0.0` and MSIX `3.0.0.0`; prerelease tags `vX.Y.Z-(alpha|beta|rc).N` with `N` in `1..99` map to MSIX fourth-part revisions `100+N`, `200+N`, and `300+N`, so `v3.1.0-beta.1` becomes app `3.1.0` and MSIX `3.1.0.201`). The repository files describe the current branch build; tag synchronization remains the guard that makes packaged bits match the release tag.
 2. **Validate Store listing** -- after dependency install, `scripts/validate_store_release.py` and `scripts/build_store_listing.py --check` run against the synced `src/version.py` (semver from the tag; prerelease suffixes already stripped by sync). Each command's exit code is checked so a failed validation cannot be masked by a later success. The release fails if listing metadata, assets, or generated outputs are invalid or out of date.
 3. **Fast tests** -- same pytest slice as CI (`not slow`, `not hardware`).
 4. **PyInstaller** -- `dist/stemma/` plus `stemma.zip` and `stemma.msix`.
@@ -140,6 +140,8 @@ when changing the workflow, and if a link ever does reach a log, delete
 that run (`gh run delete <id>`) before the link expires, about a day later.
 
 ## Partner Center credentials (GitHub Actions)
+
+`partner-center-submit.yml` runs in the `store` GitHub environment, which is restricted to `main` (enforced both by the environment's deployment branch policy and the job `if` condition).
 
 Repository secrets for `partner-center-submit.yml`:
 

@@ -33,9 +33,13 @@ on:
 
 jobs:
   submit:
+    if: github.ref == 'refs/heads/main'
+    environment: store
     runs-on: ubuntu-latest
     env:
       PRODUCT_ID: ${{ secrets.PARTNER_CENTER_PRODUCT_ID }}
+      TAG: ${{ inputs.tag }}
+      MODE: ${{ inputs.mode }}
     steps:
       # get_draft needs the repository too: it prints the draft through
       # scripts/redact_submission.py
@@ -55,8 +59,6 @@ jobs:
 
       - name: Build Partner Center payloads
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
-        env:
-          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           python scripts/build_partner_center_payloads.py \
@@ -74,8 +76,6 @@ jobs:
 
       - name: Download release MSIX
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
-        env:
-          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           url="https://github.com/${{ github.repository }}/releases/download/${TAG}/stemma.msix"
@@ -150,9 +150,9 @@ jobs:
           python scripts/merge_partner_center_metadata.py \
             --submission submission.json \
             --listing store/listing.yaml \
-            --tag "${{ inputs.tag }}" \
+            --tag "$TAG" \
             --out submission-metadata.json
-          if [ "${{ inputs.mode }}" = "update_draft" ]; then
+          if [ "$MODE" = "update_draft" ]; then
             # The listing images (screenshots and art) travel like the
             # package: listed as PendingUpload in the draft, the files in
             # the one zip at FileUploadUrl, which this replaces with the
@@ -182,10 +182,10 @@ jobs:
         if: ${{ inputs.mode == 'update_draft' || inputs.mode == 'update_metadata' }}
         run: |
           set -euo pipefail
-          version="${{ inputs.tag }}"
+          version="$TAG"
           version="${version#v}"
           NO_COLOR=1 msstore submission get "$PRODUCT_ID" > submission-after.json
-          if [ "${{ inputs.mode }}" = "update_draft" ]; then
+          if [ "$MODE" = "update_draft" ]; then
             # the package and every listing image must be waiting for upload
             expected="$(python -c 'import json; d=json.load(open("submission-metadata.json", encoding="utf-8")); print(sum(1 for p in d.get("ApplicationPackages") or [] if p.get("FileStatus") == "PendingUpload") + sum(1 for l in (d.get("Listings") or {}).values() for i in (l.get("BaseListing") or {}).get("Images") or [] if i.get("FileStatus") == "PendingUpload"))')"
             staged="$(grep -c '"PendingUpload"' submission-after.json || true)"
@@ -198,7 +198,7 @@ jobs:
           if python scripts/verify_partner_center_metadata.py \
             --submission submission-after.json \
             --expected submission-metadata.json \
-            --tag "${{ inputs.tag }}"; then
+            --tag "$TAG"; then
             echo "Partner Center submission GET matches the updateMetadata payload."
           else
             echo "::warning::The submission GET may still show stale listing fields while the draft is PendingCommit."
@@ -235,7 +235,7 @@ jobs:
             echo "Created a new draft from the release MSIX before updating the listing."
           fi
           {
-            echo "Staged ${{ inputs.tag }} in the draft (PendingCommit)."
+            echo "Staged ${TAG} in the draft (PendingCommit)."
             echo
             echo "Partner Center's page shows the old content until the draft is"
             echo "committed. Check the JSON in the log and the submission-metadata"
@@ -249,7 +249,7 @@ jobs:
         if: ${{ inputs.mode == 'submit' }}
         run: |
           set -euo pipefail
-          version="${{ inputs.tag }}"
+          version="$TAG"
           version="${version#v}"
           # msstore prints "Submission Status = ..." through its logger, on
           # stderr: capture both streams or the check below never sees it
@@ -266,7 +266,7 @@ jobs:
           fi
           msstore submission publish "$PRODUCT_ID"
           {
-            echo "Committed ${{ inputs.tag }}. Within minutes the status becomes"
+            echo "Committed ${TAG}. Within minutes the status becomes"
             echo "Certification; run mode get_draft to follow it."
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
