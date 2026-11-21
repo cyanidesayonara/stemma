@@ -1301,7 +1301,9 @@ class MainWindow(QMainWindow):
                     logger.exception("Stopping the player on quit failed.")
                 finally:
                     self._suppress_recording_reload = False
-                if not player.has_unsaved_take:
+                # "is True": a mocked player (tests) answers with a truthy
+                # mock, and a modal box would hang the run.
+                if player.has_unsaved_take is not True:
                     return True
                 reason = player.take_save_error or "The take was not saved."
                 answer = QMessageBox.warning(

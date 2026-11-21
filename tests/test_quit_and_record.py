@@ -376,6 +376,20 @@ class TestRecordingSaveFailure:
         assert not armed_player.has_unsaved_take
         assert armed_player._recording_buffer is None
 
+    def test_save_error_does_not_carry_over_to_the_next_song(
+        self, armed_player, tmp_path,
+    ):
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_frames_captured = 100
+        with patch(
+            "src.player.sf.write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            armed_player.save_recording(str(tmp_path))
+        assert armed_player.take_save_error
+        armed_player.unload()  # another song; the take is dropped
+        assert armed_player.take_save_error == ""
+
     def test_main_window_shows_the_save_failure(self, app):
         from src.ui.main_window import MainWindow
 
@@ -454,6 +468,16 @@ class TestQuitWithUnsavedTake:
         assert result is True
         assert not stub._player.has_unsaved_take
         assert not list(tmp_path.glob("recording_take*.wav"))
+
+    def test_a_mocked_player_never_opens_the_question(self, app):
+        """A MagicMock player reads every attribute as truthy; a modal box
+        on close would hang the test run instead of failing it."""
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        with patch("src.ui.main_window.QMessageBox.warning") as ask:
+            assert MainWindow._stop_player_for_quit(stub) is True
+        ask.assert_not_called()
 
     def test_close_is_cancelled_before_the_window_hides(self, app):
         from src.ui.main_window import MainWindow
