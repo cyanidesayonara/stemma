@@ -11,6 +11,7 @@ frame synchronisation with the stems being mixed to output.
 """
 
 import glob
+import logging
 import math
 import os
 import threading
@@ -25,6 +26,8 @@ from src.click_utils import generate_click
 from src.import_messages import describe_error
 from src.metronome import local_beat_tempi
 from src.stretch import StreamingStretcher
+
+logger = logging.getLogger("stemma")
 
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
@@ -790,6 +793,8 @@ class MultiTrackPlayer(QObject):
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
+        # The dropped take's reason must not surface on the next song.
+        self._take_save_error = ""
         self._nudge_offsets.clear()
 
     def unload(self) -> None:
@@ -1338,6 +1343,7 @@ class MultiTrackPlayer(QObject):
         with self._stretch_lock:
             if frame is None:
                 frame = self._current_frame
+            was_playing = self._is_playing
             specs = [
                 (reader.names, stretcher.speed, stretcher.semitones)
                 for stretcher, reader in self._stretch_paths
@@ -1360,6 +1366,33 @@ class MultiTrackPlayer(QObject):
             self._fading_paths = []
             self._click_cursor = None
             self._stretch_paths = paths
+            # The callback kept playing the old paths while these primed;
+            # if the song ended meanwhile, the seek still plays on from
+            # *frame* instead of finishing the song.
+            ended_meanwhile = was_playing and not self._is_playing
+            if ended_meanwhile:
+                self._is_playing = True
+        if ended_meanwhile:
+            self._restart_ended_stream()
+
+    def _restart_ended_stream(self) -> None:
+        """Start the stream again after the callback stopped it.
+
+        PortAudio ends a stream once its callback raises CallbackStop; it
+        has to be stopped before it can start again. If that fails, the
+        player is left stopped and ``_emit_position`` reports the end.
+        """
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.stop()
+            stream.start()
+        except (sd.PortAudioError, OSError):
+            logger.warning(
+                "Could not restart playback after a seek.", exc_info=True,
+            )
+            self._is_playing = False
 
     def _mix_stems_into(
         self,

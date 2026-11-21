@@ -8,6 +8,7 @@ song time. These tests drive the real callback the way PortAudio does.
 """
 
 import threading
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -430,6 +431,46 @@ class TestReviewFindings:
         assert held_while_filling  # the new paths were primed
         assert not any(held_while_filling)
         assert player._current_frame == 3 * SR
+
+    def test_seek_back_survives_the_song_ending_during_priming(
+        self, player, monkeypatch,
+    ):
+        """The callback runs on the old paths while a seek primes the new
+        ones; if the song ends in that window, the seek back must play on,
+        not finish the song (#245 review)."""
+        player.set_speed(0.75)
+        player.seek(5.999)
+        stream = MagicMock()
+        player._stream = stream
+        stops, fired = [], []
+        real_fill = StreamingStretcher.fill
+
+        def fill(stretcher, count, source):
+            # Once, from the seek's priming (the callback's own fills
+            # come back here too, under the lock).
+            if not fired:
+                fired.append(1)
+                for _ in range(20):  # the audio thread runs meanwhile
+                    buf = np.zeros((BLOCK, 2), dtype=np.float32)
+                    try:
+                        player._audio_callback(buf, BLOCK, {}, None)
+                    except sd.CallbackStop:
+                        stops.append(1)
+                        break
+            return real_fill(stretcher, count, source)
+
+        monkeypatch.setattr(StreamingStretcher, "fill", fill)
+        player.seek(1.0)
+        assert stops  # the old path did end mid-seek
+        assert player.is_playing
+        assert player._current_frame == SR
+        # PortAudio ends a stream after CallbackStop; it is started again.
+        stream.stop.assert_called_once_with()
+        stream.start.assert_called_once_with()
+        player._stream = None
+        monkeypatch.undo()
+        out = _run(player, 10)
+        assert np.abs(out).max() > 0.1
 
     def test_stretched_seek_sounds_like_starting_there(self, app):
         """A seek's fresh paths match paths built at that frame."""
