@@ -350,6 +350,7 @@ class PlayerControls(QWidget):
         self._master_volume_combo = transport.master_volume_combo
         self._waveform_frame = self._waveform_panel.frame
         self._waveform = self._waveform_panel.waveform
+        self._chord_lane = self._waveform_panel.chord_lane
         self._play_icon = transport.play_icon
         self._pause_icon = transport.pause_icon
         self._stop_icon = transport.stop_icon
@@ -579,6 +580,7 @@ class PlayerControls(QWidget):
         # Old sessions are handled by the det_ver gate in main_window: beat
         # times saved before DETECTION_VERSION are not restored, so this
         # fires.
+        self._sync_chord_lane_from_player()
         if has_stems and not self._player.beat_times:
             self.start_detection()
 
@@ -597,6 +599,7 @@ class PlayerControls(QWidget):
         self._waveform.set_loading(False)
         self._waveform.set_stem_lanes([], muted=set(), soloed=set())
         self._waveform.set_position(0.0)
+        self._chord_lane.clear()
         self._time_label.setText("0:00 / 0:00")
         self._song_info_bar.clear()
         self._key_conf = ""
@@ -689,6 +692,7 @@ class PlayerControls(QWidget):
         )
         if total > 0:
             self._waveform.set_position(pos_s / total)
+        self._chord_lane.set_position(pos_s)
         self.update_count_in_display()
         self._refresh_synced_bpm(pos_s)
 
@@ -752,6 +756,7 @@ class PlayerControls(QWidget):
             )
         else:
             self._waveform.set_position(0.0)
+        self._chord_lane.set_position(self._player.current_seconds)
 
     def _build_stem_lanes(
         self, stem_peaks: dict[str, np.ndarray],
@@ -875,6 +880,7 @@ class PlayerControls(QWidget):
         except RuntimeError:
             return  # Widget was destroyed
         self._waveform.set_total_seconds(self._player.total_seconds)
+        self._chord_lane.set_total_seconds(self._player.total_seconds)
 
     def _update_waveform_loop_markers(self) -> None:
         """Update loop marker positions on the waveform widget."""
@@ -1091,6 +1097,7 @@ class PlayerControls(QWidget):
         speed, so the stems and their peaks never change.
         """
         self._refresh_key_label()
+        self._chord_lane.set_pitch(int(self._player.pitch_semitones))
         self.update_record_button_state()
         self._update_trainer_status()
         self._refresh_synced_bpm()
@@ -1403,6 +1410,7 @@ class PlayerControls(QWidget):
         self._song_info_bar.show_detection_status(
             "Key: detecting...", "Tempo: detecting...",
         )
+        self._chord_lane.set_detecting(True)
 
         # One detection at a time. A superseded worker keeps running after it
         # is detached, and rapid A-B loop clicks used to stack six or more
@@ -1460,6 +1468,7 @@ class PlayerControls(QWidget):
     def restore_beat_times(self, beat_times: list[float], downbeat_times: list[float]) -> None:
         """Restore beat times from a saved session and update UI."""
         self._player.set_beat_times(beat_times, downbeat_times)
+        self._chord_lane.set_downbeats(downbeat_times)
         self._update_sync_btn_state(len(beat_times) >= 2)
 
     def _on_detect_completed(self, result: DetectionResult) -> None:
@@ -1505,6 +1514,27 @@ class PlayerControls(QWidget):
             self._player.set_chord_sequence([])
             self._song_info_bar.clear_chord()
             self._chord_timer.stop()
+        self._show_detection_in_chord_lane(result)
+
+    def _detection_region(self) -> tuple[float, float] | None:
+        """The A-B region the finished detection analysed, if any."""
+        region = getattr(self.sender(), "region", None)
+        return region if isinstance(region, tuple) else None
+
+    def _show_detection_in_chord_lane(self, result: DetectionResult) -> None:
+        """Put a detection result in the chord lane.
+
+        A loop re-detection covers only the loop, so its chords are
+        spliced in and the rest of the song keeps its chords and bar lines.
+        """
+        lane = self._chord_lane
+        region = self._detection_region()
+        if region is None:
+            lane.set_chords(result.chord_sequence)
+            lane.set_downbeats(result.downbeat_times)
+        else:
+            lane.splice_region(result.chord_sequence, *region)
+        lane.set_detecting(False)
 
     def _on_detect_error(self, msg: str) -> None:
         if not self._is_active_detection_sender():
@@ -1514,6 +1544,9 @@ class PlayerControls(QWidget):
         # next theme switch brought it back (#212 review).
         self._song_info_bar.clear()
         self._player.set_chord_sequence([])
+        self._chord_lane.set_detecting(False)
+        if self._detection_region() is None:
+            self._chord_lane.set_chords([])
         self._detected_key_raw = ""
         self._detected_bpm_raw = ""
         self._key_conf = ""
@@ -1605,6 +1638,7 @@ class PlayerControls(QWidget):
         if not self._is_active_detection_sender():
             return
         self._player.set_beat_times(result.beat_times, result.downbeat_times)
+        self._chord_lane.set_downbeats(result.downbeat_times)
         self._update_sync_btn_state(len(result.beat_times) >= 2)
         if result.bpm > 0:
             self._bpm_conf = result.bpm_confidence
@@ -1643,6 +1677,7 @@ class PlayerControls(QWidget):
     ) -> None:
         """Restore a previously detected chord sequence from QSettings."""
         self._player.set_chord_sequence(chords)
+        self._chord_lane.set_chords(chords)
         if chords:
             # Always apply badge style so the outline is visible even
             # before playback starts (fixes missing badge on app launch).
@@ -1844,6 +1879,23 @@ class PlayerControls(QWidget):
         """Remove all recording rows."""
         self._stem_mixer.clear_recording_rows()
         self._sync_waveform_lane_capacity()
+
+    def set_chord_lane_visible(self, visible: bool) -> None:
+        """Show or hide the chord lane under the stem lanes (View menu)."""
+        self._chord_lane.setVisible(visible)
+
+    def _sync_chord_lane_from_player(self) -> None:
+        """Start the chord lane from the player's state for a new song.
+
+        MainWindow restores saved chords and downbeats before the stems
+        are named, so the player already holds them (or nothing).
+        """
+        lane = self._chord_lane
+        lane.clear()
+        lane.set_total_seconds(self._player.total_seconds)
+        lane.set_chords(self._player.chord_sequence)
+        lane.set_downbeats(self._player.downbeat_times)
+        lane.set_pitch(int(self._player.pitch_semitones))
 
     def _sync_waveform_lane_capacity(self) -> None:
         """Size the waveform's height cap to one lane per mixer row."""
