@@ -9,11 +9,12 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLayout, QVBoxLayout, QWidget
 
 from src.ui.chord_lane import ChordLaneWidget
+from src.ui.section_ruler import SectionRulerWidget
 from src.ui.waveform_stack_widget import WaveformStackWidget
 
 
 class WaveformPanel(QWidget):
-    """The stem-lane waveform and the chord lane inside their card frame."""
+    """The section ruler, stem-lane waveform, and chord lane in one card."""
 
     seek_requested = Signal(float)  # Emits seconds
 
@@ -32,6 +33,11 @@ class WaveformPanel(QWidget):
         frame_layout = QVBoxLayout(self._frame)
         frame_layout.setContentsMargins(4, 4, 4, 4)
         frame_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+
+        # Above the stem lanes, on their time axis (#133, experimental).
+        self._section_ruler = SectionRulerWidget()
+        self._section_ruler.seek_requested.connect(self.seek_requested.emit)
+        frame_layout.addWidget(self._section_ruler)
 
         self._waveform = WaveformStackWidget()
         self._waveform.seek_requested.connect(self.seek_requested.emit)
@@ -55,7 +61,12 @@ class WaveformPanel(QWidget):
     def chord_lane(self) -> ChordLaneWidget:
         return self._chord_lane
 
+    @property
+    def section_ruler(self) -> SectionRulerWidget:
+        return self._section_ruler
+
     def apply_theme(self, colors: dict[str, str]) -> None:
         """Repaint the lanes for a new theme."""
         self._waveform.set_theme_colors(colors)
         self._chord_lane.set_theme_colors(colors)
+        self._section_ruler.set_theme_colors(colors)

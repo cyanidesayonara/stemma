@@ -66,7 +66,14 @@ def synth_stems(stem_count: int = 4, seconds: float = DURATION_S):
     beat = 60.0 / _BPM
     phase = np.mod(t, beat)
     bar = (t // (beat * 4)).astype(int) % 4
-    roots = np.array([110.0, 87.31, 130.81, 98.0])[bar]  # A F C G
+    # Eight bars of verse, eight of a louder chorus on other chords, then
+    # the verse again, so the section ruler has sections to show (#133).
+    chorus = ((t // (beat * 4 * 8)).astype(int) % 2) == 1
+    roots = np.where(
+        chorus,
+        np.array([146.83, 164.81, 98.0, 123.47])[bar],  # D E G B
+        np.array([110.0, 87.31, 130.81, 98.0])[bar],  # A F C G
+    )
 
     def tone(freq):
         return np.sin(2 * np.pi * np.cumsum(freq) / SAMPLE_RATE)
@@ -76,6 +83,10 @@ def synth_stems(stem_count: int = 4, seconds: float = DURATION_S):
     drums += 0.3 * np.exp(-60 * off) * rng.standard_normal(t.size)
     bass = 0.5 * tone(roots) * (0.6 + 0.4 * np.exp(-4 * phase))
     other = sum(0.15 * tone(roots * m) for m in (2.0, 2.5198, 2.9966))
+    other = other * np.where(chorus, 2.0, 1.0)
+    drums += np.where(chorus, 0.4, 0.0) * np.exp(-50 * off) * (
+        rng.standard_normal(t.size)
+    )
     melody = 440 * 2 ** (np.round(4 * np.sin(2 * np.pi * t / 7)) / 12)
     phrase = np.sin(2 * np.pi * t / 5) > -0.3
     vocals = 0.35 * tone(melody) * phrase

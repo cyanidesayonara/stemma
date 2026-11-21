@@ -72,6 +72,7 @@ from src.player import (
 )
 from src.qt_signal_utils import safe_disconnect
 from src.separation_state import is_interrupted_import
+from src.song_sections import parse_sections
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -127,6 +128,8 @@ def _is_audio_path(path: str) -> bool:
 _THEME_TOGGLE_ICON_PX = 18
 # View > Chord Lane, on by default (#133).
 _CHORD_LANE_SETTING = "view/chord_lane"
+# View > Song Sections (Experimental), on by default (#133).
+_SECTION_RULER_SETTING = "view/section_ruler"
 
 # Keys a focused control uses for itself, ahead of the window shortcuts.
 _NAVIGATION_KEYS = frozenset({
@@ -362,6 +365,19 @@ class MainWindow(QMainWindow):
         self._player_controls.set_chord_lane_visible(
             self._chord_lane_action.isChecked()
         )
+        self._section_ruler_action = view_menu.addAction(
+            "Song &Sections (Experimental)"
+        )
+        self._section_ruler_action.setCheckable(True)
+        self._section_ruler_action.setChecked(
+            self._settings.value(_SECTION_RULER_SETTING, True, type=bool)
+        )
+        self._section_ruler_action.toggled.connect(
+            self._on_section_ruler_toggled
+        )
+        self._player_controls.set_section_ruler_visible(
+            self._section_ruler_action.isChecked()
+        )
 
         help_menu = menu_bar.addMenu("&Help")
 
@@ -393,6 +409,11 @@ class MainWindow(QMainWindow):
         """Show or hide the chord lane and remember the choice."""
         self._player_controls.set_chord_lane_visible(checked)
         self._settings.setValue(_CHORD_LANE_SETTING, checked)
+
+    def _on_section_ruler_toggled(self, checked: bool) -> None:
+        """Show or hide the section ruler and remember the choice."""
+        self._player_controls.set_section_ruler_visible(checked)
+        self._settings.setValue(_SECTION_RULER_SETTING, checked)
 
     def _setup_shortcuts(self) -> None:
         """Register global keyboard shortcuts (layout-independent).
@@ -451,6 +472,8 @@ class MainWindow(QMainWindow):
         g(Qt.Key.Key_A, self._player_controls.set_loop_a)
         g(Qt.Key.Key_B, self._player_controls.set_loop_b)
         g(Qt.Key.Key_L, self._player_controls.toggle_looping)
+        g(Qt.Modifier.SHIFT | Qt.Key.Key_L,
+          self._player_controls.loop_current_section)
 
         # -- Metronome / Count-in / Recording --
         g(Qt.Key.Key_M, self._player_controls.toggle_metronome)
@@ -759,6 +782,8 @@ class MainWindow(QMainWindow):
                 ("A", "Set loop point A"),
                 ("B", "Set loop point B"),
                 ("L", "Toggle A-B loop"),
+                ("Shift+L", "Loop the song section playing\n"
+                            "(experimental)"),
             )),
             ("Metronome & Recording", (
                 ("M", "Toggle metronome"),
@@ -1039,6 +1064,9 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
+            self._settings.setValue(
+                f"{prefix}/sections", json.dumps(self._player.sections),
+            )
             self._settings.setValue(f"{prefix}/det_ver", DETECTION_VERSION)
         # Library playback mode.
         self._settings.setValue(
@@ -1252,6 +1280,7 @@ class MainWindow(QMainWindow):
                         self._player_controls.restore_chord_sequence(chords)
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
+                self._restore_sections(prefix)
 
     def _is_current_song_generation(
         self,
@@ -1551,6 +1580,17 @@ class MainWindow(QMainWindow):
                 )
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
+        if det_ver >= DETECTION_VERSION:
+            self._restore_sections(prefix)
+
+    def _restore_sections(self, prefix: str) -> None:
+        """Restore a song's saved sections; bad data restores none."""
+        raw = self._settings.value(f"{prefix}/sections", "[]")
+        try:
+            sections = parse_sections(json.loads(str(raw)) if raw else [])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            sections = []
+        self._player_controls.restore_sections(sections)
 
     @Slot(str)
     def _on_stem_load_error(self, message: str) -> None:

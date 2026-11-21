@@ -79,6 +79,7 @@ stemma/
 │   ├── stretch.py          # real-time speed and pitch (phase vocoder)
 │   ├── library.py          # persistent song index and recovery
 │   ├── beat_detector.py    # beat, tempo, key, and chord analysis
+│   ├── song_sections.py    # experimental song-section detection
 │   └── ui/                 # Qt presentation and interaction
 ├── tests/                  # fast, slow-model, and hardware-marked tests
 ├── scripts/                # assets, screenshots, version sync, model cache,
@@ -121,7 +122,24 @@ stemma/
 - BPM detection and beat/downbeat tracking via the `beat_this` ONNX model (chunked inference)
 - Key detection using Krumhansl-Schmuckler profiles
 - Chord detection (major/minor) with Viterbi smoothing
+- On whole-song detection only, experimental song sections
+  (`song_sections.py`) from the same chroma the chords use
 - `transpose_key()` helper for shifting a detected key by semitones (used by pitch shift)
+- `DETECTION_VERSION` gates saved beats, chords, and sections: a song saved
+  by an older detector is analysed again when opened
+
+### `song_sections.py` — Experimental Song Sections
+- numpy and librosa only. Per-bar chroma (shared with chord detection),
+  MFCC timbre, and loudness are standardised per song; Foote checkerboard
+  novelty on the bar self-similarity matrix marks changes, kept at least
+  four bars apart and above an absolute floor, so a song that never
+  changes gets no sections rather than arbitrary ones
+- Boundaries are detected downbeats (every fourth beat when there are
+  none), so a section loop starts and ends on bar lines
+- Labels are letters (A, B, A, B, C); sections whose mean features are
+  alike share one. Verse or chorus names are not guessed
+- Sections are `(start_s, end_s, label)`, kept on the player and saved
+  with the song's detection (`detection/<id>/sections`)
 
 ### `model_manager.py` — Model Download & Cache
 - Checks if ONNX model files exist under the app data directory (`models/`)
@@ -199,6 +217,16 @@ stemma/
     splices its chords into the song's (`splice_chords`) instead of
     replacing them. The overview layer is cached; frames come from the
     20 Hz position updates.
+  - **`section_ruler.py`** — Experimental, fixed-height ruler above the
+    stem lanes in the same card, on their time axis: one block per song
+    section, the current one in the accent, a section the A-B loop covers
+    exactly outlined in the loop colour. Click seeks to a section's start;
+    double-click (or Shift+L for the section playing) calls
+    `PlayerControls.loop_section`, which sets A and B on the section's bar
+    lines, turns looping on, and jumps in only from outside the section.
+    Loop re-detections leave the sections alone. The blocks are cached;
+    a frame repaints only when the current section or playhead pixel
+    changes. View > Song Sections (Experimental) hides it.
   - **`song_info_bar.py`** — Key, live chord, and tempo readout strip.
   - **`practice_rack.py`** — Loop and Trainer, Speed and Pitch, and
     Metronome and Count-in cards, which wrap to two rows in narrow windows.

@@ -1106,3 +1106,27 @@ class TestSavedDetection:
         self._save_grid(window, 4)
         window._restore_song_detection("a")
         assert window._player.beat_times == []
+
+    def test_sections_are_restored_with_the_grid(self, window):
+        """Sections persist with the song's analysis, like chords (#133)."""
+        self._save_grid(window, DETECTION_VERSION)
+        window._settings.setValue(
+            "detection/a/sections",
+            json.dumps([[0.5, 8.5, "A"], [8.5, 16.5, "B"], ["bad"]]),
+        )
+        window._restore_song_detection("a")
+        assert window._player.sections == [(0.5, 8.5, "A"), (8.5, 16.5, "B")]
+
+    def test_grid_saved_before_sections_is_redetected(self, window):
+        """Version 5 analysis has no sections: open it once more (#133)."""
+        self._save_grid(window, 5)
+        window._restore_song_detection("a")
+        assert window._player.beat_times == []
+        assert window._player.sections == []
+
+    def test_corrupt_sections_restore_none(self, window):
+        self._save_grid(window, DETECTION_VERSION)
+        window._settings.setValue("detection/a/sections", "{not json")
+        window._restore_song_detection("a")
+        assert window._player.sections == []
+        assert window._player.beat_times == [0.5, 1.0, 1.5]
