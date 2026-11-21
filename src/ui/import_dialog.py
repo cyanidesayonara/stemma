@@ -636,6 +636,11 @@ class ImportDialog(QDialog):
                 self._library.remove_song(song_id)
             except KeyError:
                 pass
+            except (OSError, ValueError) as exc:
+                # Still marked pending, so the next startup prune retries.
+                logger.warning(
+                    "Could not roll back failed import %s: %s", song_id, exc,
+                )
             self._import_song_id = None
             self._on_error("Model file missing after download.")
             return
@@ -658,6 +663,11 @@ class ImportDialog(QDialog):
                 self._library.remove_song(sid)
             except KeyError:
                 pass
+            except (OSError, ValueError) as exc:
+                # Still marked pending, so the next startup prune retries.
+                logger.warning(
+                    "Could not roll back failed import %s: %s", sid, exc,
+                )
 
     def _warn_large_source_ok(self, path: str) -> bool:
         """If *path* is very large, ask the user to confirm. Return False to abort."""

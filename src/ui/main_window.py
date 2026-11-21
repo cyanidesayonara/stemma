@@ -61,7 +61,7 @@ from src.beat_detector import DETECTION_VERSION
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
 from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
-from src.library import SongLibrary
+from src.library import LibraryRecovery, SongLibrary
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
 from src.player import (
@@ -241,6 +241,7 @@ class MainWindow(QMainWindow):
         )
         self._intro_pending = True
         QTimer.singleShot(0, self._maybe_show_data_dir_reset_notice)
+        QTimer.singleShot(0, self._maybe_show_library_recovery_notice)
         QTimer.singleShot(0, self._maybe_warn_no_audio_output)
         QTimer.singleShot(0, self._restore_session)
 
@@ -260,6 +261,14 @@ class MainWindow(QMainWindow):
         msg = consume_data_dir_reset_notice(self._settings)
         if msg:
             QMessageBox.information(self, "Data folder", msg)
+
+    def _maybe_show_library_recovery_notice(self) -> None:
+        """Tell the user once if startup had to recover the library index."""
+        if _skip_modal_startup_dialogs_on_ci():
+            return
+        recovery = getattr(self._library, "recovery", None)
+        if isinstance(recovery, LibraryRecovery):
+            QMessageBox.warning(self, "Library", recovery.message)
 
     def _maybe_warn_no_audio_output(self) -> None:
         """Warn once at startup if PortAudio reports no output devices."""
@@ -1946,13 +1955,29 @@ class MainWindow(QMainWindow):
         with no stems. Only rows whose folder carries the import's pending
         marker and no completion marker are removed: removal deletes the
         folder, and user audio is never deleted on a guess (#181).
+
+        A folder another program holds (antivirus, a sync client) is
+        logged and left for the next launch; it must not stop startup.
+        Nothing is pruned while the library index is read-only.
         """
-        for song in list(self._library.songs):
-            if is_interrupted_import(song.stems_path):
-                try:
-                    self._library.remove_song(song.id)
-                except KeyError:
-                    pass
+        library = self._library
+        if not getattr(library, "writable", True):
+            return
+        for song in list(library.songs):
+            if not is_interrupted_import(song.stems_path):
+                continue
+            try:
+                library.remove_song(song.id)
+            except KeyError:
+                pass
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Could not prune interrupted import %s: %s", song.id, exc,
+                )
+        try:
+            library.discard_staged_removals()
+        except OSError as exc:
+            logger.warning("Could not clean up removed songs: %s", exc)
 
     def _on_separation_queued(self, song_id: str) -> None:
         self._library_panel.set_song_separating(song_id, "Queued...")
@@ -2036,6 +2061,11 @@ class MainWindow(QMainWindow):
                 self._library.remove_song(song_id)
             except KeyError:
                 pass
+            except (OSError, ValueError) as exc:
+                # Still marked pending, so the next startup prune retries.
+                logger.warning(
+                    "Could not roll back failed import %s: %s", song_id, exc,
+                )
         self._library_panel.refresh()
         # A damaged model was deleted by the worker; offer a fresh import,
         # which asks to download it again.
