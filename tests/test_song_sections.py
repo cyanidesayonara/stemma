@@ -259,3 +259,11 @@ class TestQueries:
         raw = [[9, 17, "B"], [1, 9, "A"], ["x", 2, "C"], [5, 4, "D"], 7]
         assert parse_sections(raw) == [(1.0, 9.0, "A"), (9.0, 17.0, "B")]
         assert parse_sections("nope") == []
+
+    def test_parse_sections_drops_overlaps(self):
+        """Saved sections tile the song; one that starts inside another
+        is corrupt and dropped (#246 review)."""
+        raw = [[0, 1, "A"], [0.5, 3, "D"], [1, 2, "B"], [2, 4, "C"]]
+        assert parse_sections(raw) == [
+            (0.0, 1.0, "A"), (1.0, 2.0, "B"), (2.0, 4.0, "C"),
+        ]

@@ -447,10 +447,14 @@ def section_index_at(
 
 
 def parse_sections(raw) -> list[tuple[float, float, str]]:
-    """Sections from saved JSON data, dropping anything malformed."""
-    sections: list[tuple[float, float, str]] = []
+    """Sections from saved JSON data, dropping anything malformed.
+
+    Sections do not overlap: one that starts before the previous one
+    (in start order) ends is dropped.
+    """
+    candidates: list[tuple[float, float, str]] = []
     if not isinstance(raw, list):
-        return sections
+        return candidates
     for item in raw:
         try:
             start, end, label = item
@@ -458,6 +462,9 @@ def parse_sections(raw) -> list[tuple[float, float, str]]:
         except (TypeError, ValueError):
             continue
         if end > start >= 0.0:
-            sections.append((start, end, str(label)))
-    sections.sort()
+            candidates.append((start, end, str(label)))
+    sections: list[tuple[float, float, str]] = []
+    for section in sorted(candidates):
+        if not sections or section[0] >= sections[-1][1]:
+            sections.append(section)
     return sections
