@@ -28,6 +28,7 @@ def window(app, tmp_path, monkeypatch):
     # player's values would otherwise land in the suite's shared store.
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(tmp_path / "settings.ini"))
     player = MagicMock()
+    player.has_unsaved_take = False
     player.stems = {}
     player.muted_stems = set()
     player.soloed_stems = set()

@@ -9,6 +9,7 @@ progress updates and a ``DetectionResult`` on completion.
 """
 
 import dataclasses
+import logging
 import math
 import os
 
@@ -19,8 +20,10 @@ from PySide6.QtCore import QThread, Signal
 from src.import_messages import ModelDamagedError
 from src.metronome import robust_beat_interval
 from src.model_manager import discard_model_files
-from src.onnx_session import create_onnx_session
+from src.onnx_session import create_onnx_session, selected_session_provider
 from src.song_sections import detect_sections
+
+logger = logging.getLogger("stemma")
 
 
 # Version of the saved beat, downbeat, chord, and section data. A song whose
@@ -227,7 +230,16 @@ def _detect_beats_onnx(
 
     spec = _bt_spectrogram(audio_mono)  # (frames, 128)
     session = create_onnx_session(model_path)
-    beat_logits, db_logits = _bt_chunked_inference(spec, session)
+    try:
+        beat_logits, db_logits = _bt_chunked_inference(spec, session)
+    except Exception as exc:
+        # Kept on the exception so the fallback's log line says which
+        # provider (DirectML or CPU) failed.
+        try:
+            exc.onnx_provider = selected_session_provider(session)
+        except Exception:
+            pass
+        raise
 
     fps = _BT_SR / _BT_HOP
     beat_times = [float(f) / fps for f in _bt_peaks(beat_logits)]
@@ -649,11 +661,21 @@ def detect_bpm_and_key(
         except ModelDamagedError:
             # Delete it so the next detection downloads a fresh copy,
             # rather than falling back to librosa on every song.
+            logger.warning(
+                "The beat model is damaged; discarded it and fell back to "
+                "librosa.", exc_info=True,
+            )
             discard_model_files(model_path)
             beat_times, downbeat_times, bpm = _detect_beats_librosa(
                 mono, sample_rate,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "beat_this detection failed (provider: %s); falling back "
+                "to librosa.",
+                getattr(exc, "onnx_provider", "") or "no session",
+                exc_info=True,
+            )
             beat_times, downbeat_times, bpm = _detect_beats_librosa(
                 mono, sample_rate,
             )

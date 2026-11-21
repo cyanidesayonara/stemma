@@ -9,6 +9,7 @@ running".
 import json
 import sys
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -82,7 +83,7 @@ class TestCrashLog:
         worker.join()
         _flush()
 
-        text = open(path, encoding="utf-8").read()
+        text = Path(path).read_text(encoding="utf-8")
         assert "boom in a slot" in text
         assert "boom in thread" in text and "worker-x" in text
 
@@ -94,7 +95,7 @@ class TestCrashLog:
         real = crash_log.real_log_path()
 
         assert real is not None
-        assert open(real, encoding="utf-8").read().endswith("hello\n")
+        assert Path(real).read_text(encoding="utf-8").endswith("hello\n")
 
 
 class TestStartupFailure:
@@ -124,7 +125,7 @@ class TestStartupFailure:
         assert folder in text and "write to it" in text
         assert "Details were saved to" in text
         _flush()
-        assert "Startup failed" in open(log, encoding="utf-8").read()
+        assert "Startup failed" in Path(log).read_text(encoding="utf-8")
 
     def test_other_failures_get_a_generic_message(self, qapp, fresh_log):
         crash_log.install()

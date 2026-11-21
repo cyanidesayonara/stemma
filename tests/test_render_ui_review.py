@@ -1,5 +1,7 @@
 """Tests for the UI review renderer's fixture and contact sheet."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -57,7 +59,7 @@ def test_contact_sheet_groups_by_state(tmp_path):
         {"file": "empty_dark_900x600.png", "state": "empty",
          "theme": "dark", "size": "900x600"},
     ]
-    html = open(write_index(str(tmp_path), records, "t"), encoding="utf-8").read()
+    html = Path(write_index(str(tmp_path), records, "t")).read_text(encoding="utf-8")
 
     assert html.index("<h2>empty</h2>") < html.index("<h2>loaded</h2>")
     assert "loaded_dark_900x600.png" in html
@@ -70,7 +72,7 @@ def test_contact_sheet_lists_the_about_dialog_last(tmp_path):
         {"file": "practice_dark_900x600.png", "state": "practice",
          "theme": "dark", "size": "900x600"},
     ]
-    html = open(write_index(str(tmp_path), records, "t"), encoding="utf-8").read()
+    html = Path(write_index(str(tmp_path), records, "t")).read_text(encoding="utf-8")
 
     assert html.index("<h2>practice</h2>") < html.index("<h2>about</h2>")
     assert "about_dark.png" in html

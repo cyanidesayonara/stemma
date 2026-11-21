@@ -358,9 +358,154 @@ class TestRecordingSaveFailure:
         # Once the problem is fixed, the retry saves it.
         assert armed_player.save_recording(str(tmp_path)) is not None
 
+    def test_unsaved_take_is_reported_and_can_be_discarded(
+        self, armed_player, tmp_path,
+    ):
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_frames_captured = 100
+        assert armed_player.has_unsaved_take
+        with patch(
+            "src.player.sf.write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            armed_player.save_recording(str(tmp_path))
+        assert armed_player.has_unsaved_take
+        assert "could not be saved" in armed_player.take_save_error
+        assert "press Stop" not in armed_player.take_save_error
+        armed_player.discard_unsaved_take()
+        assert not armed_player.has_unsaved_take
+        assert armed_player._recording_buffer is None
+
+    def test_save_error_does_not_carry_over_to_the_next_song(
+        self, armed_player, tmp_path,
+    ):
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_frames_captured = 100
+        with patch(
+            "src.player.sf.write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            armed_player.save_recording(str(tmp_path))
+        assert armed_player.take_save_error
+        armed_player.unload()  # another song; the take is dropped
+        assert armed_player.take_save_error == ""
+
     def test_main_window_shows_the_save_failure(self, app):
         from src.ui.main_window import MainWindow
 
         with patch("src.ui.main_window.QMessageBox.warning") as warn:
             MainWindow._on_recording_save_failed(MagicMock(), "Disk full.")
         assert warn.call_args.args[2] == "Disk full."
+
+
+class TestQuitWithUnsavedTake:
+    """A take that fails to save on quit used to be lost: the window hid
+    first, then the "press Stop again" warning came with no way back."""
+
+    @pytest.fixture
+    def stub(self, app, armed_player, tmp_path):
+        armed_player.set_recording_song_dir(str(tmp_path))
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_buffer[:1000] = 0.2
+        armed_player._recording_frames_captured = 1000
+        stub = MagicMock()
+        stub._player = armed_player
+        # The normal "press Stop again" warning must not show on quit.
+        armed_player.recording_save_failed.connect(
+            stub._on_recording_save_failed,
+        )
+        return stub
+
+    def _quit(self, stub, answers, write_errors):
+        from src.ui.main_window import MainWindow
+
+        real_write = sf.write
+        errors = list(write_errors)
+
+        def write(*args, **kwargs):
+            if errors:
+                raise errors.pop(0)
+            return real_write(*args, **kwargs)
+
+        with patch("src.player.sf.write", side_effect=write), patch(
+            "src.ui.main_window.QMessageBox.warning", side_effect=answers,
+        ) as ask:
+            result = MainWindow._stop_player_for_quit(stub)
+        return result, ask
+
+    def test_saved_take_quits_without_asking(self, stub, tmp_path):
+        result, ask = self._quit(stub, [], [])
+        assert result is True
+        ask.assert_not_called()
+        assert len(list(tmp_path.glob("recording_take*.wav"))) == 1
+
+    def test_cancel_keeps_stemma_open_and_the_take(self, stub, tmp_path):
+        result, ask = self._quit(
+            stub, [QMessageBox.StandardButton.Cancel],
+            [OSError(28, "No space left on device")],
+        )
+        assert result is False
+        assert stub._player.has_unsaved_take
+        assert "space" in ask.call_args.args[2].lower()
+        stub._on_recording_save_failed.assert_not_called()
+        assert stub._suppress_recording_reload is False
+
+    def test_retry_saves_the_take(self, stub, tmp_path):
+        result, ask = self._quit(
+            stub, [QMessageBox.StandardButton.Retry],
+            [OSError(28, "No space left on device")],
+        )
+        assert result is True
+        assert ask.call_count == 1
+        assert not stub._player.has_unsaved_take
+        assert len(list(tmp_path.glob("recording_take*.wav"))) == 1
+
+    def test_discard_quits_without_the_take(self, stub, tmp_path):
+        result, _ask = self._quit(
+            stub, [QMessageBox.StandardButton.Discard],
+            [OSError(28, "No space left on device")],
+        )
+        assert result is True
+        assert not stub._player.has_unsaved_take
+        assert not list(tmp_path.glob("recording_take*.wav"))
+
+    def test_a_mocked_player_never_opens_the_question(self, app):
+        """A MagicMock player reads every attribute as truthy; a modal box
+        on close would hang the test run instead of failing it."""
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        with patch("src.ui.main_window.QMessageBox.warning") as ask:
+            assert MainWindow._stop_player_for_quit(stub) is True
+        ask.assert_not_called()
+
+    def test_close_is_cancelled_before_the_window_hides(self, app):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._confirm_quit.return_value = True
+        stub._stop_player_for_quit.return_value = False
+        event = MagicMock()
+        MainWindow.closeEvent(stub, event)
+        event.ignore.assert_called_once()
+        stub.hide.assert_not_called()
+        stub._separation_queue.shutdown.assert_not_called()
+
+    def test_session_save_failure_is_logged(self, app, caplog):
+        from src.ui.main_window import MainWindow
+
+        stub = MagicMock()
+        stub._confirm_quit.return_value = True
+        stub._export_worker = None
+        stub._save_session.side_effect = RuntimeError("settings broke")
+        stub._separation_queue.shutdown.return_value = False
+        with patch(
+            "src.ui.main_window.os._exit", side_effect=SystemExit,
+        ), patch("src.ui.main_window.logging.shutdown"), caplog.at_level(
+            "ERROR", logger="stemma",
+        ):
+            with pytest.raises(SystemExit):
+                MainWindow.closeEvent(stub, MagicMock())
+        assert "session" in caplog.text.lower()
+        assert "settings broke" in caplog.text
+        stub.hide.assert_called_once()  # the close still goes ahead

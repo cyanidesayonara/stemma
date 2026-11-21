@@ -11,6 +11,7 @@ frame synchronisation with the stems being mixed to output.
 """
 
 import glob
+import logging
 import math
 import os
 import threading
@@ -25,6 +26,8 @@ from src.click_utils import generate_click
 from src.import_messages import describe_error
 from src.metronome import local_beat_tempi
 from src.stretch import StreamingStretcher
+
+logger = logging.getLogger("stemma")
 
 
 SPEED_PRESETS = (0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0)
@@ -237,6 +240,8 @@ class MultiTrackPlayer(QObject):
         # Held by the audio callback while it stretches and by the GUI
         # thread while it rebuilds or seeks the stretch paths.
         self._stretch_lock = threading.Lock()
+        # Set by shutdown(): no stretch paths are built after it.
+        self._shut_down = False
 
         # Metronome state.
         self._metronome_enabled: bool = False
@@ -276,6 +281,8 @@ class MultiTrackPlayer(QObject):
         # against saving a full-length silent WAV when playback is
         # stopped before any input was captured (e.g. during count-in).
         self._recording_frames_captured: int = 0
+        # Why the last take failed to save; "" when none has failed.
+        self._take_save_error: str = ""
         self._input_device: int | None = None
         self._latency_offset_frames: int = 0
         self._recording_song_dir: str | None = None
@@ -302,7 +309,9 @@ class MultiTrackPlayer(QObject):
         """
         if self._timer.isActive():
             self._timer.stop()
-        # Release the soxr streams before interpreter exit.
+        # Release the soxr streams before interpreter exit, and build no
+        # more (see _rebuild_stretch).
+        self._shut_down = True
         with self._stretch_lock:
             self._stretch_paths = []
             self._fading_paths = []
@@ -640,15 +649,39 @@ class MultiTrackPlayer(QObject):
                 os.remove(path)  # a partial file would count as a take
             except OSError:
                 pass
-            self.recording_save_failed.emit(
+            self._take_save_error = (
                 "The take could not be saved. "
                 + describe_error(exc, "Saving a recording")
+            )
+            self.recording_save_failed.emit(
+                self._take_save_error
                 + " The take is kept in memory: press Stop again to save "
                 "it."
             )
             return None
         self._recording_buffer = None
+        self._take_save_error = ""
         return path
+
+    @property
+    def has_unsaved_take(self) -> bool:
+        """True while a take with captured input waits to be saved."""
+        return (
+            self._recording_buffer is not None
+            and self._recording_frames_captured > 0
+        )
+
+    @property
+    def take_save_error(self) -> str:
+        """Why the last take could not be saved ("" once one is saved)."""
+        return self._take_save_error
+
+    def discard_unsaved_take(self) -> None:
+        """Drop the take waiting to be saved (quit without it)."""
+        self.pause()
+        self._recording_buffer = None
+        self._recording_frames_captured = 0
+        self._take_save_error = ""
 
     def add_recording_stem(self, name: str, data: np.ndarray) -> None:
         """Add a recording take as a playable stem.
@@ -773,6 +806,8 @@ class MultiTrackPlayer(QObject):
         self._recording_armed = False
         self._recording = False
         self._recording_buffer = None
+        # The dropped take's reason must not surface on the next song.
+        self._take_save_error = ""
         self._nudge_offsets.clear()
 
     def unload(self) -> None:
@@ -1276,6 +1311,10 @@ class MultiTrackPlayer(QObject):
         groups (or to or from the original speed and pitch) starts fresh
         paths at the frame being heard.
         """
+        if self._shut_down:
+            # A debounced change can land after app close; soxr streams
+            # built now would outlive the interpreter.
+            return
         groups = self._stretch_groups()
         with self._stretch_lock:
             current = [reader.names for _, reader in self._stretch_paths]
@@ -1307,18 +1346,66 @@ class MultiTrackPlayer(QObject):
     def _restart_stretch(self, frame: int | None = None) -> None:
         """Start the stretch paths again from *frame* (a seek).
 
-        The frame is set under the same lock the audio callback holds, so
-        a callback finishing mid-seek cannot write its old position back.
+        Fresh paths with the running ones' stems, speed, and pitch are
+        built and primed outside the lock, as ``_rebuild_stretch`` does:
+        priming under it blocked the audio callback for ~4 ms per path
+        and could click (#237). The frame and the new paths are then set
+        together under the lock the callback holds, so a callback
+        finishing mid-seek cannot write its old position back.
         """
         with self._stretch_lock:
-            if frame is not None:
+            if frame is None:
+                frame = self._current_frame
+            was_playing = self._is_playing
+            specs = [
+                (reader.names, stretcher.speed, stretcher.semitones)
+                for stretcher, reader in self._stretch_paths
+            ]
+            if not specs:
                 self._current_frame = frame
+                self._fading_paths = []
+                self._click_cursor = None
+                return
+        paths = []
+        for names, speed, semitones in specs:
+            stretcher = StreamingStretcher(self._sample_rate, 2)
+            stretcher.set_params(speed, semitones)
+            stretcher.reset(frame)
+            reader = _SourceReader(self, names, frame)
+            stretcher.fill(_PRIME_FRAMES, reader)
+            paths.append((stretcher, reader))
+        with self._stretch_lock:
+            self._current_frame = frame
             self._fading_paths = []
             self._click_cursor = None
-            for stretcher, reader in self._stretch_paths:
-                stretcher.reset(self._current_frame)
-                reader.head = self._current_frame
-                stretcher.fill(_PRIME_FRAMES, reader)
+            self._stretch_paths = paths
+            # The callback kept playing the old paths while these primed;
+            # if the song ended meanwhile, the seek still plays on from
+            # *frame* instead of finishing the song.
+            ended_meanwhile = was_playing and not self._is_playing
+            if ended_meanwhile:
+                self._is_playing = True
+        if ended_meanwhile:
+            self._restart_ended_stream()
+
+    def _restart_ended_stream(self) -> None:
+        """Start the stream again after the callback stopped it.
+
+        PortAudio ends a stream once its callback raises CallbackStop; it
+        has to be stopped before it can start again. If that fails, the
+        player is left stopped and ``_emit_position`` reports the end.
+        """
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.stop()
+            stream.start()
+        except (sd.PortAudioError, OSError):
+            logger.warning(
+                "Could not restart playback after a seek.", exc_info=True,
+            )
+            self._is_playing = False
 
     def _mix_stems_into(
         self,

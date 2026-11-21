@@ -1331,6 +1331,58 @@ class MainWindow(QMainWindow):
         )
         return reply == QMessageBox.StandardButton.Yes
 
+    def _stop_player_for_quit(self) -> bool:
+        """Stop playback and save any take before quitting; True to quit.
+
+        A take that cannot be saved is not dropped silently: the user can
+        try again, quit without it, or cancel the quit (the take stays in
+        memory, and Stop saves it once the problem is fixed).
+        """
+        player = self._player
+        # The usual "press Stop again" warning does not fit a quit; the
+        # question below replaces it.
+        player.recording_save_failed.disconnect(
+            self._on_recording_save_failed,
+        )
+        try:
+            while True:
+                self._suppress_recording_reload = True
+                try:
+                    player.stop()
+                except Exception:
+                    # A vanished audio device or a failed write must not
+                    # skip the worker drains in closeEvent (exit crash on
+                    # live QThreads).
+                    logger.exception("Stopping the player on quit failed.")
+                finally:
+                    self._suppress_recording_reload = False
+                # "is True": a mocked player (tests) answers with a truthy
+                # mock, and a modal box would hang the run.
+                if player.has_unsaved_take is not True:
+                    return True
+                reason = player.take_save_error or "The take was not saved."
+                answer = QMessageBox.warning(
+                    self,
+                    "Quit stemma",
+                    f"{reason}\n\nTry saving it again, quit without it, or "
+                    "cancel to keep stemma open with the take kept.",
+                    QMessageBox.StandardButton.Retry
+                    | QMessageBox.StandardButton.Discard
+                    | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Retry,
+                )
+                if answer == QMessageBox.StandardButton.Retry:
+                    continue
+                if answer == QMessageBox.StandardButton.Discard:
+                    logger.warning("Quit without an unsaved take: %s", reason)
+                    player.discard_unsaved_take()
+                    return True
+                return False
+        finally:
+            player.recording_save_failed.connect(
+                self._on_recording_save_failed,
+            )
+
     def closeEvent(self, event) -> None:
         """Save window geometry/state, session, and clean up background threads."""
         if not self._confirm_quit():
@@ -1339,7 +1391,13 @@ class MainWindow(QMainWindow):
         try:
             self._save_session()
         except Exception:
-            pass  # Never prevent the window from closing.
+            # Never prevent the window from closing, but leave a trace.
+            logger.exception("Saving the session on quit failed.")
+        # Stop (saving any take) while the window is still visible, so a
+        # take that fails to save can be retried or the quit cancelled.
+        if not self._stop_player_for_quit():
+            event.ignore()
+            return
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
         # Close visibly now: the waits below can take a while when a
@@ -1361,15 +1419,6 @@ class MainWindow(QMainWindow):
             os._exit(0)
         self._shutdown_stem_loads()
 
-        self._suppress_recording_reload = True
-        try:
-            self._player.stop()
-        except Exception:
-            # A vanished audio device or a failed recording write must not
-            # skip the worker drains below (exit crash on live QThreads).
-            pass
-        finally:
-            self._suppress_recording_reload = False
         # Stop the player's timer and release its stretch streams before
         # Qt tears down.
         self._player.shutdown()
