@@ -1270,7 +1270,9 @@ class PlayerControls(QWidget):
             if self._whole_song_detection_pending():
                 return
             start_sec = end_sec = None
-        elif not is_region:
+        elif not is_region and not _model_ready:
+            # A new whole-song request (not the resume after the beat-model
+            # prompt) replaces any loop that was waiting on the old one.
             self._follow_up_region = None
         self._detection_generation += 1
         generation = self._detection_generation
