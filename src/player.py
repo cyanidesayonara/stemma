@@ -954,6 +954,15 @@ class MultiTrackPlayer(QObject):
         except (sd.PortAudioError, OSError):
             pass
 
+    def _stream_inactive(self) -> bool:
+        """Return True if the open stream reports inactive or errors."""
+        if self._stream is None:
+            return False
+        try:
+            return self._stream.active is False
+        except (sd.PortAudioError, OSError):
+            return True
+
     def _disarm_recording_without_input(self) -> str:
         """Turn recording off for want of an input; return the message.
 
@@ -996,6 +1005,7 @@ class MultiTrackPlayer(QObject):
         self._device_lost = False
         self._pending_status = None
         unavailable = None
+        prev_suppress = self._suppress_next_count_in
         try:
             if self._stream is None and self._recording_armed:
                 self._stream = self._open_recording_stream()
@@ -1003,6 +1013,12 @@ class MultiTrackPlayer(QObject):
                     unavailable = self._disarm_recording_without_input()
             if self._stream is None:
                 self._stream = self._open_output_stream()
+
+            if self._suppress_next_count_in:
+                self._suppress_next_count_in = False
+            else:
+                self._arm_count_in()
+            self._is_playing = True
             try:
                 self._stream.start()
             except (sd.PortAudioError, OSError):
@@ -1010,16 +1026,18 @@ class MultiTrackPlayer(QObject):
                     raise
                 # The duplex stream opened but would not start: blame the
                 # input and play on without it.
-                self._stream.close()
-                self._stream = None
+                self._close_stream()
                 unavailable = self._disarm_recording_without_input()
                 self._stream = self._open_output_stream()
                 self._stream.start()
         except (sd.PortAudioError, OSError):
-            if self._stream is not None:
-                self._stream.close()
-                self._stream = None
+            self._is_playing = False
             self._recording = False
+            self._count_in_remaining = 0
+            self._count_in_phase = 0
+            self._count_in_beat = 0
+            self._suppress_next_count_in = prev_suppress
+            self._close_stream()
             self._discard_empty_recording()
             self.playback_failed.emit(
                 "No audio device is available, or playback failed to "
@@ -1028,12 +1046,6 @@ class MultiTrackPlayer(QObject):
             )
             return
 
-        if self._suppress_next_count_in:
-            self._suppress_next_count_in = False
-        else:
-            self._arm_count_in()
-
-        self._is_playing = True
         self._timer.start()
         self.state_changed.emit(True)
         if unavailable:
@@ -1510,8 +1522,7 @@ class MultiTrackPlayer(QObject):
             logger.debug("PortAudio callback status: %s", status)
 
         if self._is_playing and (
-            self._device_lost
-            or (self._stream is not None and self._stream.active is False)
+            self._device_lost or self._stream_inactive()
         ):
             self._device_lost = False
             logger.warning(

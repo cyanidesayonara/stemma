@@ -568,7 +568,6 @@ def test_validate_listing_needs_five_screenshots(tmp_path: Path) -> None:
 def test_canonical_docs_agree_on_latest_stable_release_and_versions() -> None:
     app_version = read_app_version(DEFAULT_VERSION_PY)
     data = load_listing(DEFAULT_LISTING_YAML)
-    assert data.listing_version == app_version
 
     manifest = (REPO_ROOT / "msix" / "AppxManifest.xml").read_text(encoding="utf-8")
     identity_match = re.search(
@@ -586,16 +585,27 @@ def test_canonical_docs_agree_on_latest_stable_release_and_versions() -> None:
 
     readme_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", readme)
     project_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", project)
-    agents_ver = re.search(r"Latest stable:\s+\*\*v(\d+\.\d+\.\d+)\*\*", agents)
+    agents_header_ver = re.search(
+        r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", agents,
+    )
+    agents_status_ver = re.search(
+        r"Latest stable:\s+\*\*v(\d+\.\d+\.\d+)\*\*", agents,
+    )
     roadmap_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", roadmap)
     changelog_ver = re.search(r"^##\s+\[v(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
 
     versions = {
         "README.md": readme_ver.group(1) if readme_ver else None,
         "PROJECT.md": project_ver.group(1) if project_ver else None,
-        "AGENTS.md": agents_ver.group(1) if agents_ver else None,
+        "AGENTS.md (header)": (
+            agents_header_ver.group(1) if agents_header_ver else None
+        ),
+        "AGENTS.md (status)": (
+            agents_status_ver.group(1) if agents_status_ver else None
+        ),
         "docs/ROADMAP.md": roadmap_ver.group(1) if roadmap_ver else None,
         "CHANGELOG.md": changelog_ver.group(1) if changelog_ver else None,
+        "store/listing.yaml": data.listing_version,
     }
     assert all(v is not None for v in versions.values()), versions
     assert len(set(versions.values())) == 1, versions

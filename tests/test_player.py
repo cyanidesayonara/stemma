@@ -2,7 +2,7 @@
 
 import logging
 import os
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import numpy as np
 import pytest
@@ -1453,7 +1453,59 @@ class TestOutputDeviceLoss:
             with caplog.at_level(logging.DEBUG, logger="stemma"):
                 player._audio_callback(outdata, 100, {}, status)
                 player._emit_position()
+            player.pause()
 
         assert "PortAudio callback status" in caplog.text
         assert player._pending_status is None
+
+    def test_output_device_disconnect_when_stream_active_raises_portaudio_error(
+        self, mock_stems,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        finished: list[bool] = []
+        failed: list[str] = []
+        player.play_finished.connect(lambda: finished.append(True))
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            player.play()
+            type(mock_stream).active = PropertyMock(
+                side_effect=sd.PortAudioError("Invalid stream"),
+            )
+            player._emit_position()
+
+        assert player.is_playing is False
+        assert finished == []
+        assert failed == ["Audio device disconnected."]
+
+    def test_play_sets_is_playing_and_arms_count_in_before_stream_start(
+        self, mock_stems,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_count_in_enabled(True)
+        player.set_count_in_beats(1)
+        player.set_metronome_bpm(120.0)
+        failed: list[str] = []
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+
+            def _run_immediate_callback():
+                outdata = np.zeros((100, 2), dtype=np.float32)
+                player._audio_callback(outdata, 100, {}, sd.CallbackFlags())
+
+            mock_stream.start.side_effect = _run_immediate_callback
+            player.play()
+            player._emit_position()
+            assert player.counting_in is True
+            player.pause()
+
+        assert failed == []
+
 
