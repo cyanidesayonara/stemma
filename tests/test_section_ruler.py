@@ -143,6 +143,31 @@ def test_double_click_loops_the_section(ruler):
     assert loops == [(50.0, 66.0)]
 
 
+def test_double_click_on_the_playing_section_does_not_restart_it(ruler):
+    """The first click of a double-click must not jump back to the start
+    of the section already playing (#246 review)."""
+    seeks, loops = [], []
+    ruler.seek_requested.connect(seeks.append)
+    ruler.loop_requested.connect(lambda a, b: loops.append((a, b)))
+    ruler.set_position(25.0)  # inside the second section, 18-34 s
+    _double_click(ruler, _middle(ruler, 1))
+    ruler._pending_seek_timer.timeout.emit()  # as if the interval passed
+    assert loops == [(18.0, 34.0)]
+    assert seeks == []
+
+
+def test_single_click_on_the_playing_section_restarts_it(ruler):
+    seeks = []
+    ruler.seek_requested.connect(seeks.append)
+    ruler.set_position(25.0)
+    _click(ruler, _middle(ruler, 1))
+    # Held back for the double-click interval, then sent.
+    assert seeks == []
+    assert ruler._pending_seek_timer.isActive()
+    ruler._pending_seek_timer.timeout.emit()
+    assert seeks == [18.0]
+
+
 def test_clicks_outside_the_sections_do_nothing(ruler):
     seeks, loops = [], []
     ruler.seek_requested.connect(seeks.append)

@@ -12,7 +12,7 @@ playhead, and frames come from the existing 20 Hz position updates.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -23,7 +23,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
 
 from src.song_sections import section_index_at
 from src.ui.styles import DARK_COLORS
@@ -77,6 +77,12 @@ class SectionRulerWidget(QWidget):
         self._blocks_cache: QPixmap | None = None
         self._blocks_cache_key: tuple | None = None
         self._label_metrics = QFontMetrics(_font(10, bold=True))
+        # A click on the playing section, held until it cannot be the first
+        # half of a double-click (see mousePressEvent).
+        self._pending_seek: float | None = None
+        self._pending_seek_timer = QTimer(self)
+        self._pending_seek_timer.setSingleShot(True)
+        self._pending_seek_timer.timeout.connect(self._send_pending_seek)
         self._apply_colors(DARK_COLORS)
 
         self.setFixedHeight(SECTION_RULER_HEIGHT)
@@ -146,6 +152,8 @@ class SectionRulerWidget(QWidget):
 
     def clear(self) -> None:
         """Forget the song."""
+        self._pending_seek_timer.stop()
+        self._pending_seek = None
         self._sections = []
         self._total = 0.0
         self._position = 0.0
@@ -416,15 +424,36 @@ class SectionRulerWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Jump to the clicked section's start.
+
+        A click on the section already playing waits out the double-click
+        interval first: if it is the start of a double-click (loop this
+        section), playback must carry on where it is rather than restart.
+        """
         if event.button() != Qt.MouseButton.LeftButton:
             return
         index = self._index_at(event.position().x())
-        if index is not None:
-            self.seek_requested.emit(self._sections[index][0])
+        if index is None:
+            return
+        start = self._sections[index][0]
+        if index == self.current_index():
+            self._pending_seek = start
+            self._pending_seek_timer.start(
+                QApplication.doubleClickInterval()
+            )
+        else:
+            self.seek_requested.emit(start)
+
+    def _send_pending_seek(self) -> None:
+        start, self._pending_seek = self._pending_seek, None
+        if start is not None:
+            self.seek_requested.emit(start)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        self._pending_seek_timer.stop()
+        self._pending_seek = None
         index = self._index_at(event.position().x())
         if index is not None:
             start, end, _ = self._sections[index]
