@@ -1,12 +1,16 @@
-"""Keep CI's requirements on the versions the release lock ships.
+"""Keep local requirements aligned with the release lock and verify CI workflows.
 
-CI installs ``requirements.txt`` while users get the hash-pinned
-``requirements-release.txt``. For packages whose releases change what the
-tests measure, any drift means CI tests a build users never get. PySide6
-6.12 narrowed ``QStyle.sizeFromContents(CT_SpinBox)`` by 16 px, which broke
-the widget snapshots on CI while the shipped build was unchanged, and a
-minor-version cap still let CI float to 6.11.3. So PySide6 is pinned exactly.
-librosa is capped at the locked minor version (issue #154).
+CI installs the hash-pinned ``requirements-release.txt`` plus
+``requirements-dev.txt`` so it tests the dependency graph that releases ship,
+while local development (``pip install -r requirements.txt``) uses
+``requirements.txt``. For packages whose releases change what the tests
+measure, any drift in ``requirements.txt`` would still diverge locally:
+PySide6 6.12 narrowed ``QStyle.sizeFromContents(CT_SpinBox)`` by 16 px, which
+broke widget snapshots while the shipped build was unchanged, and a
+minor-version cap still let installs float to 6.11.3. So PySide6 is pinned
+exactly and librosa is capped at the locked minor version (issue #154). The
+workflow tests also verify the CI lock install order and Partner Center
+workflow environment/input-handling guards.
 """
 
 from __future__ import annotations
@@ -146,10 +150,14 @@ def test_partner_center_workflow_uses_store_environment_and_env_tag():
     assert job_env.get("TAG") == "${{ inputs.tag }}"
     assert job_env.get("MODE") == "${{ inputs.mode }}"
 
+    input_interpolation = re.compile(r"\$\{\{\s*(?:github\.event\.)?inputs\.")
+    assert input_interpolation.search("${{ inputs.tag }}")
+    assert input_interpolation.search("${{ github.event.inputs.tag }}")
+
     for step in submit_job["steps"]:
         run_script = step.get("run")
         if run_script:
-            assert not re.search(r"\$\{\{\s*inputs\.", run_script), (
+            assert not input_interpolation.search(run_script), (
                 f"Step {step.get('name')!r} interpolates workflow inputs directly "
                 "into bash instead of passing them through env:"
             )

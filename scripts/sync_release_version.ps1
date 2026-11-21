@@ -29,6 +29,9 @@ $major = [int]$Matches[1]
 $minor = [int]$Matches[2]
 $patch = [int]$Matches[3]
 $semver = "$major.$minor.$patch"
+# Microsoft Store Partner Center reserves the fourth MSIX part and requires
+# .0 on Store submissions. Prerelease revisions (100+N/200+N/300+N) are
+# sideload-only and must be uninstalled before installing stable X.Y.Z.0.
 $revision = 0
 if ($Matches[4]) {
     $stageOffset = switch ($Matches[4]) {
