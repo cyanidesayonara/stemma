@@ -36,6 +36,9 @@ def player():
 def controls(qapp, player):
     ctrl = PlayerControls(player)
     player._stems = {"vocals": np.zeros((64, 2), dtype=np.float32)}
+    # Analysed already, so loop requests run as asked rather than behind a
+    # whole-song analysis (#246 review).
+    player.set_sections([])
     yield ctrl
     ctrl._cleanup_peak_thread()
     ctrl.setParent(None)
@@ -210,6 +213,28 @@ class TestBeatModelConsent:
         ask.assert_called_once()
         run.assert_called_once()
         assert run.call_args.args[:2] == (3.0, 4.0)
+
+    def test_a_loop_during_the_prompt_for_an_unanalysed_song_waits(
+        self, controls,
+    ):
+        """A loop set while the song's first analysis waits on the prompt
+        runs after that analysis instead of replacing it (#246 review)."""
+        controls._player.set_sections(None)
+        controls.set_model_manager(_manager([]))
+
+        def answer_no():
+            controls.start_detection(3.0, 4.0)
+            return False
+
+        with patch.object(
+            controls, "_ask_beat_model_download", side_effect=answer_no,
+        ), patch.object(controls, "_run_detection") as run:
+            controls.start_detection()
+            QApplication.processEvents()
+
+        run.assert_called_once()
+        assert run.call_args.args[:2] == (None, None)
+        assert controls._follow_up_region == (3.0, 4.0)
 
     def test_yes_after_a_request_during_the_prompt_downloads_once(
         self, controls,

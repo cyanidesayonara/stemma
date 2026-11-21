@@ -21,15 +21,21 @@ from src.import_messages import ModelDamagedError
 from src.metronome import robust_beat_interval
 from src.model_manager import discard_model_files
 from src.onnx_session import create_onnx_session, selected_session_provider
+from src.song_sections import detect_sections
 
 logger = logging.getLogger("stemma")
 
 
-# Version of the saved beat, downbeat, and chord data. A song whose saved
-# detection is older is analysed again when it is opened.
+# Version of the saved beat, downbeat, chord, and section data. A song whose
+# saved detection is older is analysed again when it is opened.
 #   4: major/minor-only chords (no false 7ths).
 #   5: beat_this input and peak picking match the model's own pipeline.
-DETECTION_VERSION = 5
+#   6: experimental song sections (#133).
+DETECTION_VERSION = 6
+
+# Chroma hop shared by chord and section detection (about 10.8 frames per
+# second at 44.1 kHz), so the song's chroma is computed once.
+CHROMA_HOP = 4096
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +54,8 @@ class DetectionResult:
     downbeat_times: list[float] = dataclasses.field(default_factory=list)
     time_signature: str = ""        # e.g. "4/4", "3/4", "" if unknown
     chord_sequence: list = dataclasses.field(default_factory=list)  # list[tuple[float, str]]
+    # (start_s, end_s, label) per song section; whole-song detection only.
+    sections: list = dataclasses.field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -522,18 +530,28 @@ def _viterbi_smooth(
     return path
 
 
+def _chroma(
+    audio_mono: np.ndarray, sr: int, hop_length: int = CHROMA_HOP,
+) -> np.ndarray:
+    """The ``(12, n_frames)`` CQT chroma chords and sections both read."""
+    return librosa.feature.chroma_cqt(
+        y=audio_mono, sr=sr, hop_length=hop_length,
+    )
+
+
 def _detect_chords(
     audio_mono: np.ndarray, sr: int,
-    hop_length: int = 4096,
+    hop_length: int = CHROMA_HOP,
+    chroma: np.ndarray | None = None,
 ) -> list[tuple[float, str]]:
     """Detect chords using chromagram template matching + HMM smoothing.
 
+    *chroma* is the song's chroma at *hop_length* when already computed.
     Returns a list of (onset_seconds, chord_label) tuples representing
     consecutive chord segments.
     """
-    chroma = librosa.feature.chroma_cqt(
-        y=audio_mono, sr=sr, hop_length=hop_length,
-    )  # (12, n_frames)
+    if chroma is None:
+        chroma = _chroma(audio_mono, sr, hop_length)  # (12, n_frames)
     n_frames = chroma.shape[1]
     if n_frames == 0:
         return []
@@ -612,7 +630,10 @@ def detect_bpm_and_key(
     # Slice to A-B region if specified. Keep the exact frame-derived offset
     # so detector timestamps can be converted back to absolute song time.
     slice_start_sec = 0.0
-    if start_sec is not None and end_sec is not None and end_sec > start_sec:
+    is_region = (
+        start_sec is not None and end_sec is not None and end_sec > start_sec
+    )
+    if is_region:
         s = int(start_sec * sample_rate)
         e = int(end_sec * sample_rate)
         slice_start = max(0, s)
@@ -674,8 +695,20 @@ def detect_bpm_and_key(
     # fallback, which does not produce downbeats).
     time_sig = _detect_time_signature(beat_times, downbeat_times)
 
-    # Chord detection.
-    chord_sequence = _detect_chords(mono, sample_rate)
+    # Chord detection, and on the whole song the sections, from one chroma.
+    # A loop re-detection leaves the song's sections as they are: they
+    # describe the whole song, and a loop is usually one of them.
+    sections: list[tuple[float, float, str]] = []
+    if is_region:
+        chord_sequence = _detect_chords(mono, sample_rate)
+    else:
+        chroma = _chroma(mono, sample_rate)
+        chord_sequence = _detect_chords(
+            mono, sample_rate, CHROMA_HOP, chroma,
+        )
+        sections = detect_sections(
+            mono, sample_rate, beat_times, downbeat_times, chroma, CHROMA_HOP,
+        )
 
     if slice_start_sec:
         beat_times = [time + slice_start_sec for time in beat_times]
@@ -699,6 +732,7 @@ def detect_bpm_and_key(
         downbeat_times=downbeat_times,
         time_signature=time_sig,
         chord_sequence=chord_sequence,
+        sections=sections,
     )
 
 

@@ -49,6 +49,7 @@ from src.ui.styles import (
     recording_color,
 )
 from src.ui.transport_bar import TransportBar
+from src.song_sections import section_index_at
 from src.ui.chord_lane import splice_chords
 from src.ui.waveform_panel import WaveformPanel
 from src.waveform import compute_stem_peaks
@@ -144,6 +145,9 @@ class PlayerControls(QWidget):
         # running, as (start_sec, end_sec, generation). Only one detection
         # runs at a time; requests in between are dropped (see _run_detection).
         self._queued_detection: tuple | None = None
+        # A loop detection asked for before the whole song was analysed;
+        # it runs once the whole-song analysis finishes (#246 review).
+        self._follow_up_region: tuple[float, float] | None = None
         self._model_manager = None  # set via set_model_manager()
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
@@ -352,6 +356,7 @@ class PlayerControls(QWidget):
         self._waveform_frame = self._waveform_panel.frame
         self._waveform = self._waveform_panel.waveform
         self._chord_lane = self._waveform_panel.chord_lane
+        self._section_ruler = self._waveform_panel.section_ruler
         self._play_icon = transport.play_icon
         self._pause_icon = transport.pause_icon
         self._stop_icon = transport.stop_icon
@@ -409,6 +414,7 @@ class PlayerControls(QWidget):
             self._on_master_volume_requested
         )
         self._waveform_panel.seek_requested.connect(self._on_waveform_seek)
+        self._section_ruler.loop_requested.connect(self.loop_section)
 
         practice = self._practice_rack
         practice.loop_a_requested.connect(self.set_loop_a)
@@ -601,6 +607,7 @@ class PlayerControls(QWidget):
         self._waveform.set_stem_lanes([], muted=set(), soloed=set())
         self._waveform.set_position(0.0)
         self._chord_lane.clear()
+        self._section_ruler.clear()
         self._time_label.setText("0:00 / 0:00")
         self._song_info_bar.clear()
         self._key_conf = ""
@@ -694,6 +701,7 @@ class PlayerControls(QWidget):
         if total > 0:
             self._waveform.set_position(pos_s / total)
         self._chord_lane.set_position(pos_s)
+        self._section_ruler.set_position(pos_s)
         self.update_count_in_display()
         self._refresh_synced_bpm(pos_s)
 
@@ -758,6 +766,7 @@ class PlayerControls(QWidget):
         else:
             self._waveform.set_position(0.0)
         self._chord_lane.set_position(self._player.current_seconds)
+        self._section_ruler.set_position(self._player.current_seconds)
 
     def _build_stem_lanes(
         self, stem_peaks: dict[str, np.ndarray],
@@ -882,12 +891,14 @@ class PlayerControls(QWidget):
             return  # Widget was destroyed
         self._waveform.set_total_seconds(self._player.total_seconds)
         self._chord_lane.set_total_seconds(self._player.total_seconds)
+        self._section_ruler.set_total_seconds(self._player.total_seconds)
 
     def _update_waveform_loop_markers(self) -> None:
-        """Update loop marker positions on the waveform widget."""
+        """Update loop marker positions on the waveform and section ruler."""
         total = self._player.total_seconds
         a = self._player.loop_a
         b = self._player.loop_b
+        self._section_ruler.set_loop(a, b)
         if total > 0:
             a_ratio = a / total if a is not None else None
             b_ratio = b / total if b is not None else None
@@ -939,6 +950,54 @@ class PlayerControls(QWidget):
     def toggle_looping(self) -> None:
         """Toggle the loop button state (e.g. from keyboard shortcut)."""
         self._loop_toggle_btn.setChecked(not self._loop_toggle_btn.isChecked())
+
+    # -- Song sections (experimental, #133) --------------------------------
+
+    def loop_section(self, start: float, end: float) -> None:
+        """Loop A-B over one section, on its bar lines, and turn looping on.
+
+        From outside the section, playback jumps to its start so the loop
+        is heard at once; from inside, it carries on where it is.
+        """
+        if end <= start:
+            return
+        self._player.clear_loop()
+        self._player.set_loop_a(start)
+        self._player.set_loop_b(end)
+        if not self._loop_toggle_btn.isChecked():
+            self._loop_toggle_btn.setChecked(True)
+        else:
+            self._player.set_looping(True)
+        position = self._player.current_seconds
+        if not start <= position < end:
+            self._player.seek(start)
+        self._update_loop_label()
+        self._update_waveform_loop_markers()
+        self._maybe_redetect_for_loop()
+        self._update_trainer_status()
+
+    def loop_section_at(self, seconds: float) -> None:
+        """Loop the section playing at *seconds*, if there is one."""
+        sections = self._player.sections or []
+        index = section_index_at(sections, seconds)
+        if index is not None:
+            start, end, _ = sections[index]
+            self.loop_section(start, end)
+
+    def loop_current_section(self) -> None:
+        """Loop the section under the playhead (keyboard shortcut)."""
+        self.loop_section_at(self._player.current_seconds)
+
+    def restore_sections(
+        self, sections: list[tuple[float, float, str]],
+    ) -> None:
+        """Restore previously detected sections from QSettings."""
+        self._player.set_sections(sections)
+        self._section_ruler.set_sections(self._player.sections)
+
+    def set_section_ruler_visible(self, visible: bool) -> None:
+        """Show or hide the section ruler above the stem lanes (View menu)."""
+        self._section_ruler.setVisible(visible)
 
     # -- Loop Trainer -----------------------------------------------------
 
@@ -1201,6 +1260,20 @@ class PlayerControls(QWidget):
         """
         if self._closing or not self._player.stems:
             return
+        is_region = start_sec is not None and end_sec is not None
+        if is_region and self._player.sections is None:
+            # The whole song has not been analysed yet (a fresh or stale
+            # song): a loop run must not supersede that analysis, or the
+            # song is left without sections, beats, and whole-song chords
+            # (#246 review). Finish the song, then run the loop.
+            self._follow_up_region = (float(start_sec), float(end_sec))
+            if self._whole_song_detection_pending():
+                return
+            start_sec = end_sec = None
+        elif not is_region and not _model_ready:
+            # A new whole-song request (not the resume after the beat-model
+            # prompt) replaces any loop that was waiting on the old one.
+            self._follow_up_region = None
         self._detection_generation += 1
         generation = self._detection_generation
         self._pending_detect_args = None
@@ -1209,6 +1282,9 @@ class PlayerControls(QWidget):
         # Before the beat-model check: its prompt and download come first,
         # and the lane must not read "No chords detected" meanwhile.
         self._chord_lane.set_detecting(True)
+        if start_sec is None or end_sec is None:
+            # Only whole-song detection finds sections.
+            self._section_ruler.set_detecting(True)
 
         # Ensure beat_this model is available.
         if (not _model_ready
@@ -1232,7 +1308,33 @@ class PlayerControls(QWidget):
         self._pending_detect_args = None
         self._pending_detect_generation = None
         self._queued_detection = None
+        self._follow_up_region = None
         self._detach_detection_worker()
+
+    def _whole_song_detection_pending(self) -> bool:
+        """True while the current request is a whole-song analysis: running,
+        queued behind a superseded worker, or waiting on the beat model."""
+        generation = self._detection_generation
+        worker = self._detection_worker
+        if (
+            worker is not None and worker.isRunning()
+            and getattr(worker, "region", None) is None
+            and getattr(worker, "_detection_generation", None) == generation
+        ):
+            return True
+        queued = self._queued_detection
+        if queued is not None and queued[2] == generation:
+            return queued[0] is None or queued[1] is None
+        if self._pending_detect_generation == generation:
+            args = self._pending_detect_args or (None, None)
+            return args[0] is None or args[1] is None
+        return False
+
+    def _run_follow_up_region(self) -> None:
+        """Run the loop detection that waited for the whole song, if any."""
+        region, self._follow_up_region = self._follow_up_region, None
+        if region is not None:
+            self.start_detection(*region)
 
     def _detection_running(self) -> bool:
         """True while any detection worker, current or superseded, runs."""
@@ -1405,6 +1507,7 @@ class PlayerControls(QWidget):
         """
         if not self._detection_running():
             self._chord_lane.set_detecting(False)
+            self._section_ruler.set_detecting(False)
 
     def _run_detection(
         self,
@@ -1426,6 +1529,8 @@ class PlayerControls(QWidget):
             "Key: detecting...", "Tempo: detecting...",
         )
         self._chord_lane.set_detecting(True)
+        if start_sec is None or end_sec is None:
+            self._section_ruler.set_detecting(True)
 
         # One detection at a time. A superseded worker keeps running after it
         # is detached, and rapid A-B loop clicks used to stack six or more
@@ -1542,7 +1647,14 @@ class PlayerControls(QWidget):
         if region is None:
             # Bar lines keep the whole song's downbeats.
             self._chord_lane.set_downbeats(result.downbeat_times)
+            # Sections describe the whole song: a loop re-detection, which
+            # finds none, leaves them as they are.
+            self._player.set_sections(result.sections)
+            self._section_ruler.set_sections(self._player.sections)
         self._chord_lane.set_detecting(False)
+        self._section_ruler.set_detecting(False)
+        if region is None:
+            self._run_follow_up_region()
 
     def _detection_region(self) -> tuple[float, float] | None:
         """The A-B region the finished detection analysed, if any."""
@@ -1560,10 +1672,13 @@ class PlayerControls(QWidget):
         if self._detection_region() is None:
             self._player.set_chord_sequence([])
             self._chord_lane.set_detection_failed()
+            self._player.set_sections([])
+            self._section_ruler.set_detection_failed()
         else:
             # A failed loop re-detection leaves the song's chords as they
             # were, in the player, the badge, and the lane alike.
             self._chord_lane.set_detecting(False)
+            self._section_ruler.set_detecting(False)
             if self._player.chord_sequence:
                 self._song_info_bar.set_chord("--")
                 if self._player.is_playing:
@@ -1572,6 +1687,8 @@ class PlayerControls(QWidget):
         self._detected_bpm_raw = ""
         self._key_conf = ""
         self._bpm_conf = ""
+        if self._detection_region() is None:
+            self._run_follow_up_region()
 
     def _on_detect_finished(self) -> None:
         if self._is_active_detection_sender():
@@ -1905,10 +2022,10 @@ class PlayerControls(QWidget):
         self._chord_lane.setVisible(visible)
 
     def _sync_chord_lane_from_player(self) -> None:
-        """Start the chord lane from the player's state for a new song.
+        """Start the chord lane and section ruler from the player's state.
 
-        MainWindow restores saved chords and downbeats before the stems
-        are named, so the player already holds them (or nothing).
+        MainWindow restores saved chords, downbeats, and sections before
+        the stems are named, so the player already holds them (or nothing).
         """
         lane = self._chord_lane
         lane.clear()
@@ -1916,6 +2033,12 @@ class PlayerControls(QWidget):
         lane.set_chords(self._player.chord_sequence)
         lane.set_downbeats(self._player.downbeat_times)
         lane.set_pitch(int(self._player.pitch_semitones))
+
+        ruler = self._section_ruler
+        ruler.clear()
+        ruler.set_total_seconds(self._player.total_seconds)
+        ruler.set_sections(self._player.sections)
+        ruler.set_loop(self._player.loop_a, self._player.loop_b)
 
     def _sync_waveform_lane_capacity(self) -> None:
         """Size the waveform's height cap to one lane per mixer row."""

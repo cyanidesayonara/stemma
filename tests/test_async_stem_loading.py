@@ -1009,6 +1009,9 @@ class TestDetectionGeneration:
         window._player._stems = {
             "vocals": np.zeros((64, 2), dtype=np.float32),
         }
+        # Analysed already, so the loop request runs as asked rather than
+        # behind a whole-song analysis.
+        window._player.set_sections([])
         controls.start_detection(3.0, 4.0)
         QApplication.processEvents()
 
@@ -1106,3 +1109,41 @@ class TestSavedDetection:
         self._save_grid(window, 4)
         window._restore_song_detection("a")
         assert window._player.beat_times == []
+
+    def test_sections_are_restored_with_the_grid(self, window):
+        """Sections persist with the song's analysis, like chords (#133)."""
+        self._save_grid(window, DETECTION_VERSION)
+        window._settings.setValue(
+            "detection/a/sections",
+            json.dumps([[0.5, 8.5, "A"], [8.5, 16.5, "B"], ["bad"]]),
+        )
+        window._restore_song_detection("a")
+        assert window._player.sections == [(0.5, 8.5, "A"), (8.5, 16.5, "B")]
+
+    def test_grid_saved_before_sections_is_redetected(self, window):
+        """Version 5 analysis has no sections: open it once more (#133)."""
+        self._save_grid(window, 5)
+        window._restore_song_detection("a")
+        assert window._player.beat_times == []
+        assert window._player.sections is None
+
+    def test_unanalysed_song_is_not_saved_as_current(self, window):
+        """Sections never analysed (a superseded whole-song run) must not
+        be saved as "analysed, none found" (#246 review)."""
+        window._current_song_id = "a"
+        window._player.set_sections(None)
+        window._save_session()
+        assert int(window._settings.value("detection/a/det_ver", 0)) == 0
+
+        window._player.set_sections([])
+        window._save_session()
+        assert int(
+            window._settings.value("detection/a/det_ver", 0)
+        ) == DETECTION_VERSION
+
+    def test_corrupt_sections_restore_none(self, window):
+        self._save_grid(window, DETECTION_VERSION)
+        window._settings.setValue("detection/a/sections", "{not json")
+        window._restore_song_detection("a")
+        assert window._player.sections == []
+        assert window._player.beat_times == [0.5, 1.0, 1.5]

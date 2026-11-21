@@ -8,6 +8,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 from src.beat_detector import (
+    CHROMA_HOP,
     DetectionResult,
     DetectionWorker,
     _bpm_confidence,
@@ -598,6 +599,53 @@ class TestDetectBpmAndKey:
         assert result.beat_times == [0.5]
         assert result.downbeat_times == [0.5]
         assert result.chord_sequence == [(0.75, "Am")]
+
+    def _stub_detectors(self, monkeypatch, calls):
+        monkeypatch.setattr(
+            "src.beat_detector._detect_beats_librosa",
+            lambda *_args: ([0.5, 1.0], [0.5], 100.0),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._detect_key", lambda *_args: ("", 0.0),
+        )
+        monkeypatch.setattr(
+            "src.beat_detector._chroma", lambda *_args: "chroma",
+        )
+
+        def fake_chords(*args):
+            calls.append(("chords", args[2:]))
+            return []
+
+        def fake_sections(mono, sr, beats, downbeats, chroma, hop_length):
+            calls.append(("sections", (beats, downbeats, chroma)))
+            return [(0.5, 2.5, "A"), (2.5, 4.5, "B")]
+
+        monkeypatch.setattr("src.beat_detector._detect_chords", fake_chords)
+        monkeypatch.setattr(
+            "src.beat_detector.detect_sections", fake_sections,
+        )
+
+    def test_whole_song_detects_sections_on_the_shared_chroma(
+        self, monkeypatch,
+    ):
+        calls = []
+        self._stub_detectors(monkeypatch, calls)
+        stereo = np.ones((60, 2), dtype=np.float32)
+        result = detect_bpm_and_key({"mix": stereo}, 10)
+        assert result.sections == [(0.5, 2.5, "A"), (2.5, 4.5, "B")]
+        # Chords and sections share one chroma computation.
+        assert ("chords", (CHROMA_HOP, "chroma")) in calls
+        assert ("sections", ([0.5, 1.0], [0.5], "chroma")) in calls
+
+    def test_ab_region_leaves_sections_to_the_song(self, monkeypatch):
+        calls = []
+        self._stub_detectors(monkeypatch, calls)
+        stereo = np.ones((100, 2), dtype=np.float32)
+        result = detect_bpm_and_key(
+            {"mix": stereo}, 10, start_sec=2.0, end_sec=8.0,
+        )
+        assert result.sections == []
+        assert not [c for c in calls if c[0] == "sections"]
 
     def test_ab_region_too_short(self):
         """A-B region shorter than _MIN_DURATION returns empty result."""

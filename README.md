@@ -58,6 +58,11 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - A chord lane under the stem waveforms: the whole song's chords on the
   waveform's timeline, plus the next few bars large enough to read ahead
   while playing. Click a chord to jump to it; View > Chord Lane hides it.
+- Song sections (experimental): a ruler above the stem waveforms splits
+  the song into sections on its bar lines, with the same letter for
+  sections that sound alike. Click a section to jump to it; double-click
+  it, or press Shift+L, to loop it bar-accurately. View > Song Sections
+  hides it.
 - Metronome with tap tempo, beat sync to the track, and a nudge offset;
   optional count-in before playback and before each loop repeat.
 
@@ -117,6 +122,7 @@ python -m pytest -m "not slow and not hardware"
 | Ctrl+1-6 | Mute/unmute vocals, drums, bass, other, guitar, piano |
 | A / B | Set loop point A / B |
 | L | Toggle A-B loop |
+| Shift+L | Loop the song section playing (experimental) |
 | M | Toggle metronome |
 | C | Toggle count-in |
 | R | Arm / disarm recording |
