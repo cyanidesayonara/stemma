@@ -8,11 +8,12 @@ window.
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLayout, QVBoxLayout, QWidget
 
+from src.ui.chord_lane import ChordLaneWidget
 from src.ui.waveform_stack_widget import WaveformStackWidget
 
 
 class WaveformPanel(QWidget):
-    """The stem-lane waveform inside its card frame."""
+    """The stem-lane waveform and the chord lane inside their card frame."""
 
     seek_requested = Signal(float)  # Emits seconds
 
@@ -35,6 +36,11 @@ class WaveformPanel(QWidget):
         self._waveform = WaveformStackWidget()
         self._waveform.seek_requested.connect(self.seek_requested.emit)
         frame_layout.addWidget(self._waveform)
+
+        # Under the stem lanes, on their time axis (#133).
+        self._chord_lane = ChordLaneWidget()
+        self._chord_lane.seek_requested.connect(self.seek_requested.emit)
+        frame_layout.addWidget(self._chord_lane)
         layout.addWidget(self._frame)
 
     @property
@@ -45,6 +51,11 @@ class WaveformPanel(QWidget):
     def waveform(self) -> WaveformStackWidget:
         return self._waveform
 
+    @property
+    def chord_lane(self) -> ChordLaneWidget:
+        return self._chord_lane
+
     def apply_theme(self, colors: dict[str, str]) -> None:
         """Repaint the lanes for a new theme."""
         self._waveform.set_theme_colors(colors)
+        self._chord_lane.set_theme_colors(colors)

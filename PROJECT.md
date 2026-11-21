@@ -189,6 +189,16 @@ stemma/
     stack prefers 280px, yields to a 120px floor in short windows, and in
     tall windows grows into spare height up to about 110px per lane (520px
     at most, never capped below 280px).
+  - **`chord_lane.py`** — Fixed-height lane under the stem lanes in the
+    same card: an overview row of the whole song's chords on the stem
+    lanes' time axis, and a read-ahead row showing the current bar and the
+    next seven, scrolling with the playhead. Labels follow transposition.
+    The player's `chord_sequence` is the one source of truth for the lane,
+    the chord badge, and the saved session, and always covers the whole
+    song: a loop re-detection analyses only the loop, so `PlayerControls`
+    splices its chords into the song's (`splice_chords`) instead of
+    replacing them. The overview layer is cached; frames come from the
+    20 Hz position updates.
   - **`song_info_bar.py`** — Key, live chord, and tempo readout strip.
   - **`practice_rack.py`** — Loop and Trainer, Speed and Pitch, and
     Metronome and Count-in cards, which wrap to two rows in narrow windows.

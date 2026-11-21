@@ -125,6 +125,8 @@ def _is_audio_path(path: str) -> bool:
 
 
 _THEME_TOGGLE_ICON_PX = 18
+# View > Chord Lane, on by default (#133).
+_CHORD_LANE_SETTING = "view/chord_lane"
 
 # Keys a focused control uses for itself, ahead of the window shortcuts.
 _NAVIGATION_KEYS = frozenset({
@@ -350,6 +352,16 @@ class MainWindow(QMainWindow):
         view_menu = menu_bar.addMenu("&View")
         theme_action = view_menu.addAction("Switch &Theme")
         theme_action.triggered.connect(self._toggle_theme)
+        view_menu.addSeparator()
+        self._chord_lane_action = view_menu.addAction("&Chord Lane")
+        self._chord_lane_action.setCheckable(True)
+        self._chord_lane_action.setChecked(
+            self._settings.value(_CHORD_LANE_SETTING, True, type=bool)
+        )
+        self._chord_lane_action.toggled.connect(self._on_chord_lane_toggled)
+        self._player_controls.set_chord_lane_visible(
+            self._chord_lane_action.isChecked()
+        )
 
         help_menu = menu_bar.addMenu("&Help")
 
@@ -376,6 +388,11 @@ class MainWindow(QMainWindow):
 
         about_action = help_menu.addAction("&About stemma")
         about_action.triggered.connect(self._on_about)
+
+    def _on_chord_lane_toggled(self, checked: bool) -> None:
+        """Show or hide the chord lane and remember the choice."""
+        self._player_controls.set_chord_lane_visible(checked)
+        self._settings.setValue(_CHORD_LANE_SETTING, checked)
 
     def _setup_shortcuts(self) -> None:
         """Register global keyboard shortcuts (layout-independent).
