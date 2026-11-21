@@ -21,15 +21,27 @@ if ($trimmed.StartsWith("refs/tags/")) {
     $trimmed = $trimmed.Substring("refs/tags/".Length)
 }
 
-if ($trimmed -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$') {
-    throw "Tag must be vMAJOR.MINOR.PATCH (optional prerelease suffix after '-' is ignored for MSIX), got: $Tag"
+if ($trimmed -cnotmatch '^v(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.([1-9]\d?))?$') {
+    throw "Tag must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(alpha|beta|rc).N (N in 1..99), got: $Tag"
 }
 
 $major = [int]$Matches[1]
 $minor = [int]$Matches[2]
 $patch = [int]$Matches[3]
 $semver = "$major.$minor.$patch"
-$msixFourPart = "$semver.0"
+# Microsoft Store Partner Center reserves the fourth MSIX part and requires
+# .0 on Store submissions. Prerelease revisions (100+N/200+N/300+N) are
+# sideload-only and must be uninstalled before installing stable X.Y.Z.0.
+$revision = 0
+if ($Matches[4]) {
+    $stageOffset = switch ($Matches[4]) {
+        "alpha" { 100 }
+        "beta" { 200 }
+        "rc" { 300 }
+    }
+    $revision = $stageOffset + [int]$Matches[5]
+}
+$msixFourPart = "$semver.$revision"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
 

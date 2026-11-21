@@ -103,3 +103,48 @@ def test_sync_fails_loudly_when_a_write_fails(shell: str, repo: Path) -> None:
 
     assert result.returncode != 0
     assert "Synced" not in result.stdout
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_sync_maps_prerelease_tags_to_distinct_msix_revisions(
+    shell: str, repo: Path,
+) -> None:
+    cases = [
+        ("v3.1.0-alpha.1", "3.1.0", "3.1.0.101"),
+        ("v3.1.0-beta.1", "3.1.0", "3.1.0.201"),
+        ("v3.1.0-beta.2", "3.1.0", "3.1.0.202"),
+        ("v3.1.0-rc.1", "3.1.0", "3.1.0.301"),
+        ("v3.1.0", "3.1.0", "3.1.0.0"),
+    ]
+    seen_msix: list[str] = []
+    for tag, expected_semver, expected_msix in cases:
+        result = _run(shell, repo, tag)
+        assert result.returncode == 0, f"{tag}: {result.stderr}"
+        version_text = (repo / "src" / "version.py").read_text(encoding="utf-8")
+        assert f'__version__ = "{expected_semver}"' in version_text
+        manifest_text = (repo / "msix" / "AppxManifest.xml").read_text(
+            encoding="utf-8",
+        )
+        assert f'Version="{expected_msix}"' in manifest_text
+        seen_msix.append(expected_msix)
+
+    assert len(set(seen_msix)) == len(cases)
+    prerelease_revisions = [int(v.rsplit(".", 1)[1]) for v in seen_msix[:-1]]
+    assert prerelease_revisions == sorted(prerelease_revisions)
+    assert len(set(prerelease_revisions)) == len(prerelease_revisions)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "bad_tag",
+    ["v3.1.0-foo", "v3.1.0-beta", "v3.1.0-beta.0", "v3.1.0-beta.100", "v3.1.0+build1"],
+)
+def test_sync_rejects_unstructured_prerelease_suffix(
+    shell: str, repo: Path, bad_tag: str,
+) -> None:
+    result = _run(shell, repo, bad_tag)
+
+    assert result.returncode != 0
+    assert "Synced" not in result.stdout
+    assert b'"2.6.0"' in (repo / "src" / "version.py").read_bytes()
+
