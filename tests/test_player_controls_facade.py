@@ -243,6 +243,8 @@ def test_practice_cards_compose_in_intended_order(controls):
         controls._master_vol_label_prefix,
         controls._master_volume_slider,
         controls._master_volume_combo,
+        # The small arpeggio logo closes the transport row (no footer row).
+        controls._arpeggio_label,
     ]
     markers = set(expected)
     actual = [
@@ -726,9 +728,13 @@ def test_practice_card_controls_are_compact(qapp):
 
 
 @pytest.mark.parametrize("available, expected", [
-    ((1920, 1040), (1280, 820)),
-    ((1366, 728), (1229, 655)),
-    ((1000, 640), (900, 600)),
+    # 1920 x 1080: the full target, everything visible without scrolling.
+    ((1920, 1040), (1360, 820)),
+    # 1920 x 1080 at 125 %: full width, the height the screen allows.
+    ((1536, 816), (1360, 750)),
+    # 1366 x 768: nearly edge to edge so the practice cards stay on one row.
+    ((1366, 728), (1350, 669)),
+    ((1000, 640), (984, 600)),
 ])
 def test_first_run_window_size(qapp, available, expected):
     stub = MagicMock()
@@ -752,7 +758,7 @@ def test_first_run_window_stays_on_a_short_screen():
     stub.frameGeometry.return_value.height.return_value = 639
     stub.geometry.return_value.height.return_value = 600
     MainWindow._apply_first_run_size(stub)
-    assert stub.move.call_args.args == (30, 0)
+    assert stub.move.call_args.args == (8, 0)
 
 
 def test_practice_icon_buttons_stay_square(qapp):

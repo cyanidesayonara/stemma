@@ -592,21 +592,11 @@ QDialog QComboBox {{
     min-height: 20px;
 }}
 
-QWidget#footer {{
-    border-top: 1px solid {c["surface0"]};
-}}
-
 /* The transport is anchored below the scrolling practice content, so it
    needs an edge to read as a fixed bar rather than as the last row that
    happened to scroll into view. */
 QWidget#transport-bar {{
     border-top: 1px solid {c["surface0"]};
-}}
-
-QLabel#copyright {{
-    color: {c["subtext"]};
-    font-size: 9pt;
-    border: none;
 }}
 """
 

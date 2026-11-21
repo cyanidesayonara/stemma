@@ -583,6 +583,53 @@ class TestClickReplay:
         assert w._animating is True
         w._timer.stop()
 
+    def test_click_plays_the_chord(self, app, monkeypatch):
+        """A click reaches the platform player with chord.wav.
+
+        Patched at the bottom of the chain (play_impl), so the lazy import
+        in wav_playback is exercised too: when that import failed, clicks
+        animated in silence and only a log line said so.
+        """
+        from src.ui import _wav_playback_impl
+
+        played = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl", lambda path: played.append(path),
+        )
+        w = AnimatedLogoWidget(theme="dark")
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        w._timer.stop()
+        assert [p.name for p in played] == ["chord.wav"]
+
+    def test_sound_starts_before_the_animation_clock(self, app, monkeypatch):
+        """The first click pays for loading the playback module; the
+        animation clock must start after that, or the notes run ahead of
+        the chord by the load time."""
+        from src.ui import _wav_playback_impl
+
+        w = AnimatedLogoWidget(theme="dark")
+        clock_running = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl",
+            lambda path: clock_running.append(w._clock.isValid()),
+        )
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        w._timer.stop()
+        assert clock_running == [False]
+        assert w._clock.isValid()
+
+    def test_sound_off_stays_silent(self, app, monkeypatch):
+        from src.ui import _wav_playback_impl
+
+        played = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl", lambda path: played.append(path),
+        )
+        w = AnimatedLogoWidget(theme="dark", play_sound=False)
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        w._timer.stop()
+        assert played == []
+
 
 def test_logo_path_points_at_the_brand_svgs():
     assert _logo_path("dark").endswith(os.path.join("icons",
