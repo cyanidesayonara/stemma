@@ -8,7 +8,9 @@ starts and ends on a bar line.
 
 Method, kept to numpy and librosa:
 
-1. Average the features over each bar of the beat grid.
+1. Average the features over each bar of the beat grid, then over a
+   few bars around it, so a section cycling through its progression
+   reads as one steady thing; scale them by how much single bars vary.
 2. Build a bar-by-bar self-similarity matrix and slide a checkerboard
    kernel along its diagonal (Foote novelty): the score peaks where the
    bars before and after a point are alike among themselves but unlike
@@ -34,18 +36,22 @@ import numpy as np
 MIN_SECTION_BARS = 4
 # Bars on each side of the checkerboard kernel's centre.
 _KERNEL_BARS = 4
+# Bars each bar's features are averaged over (a typical progression).
+_CONTEXT_BARS = 4
 # Songs (or bar grids) shorter than this are not split.
 _MIN_SONG_BARS = 2 * MIN_SECTION_BARS
 # A novelty peak counts when it stands this many standard deviations
-# above the mean novelty, and above an absolute floor (novelty is scaled
-# to 1 for a change between two perfectly uniform, opposite halves). The
+# above the mean novelty, and above an absolute floor (novelty is 1 for a
+# change between two halves with nothing in common, 0 for no change). The
 # floor keeps a song that never changes from being split anyway: one 4-bar
-# loop repeated scores under 0.15, while real changes score 0.2 to 0.4.
+# loop repeated scores at most about 0.2, while the changes in the demo
+# songs and the test fixtures score 0.33 to 0.55.
 _PEAK_STD = 0.25
-_MIN_NOVELTY = 0.2
-# Two sections share a letter when their mean features are at least
-# this similar (cosine, on per-song standardised features).
-_SAME_LABEL_SIMILARITY = 0.6
+_MIN_NOVELTY = 0.3
+# Two sections share a letter when their mean features are at least this
+# similar (``self_similarity``). A repeated verse or chorus scores 0.8 to
+# 1.0; different sections of the demo songs at most about 0.6.
+_SAME_LABEL_SIMILARITY = 0.7
 # Without detected downbeats (the librosa fallback), a bar is this many
 # beats.
 _FALLBACK_BEATS_PER_BAR = 4
@@ -54,6 +60,10 @@ _CHROMA_WEIGHT = 1.0
 _TIMBRE_WEIGHT = 1.0
 _LOUDNESS_WEIGHT = 0.5
 _N_MFCC = 13
+# Squared feature distance that scores exp(-1) similarity. Distances are
+# in units of single-bar spread, and context-averaged bars of one section
+# sit well under a quarter of that apart.
+_SIMILARITY_SCALE = 0.5
 
 
 def bar_grid(
@@ -97,13 +107,43 @@ def _bar_means(features: np.ndarray, frames: np.ndarray) -> np.ndarray:
     return np.asarray(rows, dtype=np.float64)
 
 
-def _standardise(block: np.ndarray) -> np.ndarray:
-    """Z-score each column across bars, then scale rows to unit length."""
-    centred = block - block.mean(axis=0, keepdims=True)
-    std = centred.std(axis=0, keepdims=True)
-    centred = centred / np.where(std < 1e-9, 1.0, std)
-    norms = np.linalg.norm(centred, axis=1, keepdims=True)
-    return centred / np.where(norms < 1e-9, 1.0, norms)
+def _smooth_bars(block: np.ndarray, width: int = _CONTEXT_BARS) -> np.ndarray:
+    """Average each bar with its neighbours over a centred *width*-bar span.
+
+    A section usually cycles through a chord progression a bar or two per
+    chord, so single bars of one section differ as much as bars of two.
+    Averaged over a progression's length, the section's bars look alike,
+    and the window being centred keeps a change where it happens.
+    """
+    n = block.shape[0]
+    if n == 0 or width <= 1:
+        return block
+    before = width // 2
+    after = width - before
+    padded = np.concatenate([
+        np.repeat(block[:1], before, axis=0), block,
+        np.repeat(block[-1:], after - 1, axis=0),
+    ])
+    sums = np.cumsum(np.vstack([np.zeros((1, block.shape[1])), padded]), axis=0)
+    return (sums[width:width + n] - sums[:n]) / width
+
+
+def _context_features(raw: np.ndarray, weight: float) -> np.ndarray:
+    """Smooth per-bar features and scale them by the bar-to-bar spread.
+
+    Each column is centred and divided by its spread across *single*
+    bars, then by the square root of the column count, so a group's
+    squared distances average over its columns and *weight* sets its
+    share. Measured against single bars, a section's averaged features
+    move only when the music really changes: a song that repeats one
+    progression throughout stays near zero instead of having its noise
+    blown up to full scale.
+    """
+    smoothed = _smooth_bars(raw)
+    centred = smoothed - smoothed.mean(axis=0, keepdims=True)
+    spread = raw.std(axis=0, keepdims=True)
+    centred = centred / np.where(spread < 1e-9, 1.0, spread)
+    return centred * np.sqrt(weight / raw.shape[1])
 
 
 def bar_features(
@@ -113,7 +153,11 @@ def bar_features(
     chroma: np.ndarray | None = None,
     hop_length: int = 4096,
 ) -> np.ndarray:
-    """One row per bar: harmony, timbre, and loudness, standardised.
+    """One row per bar: harmony, timbre, and loudness in context.
+
+    Each bar is averaged with its neighbours (``_CONTEXT_BARS``) and
+    scaled by how much single bars vary, so distances between rows are in
+    units of ordinary bar-to-bar variation (see ``_context_features``).
 
     *chroma* is the ``(12, n_frames)`` chroma at *hop_length* that chord
     detection already computed; it is computed here when not given.
@@ -134,25 +178,31 @@ def bar_features(
     frames = librosa.time_to_frames(bars, sr=sr, hop_length=hop_length)
     frames = np.clip(frames, 0, n_frames)
 
-    harmony = _standardise(_bar_means(chroma[:, :n_frames], frames))
-    # The first coefficient is overall level, which loudness covers.
-    timbre = _standardise(_bar_means(mfcc[1:, :n_frames], frames))
-    level = _bar_means(loudness[:, :n_frames], frames)
-    level = level - level.mean()
-    spread = float(level.std())
-    level = level / spread if spread > 1e-9 else level
+    total = _CHROMA_WEIGHT + _TIMBRE_WEIGHT + _LOUDNESS_WEIGHT
     return np.hstack([
-        _CHROMA_WEIGHT * harmony,
-        _TIMBRE_WEIGHT * timbre,
-        _LOUDNESS_WEIGHT * np.clip(level, -2.0, 2.0) / 2.0,
+        _context_features(
+            _bar_means(chroma[:, :n_frames], frames), _CHROMA_WEIGHT / total,
+        ),
+        # The first coefficient is overall level, which loudness covers.
+        _context_features(
+            _bar_means(mfcc[1:, :n_frames], frames), _TIMBRE_WEIGHT / total,
+        ),
+        _context_features(
+            _bar_means(loudness[:, :n_frames], frames),
+            _LOUDNESS_WEIGHT / total,
+        ),
     ])
 
 
 def self_similarity(features: np.ndarray) -> np.ndarray:
-    """Cosine similarity between every pair of bars."""
-    norms = np.linalg.norm(features, axis=1, keepdims=True)
-    unit = features / np.where(norms < 1e-9, 1.0, norms)
-    return unit @ unit.T
+    """Gaussian similarity between every pair of bars, 1 for identical.
+
+    A squared distance of ``_SIMILARITY_SCALE`` in ``bar_features``
+    units scores ``exp(-1)``.
+    """
+    sq = np.sum(features ** 2, axis=1)
+    dist = np.maximum(sq[:, None] + sq[None, :] - 2 * features @ features.T, 0)
+    return np.exp(-dist / _SIMILARITY_SCALE)
 
 
 def _checkerboard(half: int) -> np.ndarray:
@@ -168,8 +218,9 @@ def novelty(ssm: np.ndarray, half: int = _KERNEL_BARS) -> np.ndarray:
     """Foote novelty at each bar line: high where the music changes.
 
     Entry ``i`` scores the boundary between bar ``i - 1`` and bar ``i``,
-    scaled so two uniform halves with opposite features score 1. The
-    matrix is zero-padded, so scores near the ends see half a kernel.
+    scaled so two uniform halves with nothing in common score 1 and no
+    change scores 0. The matrix is zero-padded, so scores near the ends
+    see half a kernel.
     """
     n = ssm.shape[0]
     kernel = _checkerboard(half)
@@ -179,7 +230,7 @@ def novelty(ssm: np.ndarray, half: int = _KERNEL_BARS) -> np.ndarray:
     for i in range(n + 1):
         window = padded[i:i + 2 * half, i:i + 2 * half]
         scores[i] = float(np.sum(window * kernel))
-    return scores / float(np.abs(kernel).sum())
+    return 2.0 * scores / float(np.abs(kernel).sum())
 
 
 def pick_boundaries(
@@ -227,13 +278,12 @@ def label_segments(
     ``_SAME_LABEL_SIMILARITY``, or the next new letter.
     """
     means = [features[s:e].mean(axis=0) for s, e in zip(starts, ends)]
-    means = [m / max(float(np.linalg.norm(m)), 1e-9) for m in means]
     representatives: list[np.ndarray] = []
     labels: list[str] = []
     for mean in means:
         best, best_sim = None, _SAME_LABEL_SIMILARITY
         for k, rep in enumerate(representatives):
-            sim = float(mean @ rep)
+            sim = float(self_similarity(np.vstack([mean, rep]))[0, 1])
             if sim >= best_sim:
                 best, best_sim = k, sim
         if best is None:

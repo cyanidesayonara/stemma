@@ -130,8 +130,10 @@ stemma/
 
 ### `song_sections.py` — Experimental Song Sections
 - numpy and librosa only. Per-bar chroma (shared with chord detection),
-  MFCC timbre, and loudness are standardised per song; Foote checkerboard
-  novelty on the bar self-similarity matrix marks changes, kept at least
+  MFCC timbre, and loudness are averaged over four bars around each bar
+  (so a section cycling through its progression reads as one steady
+  thing) and scaled by single-bar spread; Foote checkerboard novelty on
+  the bars' Gaussian self-similarity matrix marks changes, kept at least
   four bars apart and above an absolute floor, so a song that never
   changes gets no sections rather than arbitrary ones
 - Boundaries are detected downbeats (every fourth beat when there are

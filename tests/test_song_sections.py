@@ -107,15 +107,19 @@ class TestNovelty:
         assert len(scores) == 17
         assert int(np.argmax(scores)) == 8
 
-    def test_opposite_halves_score_one(self):
+    def test_halves_with_nothing_in_common_score_one(self):
         features = np.vstack([
-            np.tile([1.0, 0.0], (8, 1)), np.tile([-1.0, 0.0], (8, 1)),
+            np.tile([10.0, 0.0], (8, 1)), np.tile([-10.0, 0.0], (8, 1)),
         ])
         assert novelty(self_similarity(features))[8] == pytest.approx(1.0)
 
+    def test_no_change_scores_zero(self):
+        features = np.tile([1.0, 2.0], (16, 1))
+        assert novelty(self_similarity(features))[8] == pytest.approx(0.0)
+
     def test_weak_peaks_are_not_boundaries(self):
         scores = np.full(33, 0.05)
-        scores[16] = 0.15  # stands out, but under the absolute floor
+        scores[16] = 0.25  # stands out, but under the absolute floor
         assert pick_boundaries(scores) == []
 
     def test_boundaries_keep_their_distance(self):
@@ -167,6 +171,20 @@ class TestDetectSections:
         sections, _ = abab
         for (_, end, _), (start, _, _) in zip(sections, sections[1:]):
             assert end == start
+
+    def test_sections_that_cycle_through_chords_each_bar(self):
+        """Verse and chorus each change chord every bar; single bars of
+        one section then differ as much as bars of two (render fixture:
+        eight bars of verse, eight of chorus, four of verse, at 100 BPM)."""
+        from scripts.render_ui_review import SAMPLE_RATE, synth_stems
+
+        stems = synth_stems(4)
+        mono = sum(s.mean(axis=1) for s in stems.values()).astype(np.float32)
+        downbeats = [i * 2.4 for i in range(20)]
+        sections = detect_sections(mono, SAMPLE_RATE, [], downbeats)
+        assert [(round(s, 1), label) for s, _, label in sections] == [
+            (0.0, "A"), (19.2, "B"), (38.4, "A"),
+        ]
 
     def test_a_song_that_never_changes_has_none(self):
         audio, beats, downbeats = _uniform_loop()
