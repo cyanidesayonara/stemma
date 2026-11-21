@@ -42,7 +42,8 @@ CLIP_SECONDS = 40.0
 PEAKS = 480          # waveform overview points per stem
 EDGE_FADE = 0.02     # seconds faded at each end of a clip
 
-# Three songs in six stems, then three in four. ccMixter tracks credit the
+# Two songs in six stems, then four in four. ccMixter tracks are credited
+# with the attribution name each page sets (handle in brackets) and the
 # singer whose a cappella they build on, as the licence asks.
 SONGS = [
     {
@@ -58,23 +59,11 @@ SONGS = [
         "start": 179.82,
     },
     {
-        "id": "free-music-and-free-beer",
-        "folder": "admiralbob77-free-music-and-free-beer",
-        "title": "Free Music and Free Beer",
-        "artist": "admiralbob77",
-        "credit_as": "admiralbob77 feat. SackJo22",
-        "genre": "Blues",
-        "licence": "CC BY 3.0",
-        "licence_url": "https://creativecommons.org/licenses/by/3.0/",
-        "source": "https://ccmixter.org/files/admiralbob77/38104",
-        "start": 34.0,
-    },
-    {
         "id": "blue-part-ii",
         "folder": "jimmy233-blue-part-ii",
         "title": "Blue Part II",
-        "artist": "jimmy233",
-        "credit_as": "jimmy233 feat. Adisa McKenzie",
+        "artist": "JCrews",
+        "credit_as": "JCrews (jimmy233) feat. Adisa McKenzie",
         "genre": "Soul",
         "licence": "CC BY 3.0",
         "licence_url": "https://creativecommons.org/licenses/by/3.0/",
@@ -82,11 +71,23 @@ SONGS = [
         "start": 192.0,
     },
     {
+        "id": "free-music-and-free-beer",
+        "folder": "admiralbob77-free-music-and-free-beer-4",
+        "title": "Free Music and Free Beer",
+        "artist": "Admiral Bob",
+        "credit_as": "Admiral Bob (admiralbob77) feat. SackJo22",
+        "genre": "Blues",
+        "licence": "CC BY 3.0",
+        "licence_url": "https://creativecommons.org/licenses/by/3.0/",
+        "source": "https://ccmixter.org/files/admiralbob77/38104",
+        "start": None,
+    },
+    {
         "id": "girls-like-you",
         "folder": "jeffspeed68-girls-like-you",
         "title": "Girls Like You",
-        "artist": "JeffSpeed68",
-        "credit_as": "JeffSpeed68 feat. Thespinwires",
+        "artist": "Stefan Kartenberg",
+        "credit_as": "Stefan Kartenberg (JeffSpeed68) feat. Thespinwires",
         "genre": "Garage rock",
         "licence": "CC BY 3.0",
         "licence_url": "https://creativecommons.org/licenses/by/3.0/",
@@ -109,7 +110,7 @@ SONGS = [
         "folder": "alexberoza-where-you-are-now",
         "title": "Where You Are Now",
         "artist": "AlexBeroza",
-        "credit_as": "AlexBeroza feat. Ascension",
+        "credit_as": "AlexBeroza feat. WolfFly",
         "genre": "Hard rock",
         "licence": "CC BY 3.0",
         "licence_url": "https://creativecommons.org/licenses/by/3.0/",
@@ -128,9 +129,11 @@ def beat_model() -> str | None:
 def load_stems(folder: Path) -> tuple[dict[str, np.ndarray], int]:
     stems = {}
     rate = 0
-    for name in STEMS:
-        if not (folder / f"{name}.wav").is_file():
-            continue
+    present = [n for n in STEMS if (folder / f"{n}.wav").is_file()]
+    if present not in (list(STEMS[:4]), list(STEMS)):
+        raise SystemExit(f"{folder}: expected the 4 or 6 stems the app "
+                         f"writes, found {present or 'none'}")
+    for name in present:
         data, rate = sf.read(folder / f"{name}.wav", dtype="float32",
                              always_2d=True)
         stems[name] = data[:, :2] if data.shape[1] >= 2 else \

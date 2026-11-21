@@ -294,6 +294,17 @@ def test_demo_songs_have_their_stems_and_overview():
             assert all(0 <= p <= 99 for p in peaks)
 
 
+def test_every_demo_lane_has_something_playing():
+    # a stem that stays silent in the clip draws an empty lane, which
+    # undersells the separation the demo is there to show
+    for song in _songs():
+        for name, peaks in song["peaks"].items():
+            assert max(peaks) >= 20, f"{song['id']}: {name} is near silent"
+            busy = sum(1 for p in peaks if p >= 8) / len(peaks)
+            # drums are short hits, so a busy share counts bins, not seconds
+            assert busy >= 0.15, f"{song['id']}: {name} plays too little"
+
+
 def test_demo_song_timings_fit_the_clip():
     for song in _songs():
         duration = song["duration"]
