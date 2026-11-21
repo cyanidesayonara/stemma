@@ -477,8 +477,18 @@ def test_shift_l_loops_the_section_playing(app):
     from PySide6.QtGui import QKeySequence, QShortcut
 
     window = _main_window()
-    keys = [s.key() for s in window.findChildren(QShortcut)]
-    assert QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_L) in keys
+    player = window._player
+    player.sections = SECTIONS
+    player.current_seconds = 40.0  # inside the third section, 34-50 s
+    shortcut, = [
+        s for s in window.findChildren(QShortcut)
+        if s.key() == QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_L)
+    ]
+
+    shortcut.activated.emit()
+
+    player.set_loop_a.assert_called_with(34.0)
+    player.set_loop_b.assert_called_with(50.0)
     listed = [
         key for column in window._SHORTCUT_COLUMNS
         for _, rows in column for key, _ in rows

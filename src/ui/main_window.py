@@ -1280,7 +1280,8 @@ class MainWindow(QMainWindow):
                         self._player_controls.restore_chord_sequence(chords)
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
-                self._restore_sections(prefix)
+            # Sections come back with the song's stems, in
+            # _restore_song_detection, which every load runs.
 
     def _is_current_song_generation(
         self,
