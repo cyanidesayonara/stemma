@@ -1,5 +1,6 @@
 """Tests for Store listing-as-code helpers."""
 
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -13,6 +14,7 @@ from src.store_listing import (
     DEFAULT_SKELETON,
     DEFAULT_VERSION_PY,
     MAX_WHATS_NEW_LENGTH,
+    REPO_ROOT,
     ListingData,
     StoreIdentity,
     ValidationError,
@@ -561,3 +563,57 @@ def test_validate_listing_needs_five_screenshots(tmp_path: Path) -> None:
     with pytest.raises(ValidationError) as exc:
         validate_listing(_data(), version="2.6.0", screenshots_dir=shots)
     assert any("need >= 5 screenshots" in err for err in exc.value.errors)
+
+
+def test_canonical_docs_agree_on_latest_stable_release_and_versions() -> None:
+    app_version = read_app_version(DEFAULT_VERSION_PY)
+    data = load_listing(DEFAULT_LISTING_YAML)
+    assert data.listing_version == app_version
+
+    manifest = (REPO_ROOT / "msix" / "AppxManifest.xml").read_text(encoding="utf-8")
+    identity_match = re.search(
+        r'<Identity\b[^>]*\bVersion="(\d+\.\d+\.\d+\.\d+)"',
+        manifest,
+    )
+    assert identity_match is not None
+    assert identity_match.group(1).startswith(f"{app_version}.")
+
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    project = (REPO_ROOT / "PROJECT.md").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    roadmap = (REPO_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    readme_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", readme)
+    project_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", project)
+    agents_ver = re.search(r"Latest stable:\s+\*\*v(\d+\.\d+\.\d+)\*\*", agents)
+    roadmap_ver = re.search(r"Latest stable release:\s+\*\*v(\d+\.\d+\.\d+)\*\*", roadmap)
+    changelog_ver = re.search(r"^##\s+\[v(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+
+    versions = {
+        "README.md": readme_ver.group(1) if readme_ver else None,
+        "PROJECT.md": project_ver.group(1) if project_ver else None,
+        "AGENTS.md": agents_ver.group(1) if agents_ver else None,
+        "docs/ROADMAP.md": roadmap_ver.group(1) if roadmap_ver else None,
+        "CHANGELOG.md": changelog_ver.group(1) if changelog_ver else None,
+    }
+    assert all(v is not None for v in versions.values()), versions
+    assert len(set(versions.values())) == 1, versions
+
+    latest_stable = next(iter(versions.values()))
+    major_minor = ".".join(latest_stable.split(".")[:2])
+    section_match = re.search(
+        rf"^##\s+v{re.escape(major_minor)}\b[^\n]*\n(.*?)(?=^##\s+|\Z)",
+        roadmap,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert section_match is not None
+    section_heading = roadmap[section_match.start():section_match.start() + 120].splitlines()[0]
+    assert "(shipped)" in section_heading
+    section_body = section_match.group(1).lower()
+    assert "on main" not in section_body
+    assert "pending acceptance" not in section_body
+
+    assert "3.12" in project
+    assert re.search(r"CI/release|CI and releases", project)
+

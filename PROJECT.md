@@ -167,7 +167,7 @@ stemma/
 - Metronome and count-in settings (BPM, volume, beats, loop-repeat count-in)
 - Recording: full-duplex `sd.Stream` captures input at the playback frame position; position-indexed buffer auto-handles loop wraps; saves as `recording_takeN.wav` with optional latency offset via `np.roll`; `recording_saved` signal
 - Tracks playback position for UI sync
-- PortAudioError on open/start: stream cleanup and **`playback_failed`** signal (user-facing message for UI dialogs)
+- PortAudioError on open/start and mid-playback stream loss (`finished_callback` or inactive stream): stream cleanup, pause, and **`playback_failed`** signal (user-facing message for UI dialogs)
 
 ### `library.py` — Song Library
 - JSON song index: `{id, title, artist, stems_path, model_used, date_added}`

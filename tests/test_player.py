@@ -1,5 +1,6 @@
 """Tests for the MultiTrackPlayer."""
 
+import logging
 import os
 from unittest.mock import patch
 
@@ -7,8 +8,14 @@ import numpy as np
 import pytest
 import sounddevice as sd
 import soundfile as sf
+from PySide6.QtWidgets import QApplication
 
 from src.player import MultiTrackPlayer, next_take_number
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture
@@ -1284,3 +1291,169 @@ class TestUnload:
         player = MultiTrackPlayer()
         player.unload()
         assert not player.has_stems
+
+
+class TestOutputDeviceLoss:
+    """Mid-playback output device disconnection pauses and reports failure."""
+
+    @pytest.fixture(autouse=True)
+    def _ensure_qt_app(self, app):
+        return app
+
+    def test_output_device_disconnect_via_finished_callback_pauses_and_emits_playback_failed(
+        self, mock_stems,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        states: list[bool] = []
+        finished: list[bool] = []
+        failed: list[str] = []
+        player.state_changed.connect(states.append)
+        player.play_finished.connect(lambda: finished.append(True))
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            player.play()
+            finished_callback = mock_out.call_args.kwargs["finished_callback"]
+            assert callable(finished_callback)
+
+            finished_callback()
+            player._emit_position()
+
+        assert player.is_playing is False
+        assert False in states
+        assert finished == []
+        assert failed == ["Audio device disconnected."]
+
+    def test_output_device_disconnect_via_inactive_stream_pauses_and_emits_playback_failed(
+        self, mock_stems,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        finished: list[bool] = []
+        failed: list[str] = []
+        player.play_finished.connect(lambda: finished.append(True))
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            player.play()
+            mock_stream.active = False
+            player._emit_position()
+
+        assert player.is_playing is False
+        assert finished == []
+        assert failed == ["Audio device disconnected."]
+
+    def test_output_device_disconnect_during_recording_preserves_unsaved_take(
+        self, mock_stems, tmp_path,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        player.set_recording_song_dir(str(tmp_path))
+        player.arm_recording(True)
+        finished: list[bool] = []
+        failed: list[str] = []
+        player.play_finished.connect(lambda: finished.append(True))
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.Stream") as mock_stream_cls, \
+             patch("src.player.sd.default") as mock_default, \
+             patch("src.player.sd.query_devices") as mock_qd:
+            mock_default.device = (0, 1)
+            mock_qd.return_value = {"max_input_channels": 2}
+            mock_stream = mock_stream_cls.return_value
+            mock_stream.active = True
+            player.play()
+            finished_callback = mock_stream_cls.call_args.kwargs["finished_callback"]
+            assert callable(finished_callback)
+
+            indata = np.ones((512, 2), dtype=np.float32) * 0.25
+            outdata = np.zeros((512, 2), dtype=np.float32)
+            player._full_duplex_callback(indata, outdata, 512, {}, sd.CallbackFlags())
+            assert player.is_recording is True
+            assert player._recording_frames_captured == 512
+
+            finished_callback()
+            player._emit_position()
+
+        assert player.is_playing is False
+        assert player.is_recording is False
+        assert player.has_unsaved_take is True
+        assert finished == []
+        assert failed == ["Audio device disconnected."]
+
+    def test_normal_eof_including_exact_block_boundary_emits_play_finished_not_disconnect(
+        self,
+    ):
+        player = MultiTrackPlayer()
+        player.apply_loaded_stems(
+            {"vocals": np.ones((512, 2), dtype=np.float32) * 0.1},
+            44100,
+        )
+        finished: list[bool] = []
+        failed: list[str] = []
+        player.play_finished.connect(lambda: finished.append(True))
+        player.playback_failed.connect(failed.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            player.play()
+            finished_callback = mock_out.call_args.kwargs["finished_callback"]
+
+            outdata = np.zeros((512, 2), dtype=np.float32)
+            player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+            assert player._current_frame == 512
+            with pytest.raises(sd.CallbackStop):
+                player._audio_callback(outdata, 512, {}, sd.CallbackFlags())
+
+            mock_stream.active = False
+            finished_callback()
+            player._emit_position()
+
+        assert player.is_playing is False
+        assert len(finished) == 1
+        assert failed == []
+
+    def test_pause_ignores_portaudio_error_from_disconnected_stream(self, mock_stems):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+        states: list[bool] = []
+        player.state_changed.connect(states.append)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            mock_stream.stop.side_effect = sd.PortAudioError("Device unavailable")
+            mock_stream.close.side_effect = sd.PortAudioError("Device unavailable")
+            player.play()
+            player.pause()
+
+        assert player.is_playing is False
+        assert player._stream is None
+        assert False in states
+
+    def test_callback_status_flags_logged_on_gui_timer_tick(
+        self, mock_stems, caplog,
+    ):
+        player = MultiTrackPlayer()
+        player.load_stems(mock_stems)
+
+        with patch("src.player.sd.OutputStream") as mock_out:
+            mock_stream = mock_out.return_value
+            mock_stream.active = True
+            player.play()
+            status = sd.CallbackFlags()
+            status.output_underflow = True
+            outdata = np.zeros((100, 2), dtype=np.float32)
+            with caplog.at_level(logging.DEBUG, logger="stemma"):
+                player._audio_callback(outdata, 100, {}, status)
+                player._emit_position()
+
+        assert "PortAudio callback status" in caplog.text
+        assert player._pending_status is None
+
