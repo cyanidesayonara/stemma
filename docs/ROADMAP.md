@@ -18,8 +18,8 @@ scope or date. Each upcoming version has a GitHub milestone.
 
 - [#131: practice cockpit interface](https://github.com/cyanidesayonara/stemma/issues/131)
   — the recomposition (stacked stem lanes, practice cards, song readout
-  strip, anchored transport) is on `main`, with follow-up fixes found by
-  rendering the window in PRs
+  strip, anchored transport), released in v3.0.0, with follow-up fixes
+  found by rendering the window in PRs
   [#153](https://github.com/cyanidesayonara/stemma/pull/153) (layout) and
   [#156](https://github.com/cyanidesayonara/stemma/pull/156) (mute/solo
   button feedback).
@@ -28,17 +28,18 @@ scope or date. Each upcoming version has a GitHub milestone.
   ([#146](https://github.com/cyanidesayonara/stemma/issues/146)),
   changelog, tag, and Store submission.
 
-## v3.1 -- library and setlists
+## v3.1 -- song structure and chord lane
+
+- [#133: song sections and scrolling chord lane](https://github.com/cyanidesayonara/stemma/issues/133)
+  builds section-aware loops and read-ahead chord presentation on the
+  existing beat/chord analysis. It comes before setlists: it reuses
+  detection stemma already ships and changes practice the most.
+
+## v3.2 -- library and setlists
 
 - [#132: library, setlists, and play queue](https://github.com/cyanidesayonara/stemma/issues/132)
   adds collection structure, practice state, queueing, and the required
   storage migration.
-
-## v3.2 -- song structure and chord lane
-
-- [#133: song sections and scrolling chord lane](https://github.com/cyanidesayonara/stemma/issues/133)
-  builds section-aware loops and read-ahead chord presentation on the
-  existing beat/chord analysis.
 
 ## Research and cross-release tracks
 
