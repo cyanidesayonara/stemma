@@ -150,9 +150,9 @@ class TestSongLibraryInit:
         with open(json_path, "w") as f:
             f.write("{not valid json")
 
-        SongLibrary(data_dir=library_dir)
-        bak = json_path + ".bak"
-        assert os.path.isfile(bak)
+        lib = SongLibrary(data_dir=library_dir)
+        bak = lib.recovery.backup_path
+        assert os.path.basename(bak).startswith("library.json.corrupt-")
         assert Path(bak).read_text(encoding="utf-8") == "{not valid json"
 
     def test_rebuilds_from_disk_when_index_corrupt(self, library_dir):
@@ -261,9 +261,7 @@ class TestSongLibraryInit:
         lib = SongLibrary(data_dir=library_dir)
 
         assert [s.title for s in lib.songs] == ["Kept"]
-        assert os.path.isfile(
-            os.path.join(library_dir, "library.json.bak")
-        )
+        assert os.path.isfile(lib.recovery.backup_path)
 
     @pytest.mark.parametrize("stems, model", [
         (("drums", "bass", "other", "vocals"), "htdemucs"),
@@ -295,7 +293,7 @@ class TestSongLibraryInit:
 
         lib = SongLibrary(data_dir=library_dir)
         assert lib.songs == []
-        assert os.path.isfile(json_path + ".bak")
+        assert os.path.isfile(lib.recovery.backup_path)
 
 
 class TestSongLibraryPathSafety:

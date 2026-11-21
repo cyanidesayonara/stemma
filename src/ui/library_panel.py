@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.library import Song, SongLibrary
+from src.import_messages import describe_error
+from src.library import LIBRARY_READ_ONLY_MESSAGE, Song, SongLibrary
 from src.ui.control_primitives import (
     COMPACT_BUTTON,
     add_disabled_pixmaps,
@@ -733,7 +734,7 @@ class LibraryPanel(QWidget):
             # guard covers programmatic setCurrentItem paths as well.
             if song_id and not self.is_song_separating(song_id):
                 self.song_selected.emit(song_id)
-                self._remove_btn.setEnabled(True)
+                self._remove_btn.setEnabled(bool(self._library.writable))
         else:
             self._remove_btn.setEnabled(False)
 
@@ -756,7 +757,9 @@ class LibraryPanel(QWidget):
         # not whatever was previously selected.
         self._list.setCurrentItem(item)
         menu = QMenu(self)
-        menu.addAction("Edit...").triggered.connect(self._on_edit_song)
+        edit = menu.addAction("Edit...")
+        edit.setEnabled(bool(self._library.writable))
+        edit.triggered.connect(self._on_edit_song)
         menu.exec(self._list.mapToGlobal(pos))
 
     def _on_edit_song(self) -> None:
@@ -770,16 +773,38 @@ class LibraryPanel(QWidget):
         song = self._library.get_song(song_id)
         if song is None:
             return
+        if not self._library_writable("Edit Song"):
+            return
         dlg = EditSongDialog(song, parent=self)
         if dlg.exec():
-            self._library.update_song(song_id, title=dlg.title, artist=dlg.artist)
+            try:
+                self._library.update_song(
+                    song_id, title=dlg.title, artist=dlg.artist,
+                )
+            except OSError as exc:
+                QMessageBox.warning(
+                    self, "Edit Song",
+                    describe_error(exc, "Song edit failed"),
+                )
+                return
             self.refresh()
+
+    def _library_writable(self, title: str) -> bool:
+        """Say why nothing can change if the library is read-only."""
+        if self._library.writable:
+            return True
+        QMessageBox.warning(self, title, LIBRARY_READ_ONLY_MESSAGE)
+        return False
 
     def _on_remove_clicked(self) -> None:
         current = self._list.currentItem()
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
             if song_id:
+                # Checked first: the removal request below closes the
+                # song in the player.
+                if not self._library_writable("Remove Song"):
+                    return
                 reply = QMessageBox.question(
                     self,
                     "Remove Song",
@@ -791,7 +816,15 @@ class LibraryPanel(QWidget):
                     # MainWindow must stop/drain readers before remove_song
                     # deletes the directory they may still be reading.
                     self.song_removal_requested.emit(song_id)
-                    self._library.remove_song(song_id)
+                    try:
+                        self._library.remove_song(song_id)
+                    except (OSError, ValueError) as exc:
+                        QMessageBox.warning(
+                            self, "Remove Song",
+                            describe_error(exc, "Song removal failed"),
+                        )
+                        self.refresh()
+                        return
                     self.refresh()
                     # Let the main window unload the player if the
                     # removed song is the one currently loaded --

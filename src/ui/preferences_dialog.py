@@ -43,6 +43,16 @@ from src.import_messages import describe_error
 from src.version import __version__
 
 
+def data_dir_change_message(old_dir: str) -> str:
+    """Text shown after the data folder setting changes."""
+    return (
+        "Restart stemma for the new data folder to take effect.\n\n"
+        "Your songs are not moved automatically. To keep your library, "
+        "close stemma and copy everything in the old folder into the new "
+        f"one before opening it again:\n{old_dir}"
+    )
+
+
 def _combo_int_data(combo: QComboBox, default: int = -1) -> int:
     """Return ``currentData()`` as int, or *default* if missing or invalid."""
     d = combo.currentData()
@@ -314,7 +324,7 @@ class PreferencesDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Preferences",
-                "Restart stemma for the new data directory to take effect.",
+                data_dir_change_message(old_dir or platform_user_data_dir()),
             )
 
         self._settings.setValue(

@@ -55,6 +55,9 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - Loop Trainer: with a loop set, speed steps up one preset on each repeat,
   from a chosen start speed up to 1.0x.
 - Automatic tempo, key, beat, and live chord detection.
+- A chord lane under the stem waveforms: the whole song's chords on the
+  waveform's timeline, plus the next few bars large enough to read ahead
+  while playing. Click a chord to jump to it; View > Chord Lane hides it.
 - Metronome with tap tempo, beat sync to the track, and a nudge offset;
   optional count-in before playback and before each loop repeat.
 

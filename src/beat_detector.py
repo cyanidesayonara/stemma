@@ -735,6 +735,14 @@ class DetectionWorker(QThread):
         self._start_sec = start_sec
         self._end_sec = end_sec
 
+    @property
+    def region(self) -> tuple[float, float] | None:
+        """The (start_s, end_s) A-B region analysed, or None for the song."""
+        start, end = self._start_sec, self._end_sec
+        if start is not None and end is not None and end > start:
+            return float(start), float(end)
+        return None
+
     def run(self) -> None:
         try:
             self.progress.emit("Detecting...")

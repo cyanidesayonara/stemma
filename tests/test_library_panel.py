@@ -137,3 +137,78 @@ def test_search_box_has_an_accessible_name(app):
     """A placeholder is not a name for screen readers."""
     panel = LibraryPanel(_make_library([]))
     assert panel._search_edit.accessibleName() == "Search songs"
+
+
+class TestLibraryWriteFailures:
+    """A read-only or failing library is reported, not silently ignored."""
+
+    def _panel(self, monkeypatch, writable=True):
+        from src.ui import library_panel
+
+        box = MagicMock()
+        box.question.return_value = box.StandardButton.Yes
+        monkeypatch.setattr(library_panel, "QMessageBox", box)
+        library = _make_library(_make_songs())
+        library.writable = writable
+        panel = LibraryPanel(library)
+        panel._list.setCurrentRow(0)
+        return panel, library, box
+
+    def _accepting_dialog(self, monkeypatch):
+        from src.ui import library_panel
+
+        dialog = MagicMock()
+        dialog.return_value.exec.return_value = True
+        dialog.return_value.title = "New"
+        dialog.return_value.artist = "Band"
+        monkeypatch.setattr(library_panel, "EditSongDialog", dialog)
+        return dialog
+
+    def test_failed_edit_shows_a_warning(self, app, monkeypatch):
+        from src.library import LibraryReadOnlyError
+
+        panel, library, box = self._panel(monkeypatch)
+        self._accepting_dialog(monkeypatch)
+        library.update_song.side_effect = LibraryReadOnlyError("read only")
+
+        panel._on_edit_song()
+
+        box.warning.assert_called_once()
+
+    def test_failed_remove_shows_a_warning(self, app, monkeypatch):
+        panel, library, box = self._panel(monkeypatch)
+        library.remove_song.side_effect = PermissionError(32, "in use")
+        removed = MagicMock()
+        panel.song_removed.connect(removed)
+
+        panel._on_remove_clicked()
+
+        box.warning.assert_called_once()
+        removed.assert_not_called()
+
+    def test_read_only_remove_warns_before_closing_the_song(
+        self, app, monkeypatch,
+    ):
+        panel, library, box = self._panel(monkeypatch, writable=False)
+        requested = MagicMock()
+        panel.song_removal_requested.connect(requested)
+
+        panel._on_remove_clicked()
+
+        requested.assert_not_called()
+        library.remove_song.assert_not_called()
+        box.warning.assert_called_once()
+
+    def test_read_only_edit_opens_no_dialog(self, app, monkeypatch):
+        panel, library, box = self._panel(monkeypatch, writable=False)
+        dialog = self._accepting_dialog(monkeypatch)
+
+        panel._on_edit_song()
+
+        dialog.assert_not_called()
+        box.warning.assert_called_once()
+
+    def test_read_only_library_disables_remove(self, app, monkeypatch):
+        panel, _library, _box = self._panel(monkeypatch, writable=False)
+
+        assert not panel._remove_btn.isEnabled()
