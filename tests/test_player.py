@@ -1082,8 +1082,9 @@ class TestChordSequence:
 class TestSections:
     """Song sections are kept with the song's other analysis (#133)."""
 
-    def test_default_empty(self):
-        assert MultiTrackPlayer().sections == []
+    def test_default_is_not_analysed(self):
+        """None until analysed; [] means analysed and none found."""
+        assert MultiTrackPlayer().sections is None
 
     def test_set_sections(self, mock_stems):
         player = MultiTrackPlayer()
@@ -1096,10 +1097,12 @@ class TestSections:
         player.load_stems(mock_stems)
         player.set_sections([(0.0, 2.0, "A")])
         player.load_stems(mock_stems)
-        assert player.sections == []
+        assert player.sections is None
         player.set_sections([(0.0, 2.0, "A")])
         player.unload()
-        assert player.sections == []
+        assert player.sections is None
+        player.set_sections(None)
+        assert player.sections is None
 
     def test_default_master_volume_is_unity(self):
         player = MultiTrackPlayer()

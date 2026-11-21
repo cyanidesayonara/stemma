@@ -417,6 +417,76 @@ def test_manual_loop_change_updates_the_ruler_mark(controls):
     assert controls._section_ruler.looped_index() is None
 
 
+@pytest.fixture
+def detecting_controls(controls):
+    """Controls with the real start_detection and a recording runner."""
+    from src.ui.player_controls import PlayerControls
+
+    controls.start_detection = PlayerControls.start_detection.__get__(
+        controls,
+    )
+    controls._player.stems = {"vocals": object()}
+    controls._player.sections = None  # never analysed
+    controls._model_manager = None
+    controls._run_detection = MagicMock()
+    controls._section_ruler.set_total_seconds(100.0)
+    return controls
+
+
+def _ran(controls):
+    return [
+        (c.args[0], c.args[1]) if c.args else (None, None)
+        for c in controls._run_detection.call_args_list
+    ]
+
+
+def test_a_loop_before_the_song_is_analysed_runs_the_song_first(
+    detecting_controls,
+):
+    """A loop set before whole-song analysis finished must not leave the
+    song without sections, beats, and chords (#246 review)."""
+    controls = detecting_controls
+    controls.start_detection(18.0, 34.0)
+    assert _ran(controls) == [(None, None)]
+    assert controls._section_ruler.placeholder_text() == PLACEHOLDER_DETECTING
+
+    _complete(controls, DetectionResult(sections=SECTIONS))
+
+    assert controls._player.sections == SECTIONS
+    # Then the loop, as asked.
+    assert _ran(controls)[-1] == (18.0, 34.0)
+
+
+def test_a_loop_while_the_song_is_analysed_waits_for_it(detecting_controls):
+    controls = detecting_controls
+    controls.start_detection()
+    worker = MagicMock()
+    worker.region = None
+    worker.isRunning.return_value = True
+    worker._detection_generation = controls._detection_generation
+    controls._detection_worker = worker
+    controls._run_detection.reset_mock()
+
+    controls.start_detection(18.0, 34.0)
+
+    # The song's run carries on instead of being superseded.
+    assert controls._run_detection.call_count == 0
+    assert controls._detection_worker is worker
+    assert controls._section_ruler.placeholder_text() == PLACEHOLDER_DETECTING
+    controls.sender = lambda: worker
+    controls._is_active_detection_sender = lambda: True
+    controls._on_detect_completed(DetectionResult())
+    assert controls._player.sections == []
+    assert _ran(controls)[-1] == (18.0, 34.0)
+
+
+def test_a_loop_after_the_song_is_analysed_runs_alone(detecting_controls):
+    controls = detecting_controls
+    controls._player.sections = []  # analysed, none found
+    controls.start_detection(18.0, 34.0)
+    assert _ran(controls) == [(18.0, 34.0)]
+
+
 def test_section_ruler_can_be_hidden(controls):
     controls.set_section_ruler_visible(False)
     assert controls.waveform_panel.section_ruler.isHidden()

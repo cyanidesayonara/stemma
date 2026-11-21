@@ -111,9 +111,13 @@ class SectionRulerWidget(QWidget):
         self._invalidate()
 
     def set_sections(self, sections) -> None:
-        """Show the song's sections as ``(start_s, end_s, label)``."""
+        """Show the song's sections as ``(start_s, end_s, label)``.
+
+        None (not analysed yet) shows no sections either; the detecting
+        state says when analysis is running.
+        """
         self._sections = sorted(
-            (float(s), float(e), str(label)) for s, e, label in sections
+            (float(s), float(e), str(label)) for s, e, label in sections or ()
         )
         self._failed = False
         self._update_accessible_description()

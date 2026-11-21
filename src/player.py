@@ -262,7 +262,7 @@ class MultiTrackPlayer(QObject):
         # Chord sequence: list of (onset_seconds, chord_label).
         self._chord_sequence: list[tuple[float, str]] = []
         self._chord_times: np.ndarray = np.array([], dtype=np.float64)
-        self._sections: list[tuple[float, float, str]] = []
+        self._sections: list[tuple[float, float, str]] | None = None
 
         # Count-in state.
         self._count_in_enabled: bool = False
@@ -438,12 +438,20 @@ class MultiTrackPlayer(QObject):
     # -- Song sections (experimental, #133) ---------------------------------
 
     @property
-    def sections(self) -> list[tuple[float, float, str]]:
-        """Detected sections: list of (start_s, end_s, label)."""
+    def sections(self) -> list[tuple[float, float, str]] | None:
+        """Detected sections: list of (start_s, end_s, label).
+
+        None until the whole song has been analysed; ``[]`` once it has
+        and no sections were found.
+        """
         return self._sections
 
     def set_sections(self, sections) -> None:
-        """Store detected sections, kept with the chords for the session."""
+        """Store detected sections (None: not analysed), kept with the
+        chords for the session."""
+        if sections is None:
+            self._sections = None
+            return
         self._sections = [(float(s), float(e), str(lab)) for s, e, lab in sections]
 
     # -- Beat-synced metronome API ------------------------------------------
@@ -795,7 +803,7 @@ class MultiTrackPlayer(QObject):
         self._beat_tempi = np.array([], dtype=np.float64)
         self._chord_sequence.clear()
         self._chord_times = np.array([], dtype=np.float64)
-        self._sections = []
+        self._sections = None
         self._loop_a_frame = None
         self._loop_b_frame = None
         self._looping = False

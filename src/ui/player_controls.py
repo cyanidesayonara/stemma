@@ -145,6 +145,9 @@ class PlayerControls(QWidget):
         # running, as (start_sec, end_sec, generation). Only one detection
         # runs at a time; requests in between are dropped (see _run_detection).
         self._queued_detection: tuple | None = None
+        # A loop detection asked for before the whole song was analysed;
+        # it runs once the whole-song analysis finishes (#246 review).
+        self._follow_up_region: tuple[float, float] | None = None
         self._model_manager = None  # set via set_model_manager()
         self._beat_model_path: str | None = None
         self._beat_model_downloader = None
@@ -975,7 +978,7 @@ class PlayerControls(QWidget):
 
     def loop_section_at(self, seconds: float) -> None:
         """Loop the section playing at *seconds*, if there is one."""
-        sections = self._player.sections
+        sections = self._player.sections or []
         index = section_index_at(sections, seconds)
         if index is not None:
             start, end, _ = sections[index]
@@ -1257,6 +1260,18 @@ class PlayerControls(QWidget):
         """
         if self._closing or not self._player.stems:
             return
+        is_region = start_sec is not None and end_sec is not None
+        if is_region and self._player.sections is None:
+            # The whole song has not been analysed yet (a fresh or stale
+            # song): a loop run must not supersede that analysis, or the
+            # song is left without sections, beats, and whole-song chords
+            # (#246 review). Finish the song, then run the loop.
+            self._follow_up_region = (float(start_sec), float(end_sec))
+            if self._whole_song_detection_pending():
+                return
+            start_sec = end_sec = None
+        elif not is_region:
+            self._follow_up_region = None
         self._detection_generation += 1
         generation = self._detection_generation
         self._pending_detect_args = None
@@ -1291,7 +1306,33 @@ class PlayerControls(QWidget):
         self._pending_detect_args = None
         self._pending_detect_generation = None
         self._queued_detection = None
+        self._follow_up_region = None
         self._detach_detection_worker()
+
+    def _whole_song_detection_pending(self) -> bool:
+        """True while the current request is a whole-song analysis: running,
+        queued behind a superseded worker, or waiting on the beat model."""
+        generation = self._detection_generation
+        worker = self._detection_worker
+        if (
+            worker is not None and worker.isRunning()
+            and getattr(worker, "region", None) is None
+            and getattr(worker, "_detection_generation", None) == generation
+        ):
+            return True
+        queued = self._queued_detection
+        if queued is not None and queued[2] == generation:
+            return queued[0] is None or queued[1] is None
+        if self._pending_detect_generation == generation:
+            args = self._pending_detect_args or (None, None)
+            return args[0] is None or args[1] is None
+        return False
+
+    def _run_follow_up_region(self) -> None:
+        """Run the loop detection that waited for the whole song, if any."""
+        region, self._follow_up_region = self._follow_up_region, None
+        if region is not None:
+            self.start_detection(*region)
 
     def _detection_running(self) -> bool:
         """True while any detection worker, current or superseded, runs."""
@@ -1610,6 +1651,8 @@ class PlayerControls(QWidget):
             self._section_ruler.set_sections(self._player.sections)
         self._chord_lane.set_detecting(False)
         self._section_ruler.set_detecting(False)
+        if region is None:
+            self._run_follow_up_region()
 
     def _detection_region(self) -> tuple[float, float] | None:
         """The A-B region the finished detection analysed, if any."""
@@ -1642,6 +1685,8 @@ class PlayerControls(QWidget):
         self._detected_bpm_raw = ""
         self._key_conf = ""
         self._bpm_conf = ""
+        if self._detection_region() is None:
+            self._run_follow_up_region()
 
     def _on_detect_finished(self) -> None:
         if self._is_active_detection_sender():

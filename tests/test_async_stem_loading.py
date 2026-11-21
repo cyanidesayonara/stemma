@@ -1009,6 +1009,9 @@ class TestDetectionGeneration:
         window._player._stems = {
             "vocals": np.zeros((64, 2), dtype=np.float32),
         }
+        # Analysed already, so the loop request runs as asked rather than
+        # behind a whole-song analysis.
+        window._player.set_sections([])
         controls.start_detection(3.0, 4.0)
         QApplication.processEvents()
 
@@ -1122,7 +1125,21 @@ class TestSavedDetection:
         self._save_grid(window, 5)
         window._restore_song_detection("a")
         assert window._player.beat_times == []
-        assert window._player.sections == []
+        assert window._player.sections is None
+
+    def test_unanalysed_song_is_not_saved_as_current(self, window):
+        """Sections never analysed (a superseded whole-song run) must not
+        be saved as "analysed, none found" (#246 review)."""
+        window._current_song_id = "a"
+        window._player.set_sections(None)
+        window._save_session()
+        assert int(window._settings.value("detection/a/det_ver", 0)) == 0
+
+        window._player.set_sections([])
+        window._save_session()
+        assert int(
+            window._settings.value("detection/a/det_ver", 0)
+        ) == DETECTION_VERSION
 
     def test_corrupt_sections_restore_none(self, window):
         self._save_grid(window, DETECTION_VERSION)

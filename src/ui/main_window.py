@@ -1064,10 +1064,17 @@ class MainWindow(QMainWindow):
                 f"{prefix}/chord_sequence",
                 json.dumps(self._player.chord_sequence),
             )
+            sections = self._player.sections
             self._settings.setValue(
-                f"{prefix}/sections", json.dumps(self._player.sections),
+                f"{prefix}/sections", json.dumps(sections or []),
             )
-            self._settings.setValue(f"{prefix}/det_ver", DETECTION_VERSION)
+            # Sections never analysed (a whole-song run that did not finish)
+            # are not "none found": mark the analysis stale so the next
+            # open runs it again instead of restoring a false empty ruler.
+            self._settings.setValue(
+                f"{prefix}/det_ver",
+                DETECTION_VERSION if sections is not None else 0,
+            )
         # Library playback mode.
         self._settings.setValue(
             "session/repeat_mode", self._library_panel.repeat_mode
