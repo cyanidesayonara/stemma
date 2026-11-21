@@ -8,6 +8,7 @@ from src.song_sections import (
     bar_grid,
     detect_sections,
     label_segments,
+    merge_repeats,
     novelty,
     parse_sections,
     pick_boundaries,
@@ -149,6 +150,17 @@ class TestLabels:
         assert label_segments(features, starts, ends) == [
             "A", "B", "A", "B", "C",
         ]
+
+
+def test_neighbours_with_one_letter_merge():
+    sections = [
+        (0.0, 8.0, "A"), (8.0, 16.0, "A"), (16.0, 24.0, "B"),
+        (24.0, 32.0, "A"),
+    ]
+    assert merge_repeats(sections) == [
+        (0.0, 16.0, "A"), (16.0, 24.0, "B"), (24.0, 32.0, "A"),
+    ]
+    assert merge_repeats([]) == []
 
 
 class TestDetectSections:

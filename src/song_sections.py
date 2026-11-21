@@ -305,7 +305,7 @@ def detect_sections(
 
     Boundaries are bar lines from the beat grid. Returns ``[]`` when the
     song is too short, has no beat grid, or never clearly changes (one
-    section would say nothing).
+    section would say nothing). Neighbours with one letter are joined.
     """
     duration = len(mono) / sr if sr else 0.0
     bars = bar_grid(beat_times, downbeat_times, duration)
@@ -319,10 +319,28 @@ def detect_sections(
     starts = [0] + boundaries
     ends = starts[1:] + [n_bars]
     labels = label_segments(features, starts, ends)
-    return [
+    sections = merge_repeats([
         (bars[s], bars[e], label)
         for s, e, label in zip(starts, ends, labels)
-    ]
+    ])
+    return sections if len(sections) > 1 else []
+
+
+def merge_repeats(
+    sections: list[tuple[float, float, str]],
+) -> list[tuple[float, float, str]]:
+    """Join neighbouring sections that got the same letter.
+
+    The boundary between them was a change too small to call a new
+    section; one longer section is the more useful loop.
+    """
+    merged: list[tuple[float, float, str]] = []
+    for start, end, label in sections:
+        if merged and merged[-1][2] == label:
+            merged[-1] = (merged[-1][0], end, label)
+        else:
+            merged.append((start, end, label))
+    return merged
 
 
 def section_index_at(
