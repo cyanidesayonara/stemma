@@ -7,6 +7,8 @@ stretch the mix as it plays; positions, loops, beats, and chords stay in
 song time. These tests drive the real callback the way PortAudio does.
 """
 
+import threading
+
 import numpy as np
 import pytest
 import sounddevice as sd
@@ -18,6 +20,7 @@ from src.player import (
     RECORDING_STEM_PREFIX,
     MultiTrackPlayer,
 )
+from src.stretch import StreamingStretcher
 
 SR = 44100
 BLOCK = 1024
@@ -44,6 +47,23 @@ def player(app):
     yield p
     p._is_playing = False
     p.shutdown()
+
+
+class _WatchedLock:
+    """A lock that reports whether it is held, to see what runs under it."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.held = False
+
+    def __enter__(self):
+        self._lock.acquire()
+        self.held = True
+        return self
+
+    def __exit__(self, *exc):
+        self.held = False
+        self._lock.release()
 
 
 def _run(player, blocks):
@@ -112,6 +132,19 @@ class TestKnobs:
         player.set_pitch(0)
         player.arm_recording(True)
         assert player.recording_armed
+
+    def test_nothing_is_built_after_shutdown(self, player):
+        """A debounced pitch change landing after shutdown built soxr
+        streams that outlived the interpreter (nanobind leak, #237)."""
+        player.set_speed(0.75)
+        player.shutdown()
+        assert not player.stretching
+        player.set_pitch(3)
+        player.set_speed(1.5)
+        player.set_sync_recording_pitch(True)
+        player.seek(2.0)
+        assert player._stretch_paths == []
+        assert player._fading_paths == []
 
     def test_loading_a_song_resets_both(self, player):
         player.set_speed(0.5)
@@ -373,6 +406,72 @@ class TestReviewFindings:
             stop.set()
             worker.join()
         assert lost == 0
+
+    def test_seek_primes_outside_the_callback_lock(self, player, monkeypatch):
+        """Priming a path takes ~4 ms; under the lock it blocked the audio
+        callback and a seek at a changed speed or pitch could click (#237)."""
+        player.add_recording_stem(
+            f"{RECORDING_STEM_PREFIX}1", _tone(6.0, 330.0),
+        )
+        player.set_speed(0.75)
+        player.set_pitch(3)
+        _run(player, 5)
+        lock = _WatchedLock()
+        player._stretch_lock = lock
+        held_while_filling = []
+        real_fill = StreamingStretcher.fill
+
+        def fill(stretcher, count, source):
+            held_while_filling.append(lock.held)
+            return real_fill(stretcher, count, source)
+
+        monkeypatch.setattr(StreamingStretcher, "fill", fill)
+        player.seek(3.0)
+        assert held_while_filling  # the new paths were primed
+        assert not any(held_while_filling)
+        assert player._current_frame == 3 * SR
+
+    def test_stretched_seek_sounds_like_starting_there(self, app):
+        """A seek's fresh paths match paths built at that frame."""
+        def make():
+            p = MultiTrackPlayer()
+            p.apply_loaded_stems({"vocals": _tone(6.0, 440.0)}, SR)
+            p.add_recording_stem(
+                f"{RECORDING_STEM_PREFIX}1", _tone(6.0, 330.0),
+            )
+            p._is_playing = True
+            return p
+
+        seeked, fresh = make(), make()
+        try:
+            seeked.set_speed(0.75)
+            seeked.set_pitch(2)
+            _run(seeked, 10)
+            seeked.seek(3.0)
+            # Takes keep their own, unshifted path after the seek.
+            assert [s.semitones for s, _ in seeked._stretch_paths] == [2, 0]
+            fresh.seek(3.0)
+            fresh.set_speed(0.75)
+            fresh.set_pitch(2)
+            np.testing.assert_allclose(
+                _run(seeked, 20), _run(fresh, 20), atol=1e-5,
+            )
+            assert seeked._current_frame == fresh._current_frame
+        finally:
+            for p in (seeked, fresh):
+                p._is_playing = False
+                p.shutdown()
+
+    def test_loop_wraps_after_a_stretched_seek(self, player):
+        player.set_speed(0.5)
+        player.set_pitch(-2)
+        player.set_loop_a(1.0)
+        player.set_loop_b(2.0)
+        player.set_looping(True)
+        player.seek(1.5)
+        _run(player, int(1.5 * SR / BLOCK))  # 0.5 s of song at 0.5x is 1 s
+        assert player._loop_wrap_count == 1
+        assert SR <= player._current_frame < 2 * SR
 
     def test_the_last_moments_of_the_song_are_heard(self, player):
         player.set_speed(2.0)

@@ -237,6 +237,8 @@ class MultiTrackPlayer(QObject):
         # Held by the audio callback while it stretches and by the GUI
         # thread while it rebuilds or seeks the stretch paths.
         self._stretch_lock = threading.Lock()
+        # Set by shutdown(): no stretch paths are built after it.
+        self._shut_down = False
 
         # Metronome state.
         self._metronome_enabled: bool = False
@@ -301,7 +303,9 @@ class MultiTrackPlayer(QObject):
         """
         if self._timer.isActive():
             self._timer.stop()
-        # Release the soxr streams before interpreter exit.
+        # Release the soxr streams before interpreter exit, and build no
+        # more (see _rebuild_stretch).
+        self._shut_down = True
         with self._stretch_lock:
             self._stretch_paths = []
             self._fading_paths = []
@@ -1263,6 +1267,10 @@ class MultiTrackPlayer(QObject):
         groups (or to or from the original speed and pitch) starts fresh
         paths at the frame being heard.
         """
+        if self._shut_down:
+            # A debounced change can land after app close; soxr streams
+            # built now would outlive the interpreter.
+            return
         groups = self._stretch_groups()
         with self._stretch_lock:
             current = [reader.names for _, reader in self._stretch_paths]
@@ -1294,18 +1302,38 @@ class MultiTrackPlayer(QObject):
     def _restart_stretch(self, frame: int | None = None) -> None:
         """Start the stretch paths again from *frame* (a seek).
 
-        The frame is set under the same lock the audio callback holds, so
-        a callback finishing mid-seek cannot write its old position back.
+        Fresh paths with the running ones' stems, speed, and pitch are
+        built and primed outside the lock, as ``_rebuild_stretch`` does:
+        priming under it blocked the audio callback for ~4 ms per path
+        and could click (#237). The frame and the new paths are then set
+        together under the lock the callback holds, so a callback
+        finishing mid-seek cannot write its old position back.
         """
         with self._stretch_lock:
-            if frame is not None:
+            if frame is None:
+                frame = self._current_frame
+            specs = [
+                (reader.names, stretcher.speed, stretcher.semitones)
+                for stretcher, reader in self._stretch_paths
+            ]
+            if not specs:
                 self._current_frame = frame
+                self._fading_paths = []
+                self._click_cursor = None
+                return
+        paths = []
+        for names, speed, semitones in specs:
+            stretcher = StreamingStretcher(self._sample_rate, 2)
+            stretcher.set_params(speed, semitones)
+            stretcher.reset(frame)
+            reader = _SourceReader(self, names, frame)
+            stretcher.fill(_PRIME_FRAMES, reader)
+            paths.append((stretcher, reader))
+        with self._stretch_lock:
+            self._current_frame = frame
             self._fading_paths = []
             self._click_cursor = None
-            for stretcher, reader in self._stretch_paths:
-                stretcher.reset(self._current_frame)
-                reader.head = self._current_frame
-                stretcher.fill(_PRIME_FRAMES, reader)
+            self._stretch_paths = paths
 
     def _mix_stems_into(
         self,
