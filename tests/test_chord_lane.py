@@ -202,6 +202,57 @@ def test_clicking_a_read_ahead_block_seeks_to_its_chord(lane):
     assert seeks == [25.0]
 
 
+def test_clicking_ahead_inside_the_current_chord_does_not_jump_back(lane):
+    """A long held chord: a click further into it seeks to that moment,
+    not back to the chord's start (#244 review)."""
+    seeks = []
+    lane.seek_requested.connect(seeks.append)
+    lane.set_position(52.0)  # Am, 50-75 s
+
+    _click(lane, lane.read_ahead_x(60.0), lane.read_ahead_rect().center().y())
+
+    assert seeks == [pytest.approx(60.0, abs=0.05)]
+
+
+def test_clicking_the_current_chord_in_the_overview_seeks_there(lane):
+    seeks = []
+    lane.seek_requested.connect(seeks.append)
+    lane.set_position(52.0)
+
+    _click(lane, lane.overview_x(70.0), lane.overview_rect().center().y())
+
+    assert seeks == [pytest.approx(70.0, abs=0.2)]
+
+
+def _move(widget, x: float, y: float) -> None:
+    pos = QPointF(x, y)
+    event = QMouseEvent(
+        QEvent.Type.MouseMove, pos, widget.mapToGlobal(pos),
+        Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(widget, event)
+
+
+def test_pointing_hand_only_over_chord_blocks(lane):
+    """The gutter, the placeholders, and an empty lane are not clickable."""
+    hand = Qt.CursorShape.PointingHandCursor
+    y = lane.overview_rect().center().y()
+
+    _move(lane, lane.overview_x(60.0), y)
+    assert lane.cursor().shape() == hand
+    _move(lane, 10, y)
+    assert lane.cursor().shape() != hand
+
+    empty = ChordLaneWidget()
+    empty.resize(852, CHORD_LANE_HEIGHT)
+    empty.set_total_seconds(100.0)
+    empty.set_detecting(True)
+    _move(empty, 400, y)
+    assert empty.cursor().shape() != hand
+    empty.deleteLater()
+
+
 def test_clicking_the_gutter_does_not_seek(lane):
     seeks = []
     lane.seek_requested.connect(seeks.append)
@@ -249,6 +300,18 @@ def test_no_chords_detected_says_so(app):
 
     assert widget.placeholder_text() == "No chords detected"
     widget.grab()  # paints without chords
+    widget.deleteLater()
+
+
+def test_failed_detection_says_so(app):
+    widget = ChordLaneWidget()
+    widget.set_total_seconds(100.0)
+    widget.set_detecting(True)
+    widget.set_detection_failed()
+
+    assert widget.placeholder_text() == "Chord detection failed"
+    widget.set_detecting(True)
+    assert widget.placeholder_text() == "Finding chords..."
     widget.deleteLater()
 
 
@@ -304,6 +367,24 @@ def test_splice_replaces_chords_inside_the_loop_only():
     assert merged == [
         (0.0, "C"), (25.0, "G"), (30.0, "Em"), (40.0, "D"),
         (45.0, "G"), (50.0, "Am"), (75.0, "F"),
+    ]
+
+
+def test_splice_keeps_a_first_chord_one_sample_before_the_loop():
+    """The detector's slice starts at int(A * sr) / sr, which can be one
+    sample before A: that first chord must not be dropped (#244 review)."""
+    sr = 44100
+    start = 12.345
+    slice_start = int(start * sr) / sr
+    assert slice_start < start
+    song = [(0.0, "C"), (10.0, "G"), (15.0, "Am"), (25.0, "F")]
+    region = [(slice_start, "Em"), (slice_start + 3.0, "D")]
+
+    merged = splice_chords(song, region, start, 20.0)
+
+    assert merged == [
+        (0.0, "C"), (10.0, "G"), (start, "Em"), (slice_start + 3.0, "D"),
+        (20.0, "Am"), (25.0, "F"),
     ]
 
 
@@ -370,6 +451,7 @@ def test_detection_fills_the_lane(controls):
 
 
 def test_loop_detection_splices_into_the_lane(controls):
+    _player_keeps_chords(controls)
     lane = controls.waveform_panel.chord_lane
     _complete(controls, DetectionResult(chord_sequence=CHORDS))
     _complete(
@@ -379,6 +461,78 @@ def test_loop_detection_splices_into_the_lane(controls):
     )
 
     assert lane.labels() == ["C", "G", "Em", "G", "Am", "F"]
+
+
+def _player_keeps_chords(controls) -> None:
+    player = controls._player
+    player.set_chord_sequence.side_effect = (
+        lambda chords: setattr(player, "chord_sequence", list(chords))
+    )
+
+
+def test_loop_detection_splices_into_the_player_too(controls):
+    """One source of truth: the badge and the saved session see the same
+    whole-song chords as the lane after a loop re-detection."""
+    _player_keeps_chords(controls)
+    _complete(controls, DetectionResult(chord_sequence=CHORDS))
+    _complete(
+        controls,
+        DetectionResult(chord_sequence=[(30.0, "Em")]),
+        region=(30.0, 45.0),
+    )
+
+    player = controls._player
+    assert [c for _, c in player.chord_sequence] == [
+        "C", "G", "Em", "G", "Am", "F",
+    ]
+    assert controls.waveform_panel.chord_lane.labels() == [
+        c for _, c in player.chord_sequence
+    ]
+
+
+def test_loop_detection_without_chords_keeps_the_song(controls):
+    _player_keeps_chords(controls)
+    _complete(controls, DetectionResult(chord_sequence=CHORDS))
+    _complete(controls, DetectionResult(), region=(30.0, 31.0))
+
+    assert controls._player.chord_sequence == CHORDS
+    assert controls.waveform_panel.chord_lane.labels() == [
+        "C", "G", "Am", "F",
+    ]
+
+
+def test_lane_shows_detecting_while_the_beat_model_is_asked_for(controls):
+    """The download prompt and download come before the worker starts;
+    the lane must not say "No chords detected" meanwhile (#244 review)."""
+    lane = controls.waveform_panel.chord_lane
+    lane.set_total_seconds(100.0)
+    controls._player.stems = {"vocals": object()}
+    manager = MagicMock()
+    manager.is_beat_model_downloaded.return_value = False
+    controls._model_manager = manager
+    controls._beat_model_unavailable = False
+    controls._request_beat_model = lambda: None
+
+    controls.start_detection()
+
+    assert lane.placeholder_text() == "Finding chords..."
+
+    # The song went away before the prompt: nothing runs.
+    controls._player.stems = {}
+    controls._ask_for_beat_model()
+    assert lane.placeholder_text() == "No chords detected"
+
+
+def test_failed_song_detection_is_shown_in_the_lane(controls):
+    worker = MagicMock()
+    worker.region = None
+    controls.sender = lambda: worker
+    controls._is_active_detection_sender = lambda: True
+    controls._chord_lane.set_total_seconds(100.0)
+
+    controls._on_detect_error("boom")
+
+    assert controls._chord_lane.placeholder_text() == "Chord detection failed"
 
 
 def test_pitch_change_relabels_the_lane(controls):

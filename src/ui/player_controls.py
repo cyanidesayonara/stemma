@@ -49,6 +49,7 @@ from src.ui.styles import (
     recording_color,
 )
 from src.ui.transport_bar import TransportBar
+from src.ui.chord_lane import splice_chords
 from src.ui.waveform_panel import WaveformPanel
 from src.waveform import compute_stem_peaks
 
@@ -1205,6 +1206,9 @@ class PlayerControls(QWidget):
         self._pending_detect_args = None
         self._pending_detect_generation = None
         self._detach_detection_worker()
+        # Before the beat-model check: its prompt and download come first,
+        # and the lane must not read "No chords detected" meanwhile.
+        self._chord_lane.set_detecting(True)
 
         # Ensure beat_this model is available.
         if (not _model_ready
@@ -1300,6 +1304,7 @@ class PlayerControls(QWidget):
             # Closed or superseded before the prompt opened: ask on the
             # next detection instead.
             self._beat_model_asking = False
+            self._end_chord_lane_detecting_if_idle()
             return
         try:
             accepted = self._ask_beat_model_download()
@@ -1388,8 +1393,18 @@ class PlayerControls(QWidget):
             generation != self._detection_generation
             or not self._player.stems
         ):
+            self._end_chord_lane_detecting_if_idle()
             return
         self.start_detection(*args, _model_ready=True)
+
+    def _end_chord_lane_detecting_if_idle(self) -> None:
+        """Drop the lane's "Finding chords..." when no detection will run.
+
+        Called where a request waiting on the beat model turned out stale
+        or songless; a newer request would have taken over its slot.
+        """
+        if not self._detection_running():
+            self._chord_lane.set_detecting(False)
 
     def _run_detection(
         self,
@@ -1504,9 +1519,18 @@ class PlayerControls(QWidget):
             self._key_conf = ""
             self._detected_key_raw = ""
 
-        # Store chord sequence and start polling timer.
-        if result.chord_sequence:
-            self._player.set_chord_sequence(result.chord_sequence)
+        # Store chord sequence and start polling timer. The player's
+        # sequence is the one source of truth for the badge, the lane, and
+        # the saved session, and it always covers the whole song: a loop
+        # re-detection covers only the loop, so its chords are spliced in.
+        region = self._detection_region()
+        chords = list(result.chord_sequence)
+        if region is not None:
+            chords = splice_chords(
+                list(self._player.chord_sequence), chords, *region,
+            )
+        if chords:
+            self._player.set_chord_sequence(chords)
             self._song_info_bar.set_chord("--")
             if self._player.is_playing:
                 self._chord_timer.start()
@@ -1514,27 +1538,16 @@ class PlayerControls(QWidget):
             self._player.set_chord_sequence([])
             self._song_info_bar.clear_chord()
             self._chord_timer.stop()
-        self._show_detection_in_chord_lane(result)
+        self._chord_lane.set_chords(chords)
+        if region is None:
+            # Bar lines keep the whole song's downbeats.
+            self._chord_lane.set_downbeats(result.downbeat_times)
+        self._chord_lane.set_detecting(False)
 
     def _detection_region(self) -> tuple[float, float] | None:
         """The A-B region the finished detection analysed, if any."""
         region = getattr(self.sender(), "region", None)
         return region if isinstance(region, tuple) else None
-
-    def _show_detection_in_chord_lane(self, result: DetectionResult) -> None:
-        """Put a detection result in the chord lane.
-
-        A loop re-detection covers only the loop, so its chords are
-        spliced in and the rest of the song keeps its chords and bar lines.
-        """
-        lane = self._chord_lane
-        region = self._detection_region()
-        if region is None:
-            lane.set_chords(result.chord_sequence)
-            lane.set_downbeats(result.downbeat_times)
-        else:
-            lane.splice_region(result.chord_sequence, *region)
-        lane.set_detecting(False)
 
     def _on_detect_error(self, msg: str) -> None:
         if not self._is_active_detection_sender():
@@ -1543,15 +1556,22 @@ class PlayerControls(QWidget):
         # too: styling the labels here left that status stored, and the
         # next theme switch brought it back (#212 review).
         self._song_info_bar.clear()
-        self._player.set_chord_sequence([])
-        self._chord_lane.set_detecting(False)
+        self._chord_timer.stop()
         if self._detection_region() is None:
-            self._chord_lane.set_chords([])
+            self._player.set_chord_sequence([])
+            self._chord_lane.set_detection_failed()
+        else:
+            # A failed loop re-detection leaves the song's chords as they
+            # were, in the player, the badge, and the lane alike.
+            self._chord_lane.set_detecting(False)
+            if self._player.chord_sequence:
+                self._song_info_bar.set_chord("--")
+                if self._player.is_playing:
+                    self._chord_timer.start()
         self._detected_key_raw = ""
         self._detected_bpm_raw = ""
         self._key_conf = ""
         self._bpm_conf = ""
-        self._chord_timer.stop()
 
     def _on_detect_finished(self) -> None:
         if self._is_active_detection_sender():

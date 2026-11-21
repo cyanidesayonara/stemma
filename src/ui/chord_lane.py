@@ -61,6 +61,7 @@ _PAST_OPACITY = 0.45
 
 PLACEHOLDER_DETECTING = "Finding chords..."
 PLACEHOLDER_NONE = "No chords detected"
+PLACEHOLDER_FAILED = "Chord detection failed"
 
 
 def _small_font() -> QFont:
@@ -93,7 +94,11 @@ def splice_chords(
     if not region:
         return list(chords)
     merged = [(t, c) for t, c in chords if t < start]
-    merged.extend((t, c) for t, c in region if start <= t < end)
+    # The detector's slice starts at int(start * sr) / sr, which can be a
+    # sample before *start*: clamp onsets so the loop's first chord stays.
+    merged.extend(
+        (max(t, start), c) for t, c in region if max(t, start) < end
+    )
     onsets = [t for t, _ in chords]
     resume = bisect.bisect_right(onsets, end) - 1
     if resume >= 0 and chords[resume][0] < end:
@@ -122,6 +127,7 @@ class ChordLaneWidget(QWidget):
         self._total = 0.0
         self._position = 0.0
         self._detecting = False
+        self._failed = False
         self._frame_key: tuple | None = None
         self._overview_cache: QPixmap | None = None
         self._overview_cache_key: tuple | None = None
@@ -133,7 +139,8 @@ class ChordLaneWidget(QWidget):
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # The hand shows only over chord blocks (see mouseMoveEvent).
+        self.setMouseTracking(True)
         self.setAccessibleName("Chord lane")
         self.setToolTip("Detected chords (suggestions). Click one to jump to it.")
 
@@ -161,6 +168,7 @@ class ChordLaneWidget(QWidget):
         """Show a whole-song chord sequence of ``(onset_s, label)``."""
         self._chords = sorted((float(t), str(c)) for t, c in chords)
         self._onsets = [t for t, _ in self._chords]
+        self._failed = False
         self._relabel()
 
     def splice_region(
@@ -191,9 +199,20 @@ class ChordLaneWidget(QWidget):
 
     def set_detecting(self, detecting: bool) -> None:
         """Detection running: a quiet placeholder until chords arrive."""
+        if detecting:
+            self._failed = False
         if detecting != self._detecting:
             self._detecting = detecting
             self.update()
+
+    def set_detection_failed(self) -> None:
+        """Detection of the whole song failed: no chords, and say why."""
+        self._chords = []
+        self._onsets = []
+        self._relabel()
+        self._detecting = False
+        self._failed = True
+        self.update()
 
     def clear(self) -> None:
         """Forget the song."""
@@ -204,6 +223,7 @@ class ChordLaneWidget(QWidget):
         self._total = 0.0
         self._position = 0.0
         self._detecting = False
+        self._failed = False
         self._invalidate()
 
     def set_position(self, seconds: float) -> None:
@@ -267,7 +287,9 @@ class ChordLaneWidget(QWidget):
         """The quiet note shown instead of chords, or "" when none."""
         if self._chords or self._total <= 0:
             return ""
-        return PLACEHOLDER_DETECTING if self._detecting else PLACEHOLDER_NONE
+        if self._detecting:
+            return PLACEHOLDER_DETECTING
+        return PLACEHOLDER_FAILED if self._failed else PLACEHOLDER_NONE
 
     def _span(self) -> float:
         return max(1.0, float(self.width() - _LABEL_WIDTH))
@@ -562,20 +584,45 @@ class ChordLaneWidget(QWidget):
 
     # -- Mouse --
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        x = event.position().x()
-        if x < _LABEL_WIDTH or self._total <= 0:
-            return
+    def _seconds_at(self, x: float, y: float) -> float | None:
+        """Song time under a point on a chord block, or None off them."""
+        if (
+            x < _LABEL_WIDTH or self._total <= 0 or not self._chords
+            or self.placeholder_text()
+        ):
+            return None
         span = self._span()
-        if event.position().y() < self.read_ahead_rect().top():
+        if y < self.read_ahead_rect().top():
             seconds = (x - _LABEL_WIDTH) / span * self._total
         else:
             start, end = self.read_ahead_window()
             seconds = start + (x - _LABEL_WIDTH) / span * (end - start)
-        seconds = max(0.0, min(self._total, seconds))
+        if not self._onsets[0] <= seconds <= self._total:
+            return None
+        return seconds
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pos = event.position()
+        over_block = self._seconds_at(pos.x(), pos.y()) is not None
+        shape = (
+            Qt.CursorShape.PointingHandCursor if over_block
+            else Qt.CursorShape.ArrowCursor
+        )
+        if self.cursor().shape() != shape:
+            self.setCursor(shape)
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = event.position()
+        seconds = self._seconds_at(pos.x(), pos.y())
+        if seconds is None:
+            return
+        # Another chord: jump to its start. Inside the one playing (a long
+        # held chord), go to the moment clicked rather than back to its
+        # start (#244 review).
         index = bisect.bisect_right(self._onsets, seconds) - 1
-        if index >= 0:
+        if index != self.current_index():
             seconds = self._onsets[index]
         self.seek_requested.emit(seconds)
