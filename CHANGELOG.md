@@ -31,6 +31,8 @@ published.
 - Safer files: an export that fails leaves no partial file; a data folder
   on a disconnected drive is kept for next time instead of being forgotten;
   the library keeps its songs when its folder moves or its index is locked.
+- Recorded takes no longer change the song's detected key, tempo, chords,
+  and sections: detection listens to the song's own stems only.
 - Quitting with a take that could not be saved asks first, the logo sounds
   play again, the logo now ends the transport row, and the About dialog
   credits the author.

@@ -96,7 +96,7 @@ python scripts/generate_screenshots.py --song-dir "C:\path\to\separated\song" --
   replacing the old set: two composed shots (headline beside the window)
   and three full-window shots. The shot list, headlines, and captions live
   in `SHOTS` in the script; the plan behind them is issue #146.
-- The committed v3.0 set shows "Makes-Shift Salvation" by HoliznaCC0,
+- The committed v3.1 set shows "Makes-Shift Salvation" by HoliznaCC0,
   CC0 1.0, from the "Makeshift Salvation" album on the Free Music Archive
   (https://freemusicarchive.org/music/holiznacc0/makeshift-salvation).
   Separate it with the 6-stem model (htdemucs_6s), then regenerate with
