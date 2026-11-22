@@ -62,6 +62,11 @@ def app():
     return instance
 
 
+@pytest.fixture(autouse=True)
+def _animations_on(monkeypatch):
+    monkeypatch.setattr("src.ui.animated_logo.animations_enabled", lambda: True)
+
+
 def _is_animated_part(element) -> bool:
     """A notehead or a wave, by what it is rather than how it is written."""
     name = local_name(element)
@@ -636,3 +641,31 @@ def test_logo_path_points_at_the_brand_svgs():
                                                     "logo_main_dark.svg"))
     assert _logo_path("light").endswith(os.path.join("icons",
                                                      "logo_main_light.svg"))
+
+
+class TestReducedMotion:
+    def test_os_animations_off_stays_at_rest_frame(self, app, monkeypatch):
+        monkeypatch.setattr(
+            "src.ui.animated_logo.animations_enabled", lambda: False
+        )
+        w = AnimatedLogoWidget(theme="dark", play_sound=False)
+        w.play_intro(with_sound=False)
+        assert w._animating is False
+        assert not w._timer.isActive()
+        assert not w._clock.isValid()
+        assert w._static_t == _ANIM_END_MS
+
+    def test_animate_false_click_plays_sound_without_animating(
+        self, app, monkeypatch
+    ):
+        from src.ui import _wav_playback_impl
+
+        played = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl", lambda path: played.append(path),
+        )
+        w = AnimatedLogoWidget(theme="dark", play_sound=True, animate=False)
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        assert w._animating is False
+        assert not w._timer.isActive()
+        assert [p.name for p in played] == ["chord.wav"]

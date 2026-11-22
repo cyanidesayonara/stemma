@@ -1,9 +1,12 @@
 """Tests for the animated splash screen."""
 
+import winsound
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QImage
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.app_settings import read_startup_play_sound
@@ -18,6 +21,11 @@ from src.ui.splash_screen import (
     _NOTE_SPACING_MS,
     _make_base_svg,
 )
+
+
+@pytest.fixture(autouse=True)
+def _animations_on(monkeypatch):
+    monkeypatch.setattr("src.ui.splash_screen.animations_enabled", lambda: True)
 
 
 @pytest.fixture(scope="module")
@@ -384,3 +392,178 @@ class TestNoDoubleArpeggio:
 
         replay.assert_called_once()
         splash.close()
+
+
+class TestSplashSkip:
+    def test_click_skips_during_wait(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._sound_start_ms = 0
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 100
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        assert splash._finish_timer.isActive()
+        assert not main_win.isVisible()
+
+        QTest.mouseClick(splash, Qt.MouseButton.LeftButton)
+
+        assert not splash.isVisible()
+        assert not splash._timer.isActive()
+        assert not splash._finish_timer.isActive()
+        assert splash._done is True
+        assert main_win.isVisible()
+        main_win.close()
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            Qt.Key.Key_Escape,
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ],
+    )
+    def test_keys_skip_splash(self, app, key):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._sound_start_ms = 0
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 100
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        QTest.keyClick(splash, key)
+
+        assert not splash.isVisible()
+        assert main_win.isVisible()
+        main_win.close()
+
+    def test_unrelated_key_does_not_skip(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        splash._sound_start_ms = 0
+        splash._clock = MagicMock()
+        splash._clock.isValid.return_value = True
+        splash._clock.elapsed.return_value = 100
+
+        main_win = QWidget()
+        splash.finish(main_win)
+        QTest.keyClick(splash, Qt.Key.Key_A)
+
+        assert splash.isVisible()
+        assert not main_win.isVisible()
+        splash.abort()
+        main_win.close()
+
+    def test_skip_before_finish_shows_main_window_immediately(self, app):
+        splash = SplashScreen(theme="dark", play_sound=True)
+        splash.start()
+        splash.skip()
+        assert not splash.isVisible()
+
+        main_win = QWidget()
+        with patch.object(splash, "_replay_sound") as replay:
+            splash.finish(main_win)
+
+        assert main_win.isVisible()
+        assert not splash._finish_timer.isActive()
+        assert splash._fade_anim is None
+        replay.assert_not_called()
+        main_win.close()
+
+    def test_skip_during_fade_stops_fade_and_shows_once(self, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        main_win = QWidget()
+        splash._main_window = main_win
+        splash._finishing = True
+        splash._begin_fade_out()
+        assert splash._fade_anim is not None
+
+        splash.skip()
+
+        assert splash._fade_anim is None
+        assert splash._done is True
+        assert main_win.isVisible()
+        assert not splash.isVisible()
+        splash.skip()
+        main_win.close()
+
+    @patch("src.ui.splash_screen._HAS_WINSOUND", True)
+    @patch("src.ui.splash_screen.winsound.PlaySound")
+    def test_skip_purges_winsound_when_sound_started(self, mock_play, app):
+        splash = SplashScreen(
+            theme="dark", play_sound=True, audio_path="fake.wav"
+        )
+        splash._sound_started = True
+        splash.skip()
+        mock_play.assert_called_once_with(None, winsound.SND_PURGE)
+
+    @patch("src.ui.splash_screen.winsound.PlaySound")
+    def test_skip_does_not_purge_when_sound_disabled(self, mock_play, app):
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash._sound_started = True
+        splash.skip()
+        mock_play.assert_not_called()
+
+
+class TestSplashReducedMotion:
+    def test_os_animations_disabled_starts_without_timer(
+        self, app, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "src.ui.splash_screen.animations_enabled", lambda: False
+        )
+        splash = SplashScreen(theme="dark", play_sound=False)
+        splash.start()
+        assert splash.isVisible()
+        assert not splash._timer.isActive()
+        splash.close()
+
+    def test_animate_false_finish_shows_main_window_immediately(self, app):
+        splash = SplashScreen(theme="dark", play_sound=True, animate=False)
+        splash.start()
+        main_win = QWidget()
+
+        with patch.object(splash, "_replay_sound") as replay:
+            splash.finish(main_win)
+
+        assert main_win.isVisible()
+        assert not splash.isVisible()
+        assert not splash._finish_timer.isActive()
+        assert splash._fade_anim is None
+        replay.assert_not_called()
+        main_win.close()
+
+    def test_animate_false_paints_all_letters_without_starting_sound(
+        self, app
+    ):
+        splash = SplashScreen(theme="dark", play_sound=True, animate=False)
+        splash.start()
+        image = QImage(splash.size(), QImage.Format.Format_ARGB32)
+        splash.render(image)
+
+        assert splash._sound_started is False
+        assert not splash._timer.isActive()
+
+        animated = SplashScreen(theme="dark", play_sound=False, animate=True)
+        animated._clock = MagicMock()
+        animated._clock.isValid.return_value = True
+        animated._clock.elapsed.return_value = _ANIM_END_MS + 100
+        animated._sound_started = True
+        animated._sound_start_ms = 0
+        image_end = QImage(animated.size(), QImage.Format.Format_ARGB32)
+        animated.render(image_end)
+
+        # Every letter in the static splash matches the fully revealed frame
+        # (only the "Loading..." text opacity may differ from the pulse).
+        top_h = int(splash.height() * 0.72)
+        assert image.copy(0, 0, splash.width(), top_h) == image_end.copy(
+            0, 0, animated.width(), top_h
+        )
+        splash.close()
+        animated.close()

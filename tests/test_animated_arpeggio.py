@@ -48,6 +48,13 @@ def app():
     return instance
 
 
+@pytest.fixture(autouse=True)
+def _animations_on(monkeypatch):
+    monkeypatch.setattr(
+        "src.ui.animated_arpeggio.animations_enabled", lambda: True
+    )
+
+
 class TestLoadBaseSvg:
     def test_dark_variant_loads(self):
         svg = _load_base_svg("dark")
@@ -254,3 +261,30 @@ class TestClickReplay:
         w._timer.stop()
         assert clock_running == [False]
         assert w._clock.isValid()
+
+
+class TestReducedMotion:
+    def test_os_animations_off_stays_at_rest_frame(self, app, monkeypatch):
+        monkeypatch.setattr(
+            "src.ui.animated_arpeggio.animations_enabled", lambda: False
+        )
+        w = AnimatedArpeggioWidget(theme="dark", play_sound=False)
+        w.play_intro(with_sound=False)
+        assert w._animating is False
+        assert not w._timer.isActive()
+        assert not w._clock.isValid()
+
+    def test_animate_false_click_plays_sound_without_animating(
+        self, app, monkeypatch
+    ):
+        from src.ui import _wav_playback_impl
+
+        played = []
+        monkeypatch.setattr(
+            _wav_playback_impl, "play_impl", lambda path: played.append(path),
+        )
+        w = AnimatedArpeggioWidget(theme="dark", play_sound=True, animate=False)
+        w.mousePressEvent(_left_mouse_press(10, 10))
+        assert w._animating is False
+        assert not w._timer.isActive()
+        assert [p.name for p in played] == ["arpeggio.wav"]
