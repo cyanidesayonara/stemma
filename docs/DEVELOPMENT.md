@@ -66,6 +66,94 @@ python -m pip install --require-hashes -r requirements-release.txt
 Review dependency and hash changes before committing the regenerated lock.
 Do not hand-edit transitive pins.
 
+## Keeping YouTube import working
+
+YouTube changes how it serves video every few weeks, and `yt-dlp` follows
+with a release. A stemma release freezes three pieces into the package:
+
+- `yt-dlp`, pinned in `requirements-release.txt` (`requirements.txt` only
+  sets a floor).
+- `yt-dlp-ejs`, the challenge-solver scripts. `yt-dlp` names the exact
+  version it expects in its `default` extra.
+  `tests/test_dependency_locks.py` keeps the `requirements.txt` range on
+  the locked minor version.
+- QuickJS-ng, the JavaScript runtime that runs those scripts. Its version
+  and SHA-256 are in `scripts/fetch_js_runtime.py`. The release workflow
+  checks the frozen diagnostics line
+  `YouTube JS runtime: quickjs-ng X (yt-dlp-ejs Y)`.
+
+An installed stemma cannot update these on its own, so an old release
+eventually stops importing from YouTube. The lock has been bumped only
+twice so far (2026-07-31 and 2026-11-19), with no routine between.
+
+### Decisions
+
+- **Update by releasing stemma, never by updating `yt-dlp` inside the app.**
+  - The app does not download or replace `yt-dlp`.
+  - It does not enable `yt-dlp`'s remote solver components
+    (`ejs:github`, `ejs:npm`).
+  - Both would run code that is not in the signed, certified package, and
+    stemma stays local-only. `scripts/smoke_youtube_download.py` already
+    fails on a "remote component" warning.
+- **The vehicle is a patch release** (`vX.Y.Z`) that changes only the lock
+  and anything the new versions need. Store installs update on their own.
+  ZIP users get it from the GitHub Release.
+- **The user-facing message stays.** A format failure already reads
+  "YouTube changed how this video is served. Try again later, or update
+  stemma." (`MSG_YT_FORMAT` in `src/import_messages.py`). Under this plan,
+  that advice is correct.
+
+### Routine
+
+1. **Every release** refreshes the three pieces in its release prep PR:
+
+   ```powershell
+   python -m piptools compile --allow-unsafe --generate-hashes --index-url=https://pypi.org/simple --output-file=requirements-release.txt --strip-extras --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs requirements-release.in
+   ```
+
+   - If the new `yt-dlp` asks for a new `yt-dlp-ejs` minor version, move
+     the `requirements.txt` range with it.
+   - If the `yt-dlp-ejs` release notes ask for a newer QuickJS-ng, or
+     `yt-dlp` drops support for the current one, update
+     `scripts/fetch_js_runtime.py`: the version, URL, and SHA-256 from the
+     QuickJS-ng release page.
+   - Then run `python main.py --diagnostics`, and run the YouTube smoke
+     test with a manual `workflow_dispatch` of CI.
+2. **Every week** the scheduled CI run (Mondays) runs `youtube-smoke-test`
+   against the locked versions.
+   - A red smoke test while the fast `test` job is green means the shipped
+     `yt-dlp` no longer works.
+   - GitHub emails scheduled-run failures to whoever last changed the
+     workflow's schedule. Make sure that is the maintainer, or watch the
+     Actions tab.
+3. **When the smoke test goes red:**
+   1. Check whether the newest `yt-dlp` fixes it: run
+      `scripts/smoke_youtube_download.py` with the newest `yt-dlp` and
+      matching `yt-dlp-ejs` (`pip install -U "yt-dlp[default]"`).
+   2. If it passes, open a `fix:` PR with the step 1 lock refresh.
+      - Note the YouTube fix in `CHANGELOG.md` and the Store What's new.
+      - Ship a patch release through the normal release and Store
+        pipeline.
+   3. If the newest `yt-dlp` fails too, YouTube is ahead of `yt-dlp`.
+      - Wait for an upstream release, and re-run the smoke test with
+        `workflow_dispatch`.
+      - Nothing in stemma needs to change until then.
+   4. Some failures are not breakage: "Sign in to confirm you're not a
+      bot", 403s, and timeouts can come from GitHub's runner IP addresses.
+      Re-run once before treating a failure as one.
+
+### Automation still to build
+
+- **A canary job.** Run the smoke test against the newest `yt-dlp` next to
+  the lock, so the weekly run answers step 3.1 by itself. Report it as a
+  warning, so a canary failure never fails CI.
+- **A lock-age check.** In the scheduled run, warn when the locked `yt-dlp`
+  is more than 60 days older than the newest PyPI release. That catches
+  drift before users do.
+- **A lock-refresh workflow.** A `workflow_dispatch` job on `windows-latest`
+  with Python 3.12 that runs the step 1 command and opens a PR. The lock is
+  Windows-specific, so Dependabot's Linux runners cannot regenerate it.
+
 ## Testing
 
 Qt tests should use the offscreen platform for deterministic headless runs:
