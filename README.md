@@ -4,7 +4,7 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
-Latest stable release: **v3.0.0**.
+Latest stable release: **v3.1.0**.
 
 ## Download
 
@@ -123,6 +123,9 @@ python -m pytest -m "not slow and not hardware"
 | A / B | Set loop point A / B |
 | L | Toggle A-B loop |
 | Shift+L | Loop the song section playing (experimental) |
+| Ctrl+O | Import a song |
+| Ctrl+, | Preferences |
+| Ctrl+Q | Quit |
 | M | Toggle metronome |
 | C | Toggle count-in |
 | R | Arm / disarm recording |

@@ -73,7 +73,7 @@ button submits that old content. Only mode `submit` commits the staged
 package and listing.
 
 ```powershell
-python scripts/build_partner_center_payloads.py --tag v3.0.0
+python scripts/build_partner_center_payloads.py --tag v3.1.0
 ```
 
 Writes `store/payloads/product-update.json` and `store/payloads/metadata-update.json`
@@ -96,7 +96,7 @@ python scripts/generate_screenshots.py --song-dir "C:\path\to\separated\song" --
   replacing the old set: two composed shots (headline beside the window)
   and three full-window shots. The shot list, headlines, and captions live
   in `SHOTS` in the script; the plan behind them is issue #146.
-- The committed v3.0 set shows "Makes-Shift Salvation" by HoliznaCC0,
+- The committed v3.1 set shows "Makes-Shift Salvation" by HoliznaCC0,
   CC0 1.0, from the "Makeshift Salvation" album on the Free Music Archive
   (https://freemusicarchive.org/music/holiznacc0/makeshift-salvation).
   Separate it with the 6-stem model (htdemucs_6s), then regenerate with
@@ -125,7 +125,7 @@ Public download URL pattern (public repo):
 
 `https://github.com/<owner>/<repo>/releases/download/<tag>/stemma.msix`
 
-Example: `https://github.com/cyanidesayonara/stemma/releases/download/v3.0.0/stemma.msix`
+Example: `https://github.com/cyanidesayonara/stemma/releases/download/v3.1.0/stemma.msix`
 
 ## Keeping the upload link private
 
@@ -151,7 +151,7 @@ Environment secrets (`store` environment) for `partner-center-submit.yml`:
 - `PARTNER_CENTER_CLIENT_ID`
 - `PARTNER_CENTER_CLIENT_SECRET`
 
-Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.0.0`), check the staged draft, then **`submit`**. Do not submit a workflow-staged draft from Partner Center. Manual MSIX upload remains a fallback if automation fails.
+Use **mode `configure`** first, then **`update_draft`** with a release tag (for example `v3.1.0`), check the staged draft, then **`submit`**. Do not submit a workflow-staged draft from Partner Center. Manual MSIX upload remains a fallback if automation fails.
 
 **Listing images are staged by `update_draft`:** the screenshots in `assets/store_listing/screenshots/` (in `captions.txt` order) and the tile, box, and poster art in `assets/store_listing/` (regenerate with `scripts/generate_store_listing_assets.py`). `scripts/stage_store_images.py` marks the Store's current images of those types (screenshots, Icon, StoreLogoSquare, StoreLogo9x16) `PendingDelete`, leaves any other type alone, adds these as `PendingUpload`, and builds the upload zip (the MSIX plus the images) that the workflow PUTs to the draft's `FileUploadUrl`; `submit` then ingests the package and images together. msstore's image model has no description field, so screenshot captions are not sent: add them in Partner Center after certification if wanted, as a separate submission made entirely there. **Not automated:** category and age-rating fields. Release CI validates screenshot count and size; MSIX package icons come from the uploaded package itself: `scripts/generate_app_icons.py` renders them (and `assets/icons/stemma.ico`) from the SVG drawings in `assets/icons/` (pixel-placed drawings at 16, 20, 24, 30, 32, and 36 px, and one large drawing), and `scripts/build_msix.ps1` indexes every size in `resources.pri` so Windows picks the right one.
 
@@ -164,9 +164,9 @@ Note: [microsoft/store-submission](https://github.com/microsoft/store-submission
 To align repo files with a would-be tag before committing:
 
 ```powershell
-.\scripts\sync_release_version.ps1 -Tag v3.0.0
+.\scripts\sync_release_version.ps1 -Tag v3.1.0
 ```
 
-This updates local build metadata only; it does not publish v3.0.0. Commit
+This updates local build metadata only; it does not publish v3.1.0. Commit
 `src/version.py` and `msix/AppxManifest.xml` when the branch build target
 changes.

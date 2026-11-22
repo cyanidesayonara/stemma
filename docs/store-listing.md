@@ -4,7 +4,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 `python scripts/build_store_listing.py` to regenerate this file.
 Do not edit this markdown by hand.
 
-This copy reflects listing content for version **3.0.0**.
+This copy reflects listing content for version **3.1.0**.
 
 Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
 
@@ -39,7 +39,7 @@ Import a track and stemma separates it into individual stems -- vocals, drums, b
 
 Everything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.
 
-stemma reads the song as you work: tempo, musical key, and the chord under the playhead, updated as it plays. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers exactly where you left off -- song, position, mix, loop, speed, and pitch -- so practice picks up where it stopped. Browse with previous and next, loop a single song, shuffle the collection, or autoplay through it.
+stemma reads the song as you work: tempo, musical key, and a chord lane under the waveform with the chords coming up in the next bars, so you can read ahead as you play. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers exactly where you left off -- song, position, mix, loop, speed, and pitch -- so practice picks up where it stopped. Browse with previous and next, loop a single song, shuffle the collection, or autoplay through it.
 
 Separation runs on your own machine. Nothing is uploaded, there is no account, no subscription, and no internet connection needed once the models are downloaded. Import an MP3, WAV, or FLAC file or paste a YouTube link, and export your own mix, a single stem, or just the loop as WAV or MP3 when you want to take it elsewhere.
 
@@ -49,29 +49,21 @@ Built for Windows, with keyboard shortcuts for the whole practice loop that work
 
 ## What's new in this version
 
-What's new in version 3.0.0
+What's new in version 3.1.0
 
-A new practice cockpit: every stem gets its own colored lane in the waveform, a muted stem dims in place, and the A-B loop shows its times. The practice controls are grouped into cards, with key, chord, and tempo in one readout under the waveform.
+A chord lane under the waveform: the whole song's chords, plus the next bars large enough to read ahead while you play. Click a chord to jump to it.
 
-Speed and pitch change instantly while the song plays, with no wait.
+Song sections (experimental): stemma splits the song into sections on its bar lines, with the same letter for parts that sound alike. Double-click a section, or press Shift+L, to loop it.
 
-While a song separates, the empty player shows its progress and time left, then opens it.
+YouTube import now uses its own JavaScript runtime for YouTube's checks.
 
-A new look: a new app icon, stronger contrast in both themes, and tidier dialogs.
+If your headphones or speakers disconnect during playback, stemma pauses and tells you.
 
-A damaged library file no longer removes songs, and an interrupted import is cleaned up on the next launch.
+A silent recording, usually Windows blocking the microphone, now comes with a warning that points to the setting.
 
-Export Mix exports the stems you hear, at the original speed and pitch.
+Keyboard and screen readers: the waveform is a Tab stop that announces the playback position and loop points, and Ctrl+O, Ctrl+, and Ctrl+Q import, open Preferences, and quit.
 
-Keyboard and accessibility: the whole app works from the keyboard, and controls have names for screen readers.
-
-Safer imports: stemma checks a file before importing it, asks before downloading a model, and replaces a damaged one. Quitting during a separation asks first.
-
-Clearer errors: a readable message, with details in a log file.
-
-Recording: with no microphone, stemma turns recording off and keeps playing, and a take that cannot be saved stays in memory.
-
-Fixes: changing loop points quickly no longer crashes the app, the chord readout follows the pitch shift, the synced metronome keeps the real tempo, and a YouTube download that fails once is retried.
+Safer files: a failed export leaves no partial file, and a data folder on a disconnected drive is kept for next time.
 
 ---
 
@@ -85,7 +77,7 @@ Slow down or speed up from 0.5x to 2x without changing pitch
 A-B loop to drill a difficult passage
 Loop Trainer: speed steps up on every repeat until you reach full tempo
 Transpose up or down seven semitones, tempo unchanged
-Automatic key and tempo detection, with a live chord readout
+Automatic key and tempo detection, with a chord lane that shows the chords ahead
 Beat-synced metronome with tap tempo and nudge
 Count-in before playback and before each loop repeat
 Record your own take over the backing track

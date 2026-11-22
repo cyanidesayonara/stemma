@@ -193,7 +193,7 @@ Generated `build/`, `dist/`, model, and package artifacts are not committed.
 build. A release tag still synchronizes both before packaging:
 
 ```powershell
-.\scripts\sync_release_version.ps1 -Tag v3.0.0
+.\scripts\sync_release_version.ps1 -Tag v3.1.0
 ```
 
 Running that command does not publish a release. The GitHub Release is the

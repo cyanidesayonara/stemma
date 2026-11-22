@@ -110,9 +110,13 @@ and Page Up move 15, and Home and End go to the start and the end.
 | Song | Artist | Genre | Licence | Source |
 |---|---|---|---|---|
 | Makes-Shift Salvation | HoliznaCC0 | Indie rock | CC0 1.0 | [Free Music Archive](https://freemusicarchive.org/music/holiznacc0/makeshift-salvation/makes-shift-salvation) |
-| Swansong | Josh Woodward | Folk pop | CC BY 3.0 | [Free Music Archive](https://freemusicarchive.org/music/Josh_Woodward/Breadcrumbs/JoshWoodward-Breadcrumbs-01-Swansong/) |
-| Bossa Antigua | Kevin MacLeod | Bossa nova | CC BY 4.0 | [incompetech](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1700069) |
-| Funkorama | Kevin MacLeod | Funk | CC BY 4.0 | [incompetech](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100474) |
+| Blue Part II | JCrews (jimmy233) feat. Adisa McKenzie | Soul | CC BY 3.0 | [ccMixter](https://ccmixter.org/files/jimmy233/58818) |
+| Free Music and Free Beer | Admiral Bob (admiralbob77) feat. SackJo22 | Blues | CC BY 3.0 | [ccMixter](https://ccmixter.org/files/admiralbob77/38104) |
+| Girls Like You | Stefan Kartenberg (JeffSpeed68) feat. Thespinwires | Garage rock | CC BY 3.0 | [ccMixter](https://ccmixter.org/files/JeffSpeed68/44932) |
+| Let It In | Josh Woodward | Funk rock | CC BY 4.0 | [joshwoodward.com](https://joshwoodward.com/song/LetItIn) |
+| Where You Are Now | AlexBeroza feat. WolfFly | Hard rock | CC BY 3.0 | [ccMixter](https://ccmixter.org/files/AlexBeroza/33065) |
+
+The list mirrors `SONGS` in `scripts/make_demo_songs.py`.
 
 Only licences that allow derivative works without a non-commercial clause
 qualify (CC0, CC BY); `tests/test_site.py` enforces that, the credit the
