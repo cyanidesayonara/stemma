@@ -151,7 +151,7 @@ def test_badge_redetection_does_not_bypass_running_worker(controls, redetect):
     ],
     ids=["whole-song", "loop", "key-only", "bpm-only"],
 )
-def test_detection_ignores_recording_takes(controls, start):
+def test_detection_ignores_recording_takes(controls, start, request):
     """A take is the player's own playing, not the song: mixing it in
     shifted the song's key, beats, chords, and sections (seen as different
     sections in the take screenshot, v3.1 release prep)."""
@@ -166,3 +166,6 @@ def test_detection_ignores_recording_takes(controls, start):
 
     assert _GatedWorker.instances, "no detection started"
     assert set(_GatedWorker.instances[-1].kwargs["stems"]) == {"vocals", "drums"}
+    if request.node.callspec.id == "loop":
+        # Still a region run: the stems check must not hide a whole-song one.
+        assert _GatedWorker.instances[-1].kwargs["start_sec"] == 1.0

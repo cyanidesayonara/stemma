@@ -1244,7 +1244,7 @@ class PlayerControls(QWidget):
         self._model_manager = manager
         self._beat_model_path = manager.beat_model_path()
 
-    def _analysis_stems(self) -> dict:
+    def _analysis_stems(self) -> dict[str, np.ndarray]:
         """The song's own stems for detection, without recording takes.
 
         A take is the player's playing over the song, not the song: mixing
