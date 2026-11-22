@@ -203,6 +203,8 @@ class MainWindow(QMainWindow):
         self._session_restore_song_id: str | None = None
         self._pending_restore_callbacks: list[tuple[object, object]] = []
         self._suppress_recording_reload = False
+        # Set once the user confirms quitting: no modal box may open then.
+        self._quitting = False
         # Queued jobs all fail once the damaged model is deleted; offer the
         # fresh import once, not once per song.
         self._damaged_prompt_open = False
@@ -309,9 +311,19 @@ class MainWindow(QMainWindow):
     def _on_recording_silent(self, message: str) -> None:
         """A saved take holds only silence: point to the input settings.
 
+        Deferred to the event loop, so a take saved while switching songs
+        is reported once the switch is done rather than from inside it.
         Skipped while quitting, when no modal box may open.
         """
-        if self._suppress_recording_reload:
+        if self._quitting:
+            return
+        QTimer.singleShot(
+            0, lambda: self._show_silent_take_warning(message),
+        )
+
+    def _show_silent_take_warning(self, message: str) -> None:
+        """Show the deferred silent-take warning unless quitting by now."""
+        if self._quitting:
             return
         QMessageBox.warning(self, "Recording", message)
 
@@ -1368,6 +1380,7 @@ class MainWindow(QMainWindow):
         memory, and Stop saves it once the problem is fixed).
         """
         player = self._player
+        self._quitting = True
         # The usual "press Stop again" warning does not fit a quit; the
         # question below replaces it.
         player.recording_save_failed.disconnect(
@@ -1406,6 +1419,7 @@ class MainWindow(QMainWindow):
                     logger.warning("Quit without an unsaved take: %s", reason)
                     player.discard_unsaved_take()
                     return True
+                self._quitting = False
                 return False
         finally:
             player.recording_save_failed.connect(

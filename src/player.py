@@ -689,9 +689,9 @@ class MultiTrackPlayer(QObject):
                 "it."
             )
             return None
-        self._last_take_silent = bool(
-            np.max(np.abs(buf), initial=0.0) < SILENT_TAKE_PEAK
-        )
+        # max/min rather than abs: no temporary copy of a long take.
+        peak = max(float(buf.max(initial=0.0)), -float(buf.min(initial=0.0)))
+        self._last_take_silent = peak < SILENT_TAKE_PEAK
         self._recording_buffer = None
         self._take_save_error = ""
         return path

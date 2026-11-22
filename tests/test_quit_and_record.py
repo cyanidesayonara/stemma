@@ -543,6 +543,26 @@ class TestSilentTake:
         events = self._stop_with_take(armed_player, tmp_path, 0.2)
         assert [kind for kind, _ in events] == ["saved"]
 
+    def test_silent_take_at_the_end_of_the_song_is_reported(
+        self, armed_player, tmp_path,
+    ):
+        player = armed_player
+        player.set_recording_song_dir(str(tmp_path))
+        player._allocate_recording_buffer()
+        player._recording_frames_captured = 4410
+        events = []
+        player.recording_saved.connect(lambda p: events.append("saved"))
+        player.recording_silent.connect(lambda m: events.append("silent"))
+        # The callback ended the song: playing is off, the timer still runs.
+        player._timer.start()
+        player._is_playing = False
+        player._emit_position()
+        assert events == ["saved", "silent"]
+
+    def test_negative_only_take_is_not_silent(self, armed_player, tmp_path):
+        events = self._stop_with_take(armed_player, tmp_path, -0.2)
+        assert [kind for kind, _ in events] == ["saved"]
+
     def test_failed_save_is_not_reported_as_silent(
         self, armed_player, tmp_path,
     ):
@@ -558,20 +578,32 @@ class TestSilentTake:
             armed_player.stop()
         assert silent == []
 
-    def test_main_window_warns_about_a_silent_take(self, app):
+    def test_main_window_warns_after_the_event_loop_turns(self, app):
+        """Also on a song switch (reload suppressed), but not from inside
+        the switch: the box waits for the event loop."""
         from src.ui.main_window import MainWindow
 
         window = MagicMock()
-        window._suppress_recording_reload = False
-        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+        window._quitting = False
+        window._suppress_recording_reload = True  # switching songs
+        with patch("src.ui.main_window.QTimer.singleShot") as later:
             MainWindow._on_recording_silent(window, "Silent.")
+        window._show_silent_take_warning.assert_not_called()
+        later.call_args.args[1]()
+        window._show_silent_take_warning.assert_called_once_with("Silent.")
+        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+            MainWindow._show_silent_take_warning(window, "Silent.")
         assert warn.call_args.args[1:] == ("Recording", "Silent.")
 
     def test_main_window_stays_quiet_while_quitting(self, app):
         from src.ui.main_window import MainWindow
 
         window = MagicMock()
-        window._suppress_recording_reload = True
-        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+        window._quitting = True
+        with patch("src.ui.main_window.QTimer.singleShot") as later, patch(
+            "src.ui.main_window.QMessageBox.warning",
+        ) as warn:
             MainWindow._on_recording_silent(window, "Silent.")
+            MainWindow._show_silent_take_warning(window, "Silent.")
+        later.assert_not_called()
         warn.assert_not_called()
