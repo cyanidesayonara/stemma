@@ -24,6 +24,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.ui.audio_sync import SPLASH_SOUND_SYNC_MS
+from src.ui.motion import animations_enabled
 from src.ui.styles import DARK_COLORS, LIGHT_COLORS
 
 try:
@@ -104,6 +105,7 @@ class SplashScreen(QWidget):
         theme: str = "dark",
         play_sound: bool = True,
         audio_path: str | None = None,
+        animate: bool | None = None,
     ) -> None:
         super().__init__(None)
         flags = (
@@ -126,6 +128,9 @@ class SplashScreen(QWidget):
         self._is_dark = theme == "dark"
         self._play_sound = play_sound and _HAS_WINSOUND
         self._audio_path = audio_path
+        self._animate = (
+            animations_enabled() if animate is None else bool(animate)
+        )
 
         c = DARK_COLORS if self._is_dark else LIGHT_COLORS
         self._bg_color = QColor(c["base"])
@@ -140,9 +145,15 @@ class SplashScreen(QWidget):
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self.update)
 
+        self._finish_timer = QTimer(self)
+        self._finish_timer.setSingleShot(True)
+        self._finish_timer.timeout.connect(self._begin_fade_out)
+
         self._main_window: QWidget | None = None
         self._fade_anim: QPropertyAnimation | None = None
         self._finishing = False
+        self._skipped = False
+        self._done = False
         self._sound_started = False
         self._frame_count = 0
         self._sound_start_ms = 0
@@ -157,10 +168,47 @@ class SplashScreen(QWidget):
         is blocked by heavy imports between ``show()`` and the next
         paint.
         """
-        self._clock.start()
-        self._timer.start(_FRAME_MS)
+        if self._animate:
+            self._clock.start()
+            self._timer.start(_FRAME_MS)
         self.show()
         QApplication.processEvents()
+
+    def skip(self) -> None:
+        """Dismiss the splash early and show the main window as soon as ready."""
+        if self._done or (self._skipped and self._main_window is None):
+            return
+        self._skipped = True
+        self._timer.stop()
+        self._finish_timer.stop()
+        if self._fade_anim is not None:
+            self._fade_anim.blockSignals(True)
+            self._fade_anim.stop()
+            self._fade_anim = None
+        self._stop_sound()
+        if self._main_window is not None:
+            self._done = True
+            self._main_window.show()
+        self.close()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.skip()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (
+            Qt.Key.Key_Escape,
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ):
+            self.skip()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def finish(self, main_window: QWidget) -> None:
         """Transition from splash to *main_window*.
@@ -175,8 +223,12 @@ class SplashScreen(QWidget):
         self._finishing = True
         self._main_window = main_window
 
-        if not self.isVisible():
+        if self._skipped or not self.isVisible() or not self._animate:
+            self._timer.stop()
+            self._finish_timer.stop()
+            self._done = True
             main_window.show()
+            self.close()
             return
 
         elapsed = self._clock.elapsed() if self._clock.isValid() else _MIN_DISPLAY_MS
@@ -195,18 +247,25 @@ class SplashScreen(QWidget):
         anim_elapsed = max(0, elapsed - self._sound_start_ms)
         remaining = max(0, _MIN_DISPLAY_MS - anim_elapsed)
         if remaining > 0:
-            QTimer.singleShot(remaining, self._begin_fade_out)
+            self._finish_timer.start(remaining)
         else:
             self._begin_fade_out()
 
     def abort(self) -> None:
         """Close at once, without the fade: startup failed."""
         self._finishing = True
+        self._done = True
         self._timer.stop()
+        self._finish_timer.stop()
+        if self._fade_anim is not None:
+            self._fade_anim.blockSignals(True)
+            self._fade_anim.stop()
+            self._fade_anim = None
+        self._stop_sound()
         self.close()
 
     def _begin_fade_out(self) -> None:
-        if self._fade_anim is not None:
+        if self._done or self._skipped or self._fade_anim is not None:
             return
         self._timer.stop()
         anim = QPropertyAnimation(self, b"windowOpacity")
@@ -218,6 +277,8 @@ class SplashScreen(QWidget):
         anim.start()
 
     def _on_fade_done(self) -> None:
+        self._done = True
+        self._fade_anim = None
         if self._main_window is not None:
             self._main_window.show()
         self.close()
@@ -257,6 +318,21 @@ class SplashScreen(QWidget):
                 self._sound_played_on_frame2 = True
 
     def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        p.fillRect(self.rect(), self._bg_color)
+        p.setPen(self._border_color)
+        p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        p.drawPixmap(int(_LOGO_X), int(_LOGO_Y), self._base_pixmap)
+
+        if not self._animate:
+            self._paint_letters(p, sync_elapsed=None)
+            self._paint_loading_text(p, opacity=0.5)
+            p.end()
+            return
+
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
         self._try_start_sound(elapsed)
         anim_elapsed = max(0, elapsed - self._sound_start_ms)
@@ -265,19 +341,21 @@ class SplashScreen(QWidget):
         if self._sound_started:
             self._anim_paint_count += 1
 
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        self._paint_letters(p, sync_elapsed=sync_elapsed)
+        if sync_elapsed > _ANIM_END_MS:
+            pulse = 0.35 + 0.15 * math.sin(sync_elapsed / 400.0)
+            self._paint_loading_text(p, opacity=pulse)
 
-        p.fillRect(self.rect(), self._bg_color)
-        p.setPen(self._border_color)
-        p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        p.end()
 
-        p.drawPixmap(int(_LOGO_X), int(_LOGO_Y), self._base_pixmap)
-
+    def _paint_letters(self, p: QPainter, sync_elapsed: int | None) -> None:
         p.setFont(self._font)
         for i, (char, sx, sy, dark_c, light_c) in enumerate(_LETTERS):
-            alpha = self._letter_alpha(i, sync_elapsed)
+            alpha = (
+                1.0
+                if sync_elapsed is None
+                else self._letter_alpha(i, sync_elapsed)
+            )
             if alpha <= 0.0:
                 continue
             color = QColor(dark_c if self._is_dark else light_c)
@@ -288,25 +366,22 @@ class SplashScreen(QWidget):
             tw = p.fontMetrics().horizontalAdvance(char)
             p.drawText(QPointF(px - tw / 2.0, py), char)
 
-        if sync_elapsed > _ANIM_END_MS:
-            pulse = 0.35 + 0.15 * math.sin(sync_elapsed / 400.0)
-            lc = QColor(self._text_color)
-            lc.setAlphaF(pulse)
-            p.setPen(lc)
-            p.setFont(QFont("Segoe UI", 10))
-            text_rect = QRectF(
-                0,
-                _LOGO_Y + 75 * _SCALE + 25,
-                _SPLASH_W,
-                30,
-            )
-            p.drawText(
-                text_rect,
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                "Loading\u2026",
-            )
-
-        p.end()
+    def _paint_loading_text(self, p: QPainter, opacity: float) -> None:
+        lc = QColor(self._text_color)
+        lc.setAlphaF(opacity)
+        p.setPen(lc)
+        p.setFont(QFont("Segoe UI", 10))
+        text_rect = QRectF(
+            0,
+            _LOGO_Y + 75 * _SCALE + 25,
+            _SPLASH_W,
+            30,
+        )
+        p.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+            "Loading\u2026",
+        )
 
     @staticmethod
     def _letter_alpha(index: int, elapsed_ms: int) -> float:
@@ -322,12 +397,21 @@ class SplashScreen(QWidget):
             and self._audio_path
             and os.path.isfile(self._audio_path)
         ):
+            self._sound_started = True
             data = open(self._audio_path, "rb").read()  # noqa: SIM115
             threading.Thread(
                 target=winsound.PlaySound,
                 args=(data, winsound.SND_MEMORY),
                 daemon=True,
             ).start()
+
+    def _stop_sound(self) -> None:
+        """Stop any in-progress splash arpeggio playback."""
+        if _HAS_WINSOUND and self._play_sound and self._sound_started:
+            try:
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except (RuntimeError, OSError):
+                pass
 
     # -- helpers --------------------------------------------------------
 

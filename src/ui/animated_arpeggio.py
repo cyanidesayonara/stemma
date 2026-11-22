@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from src.paths import app_root
 from src.ui.audio_sync import LOGO_AUDIO_VISUAL_LAG_MS
+from src.ui.motion import animations_enabled
 from src.ui.svg_source import (
     local_name,
     read_svg,
@@ -81,7 +82,12 @@ def _glow(elapsed: int, onset: int) -> float:
 class AnimatedArpeggioWidget(QWidget):
     """Small arpeggio logo with animated letter glow."""
 
-    def __init__(self, theme: str = "dark", play_sound: bool = True) -> None:
+    def __init__(
+        self,
+        theme: str = "dark",
+        play_sound: bool = True,
+        animate: bool | None = None,
+    ) -> None:
         super().__init__()
         self.setFixedSize(_W, _H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -90,6 +96,7 @@ class AnimatedArpeggioWidget(QWidget):
 
         self._is_dark = theme == "dark"
         self._play_sound = play_sound
+        self._animate = animate
         self._base_pixmap = self._render_base(theme)
         self._font = self._build_font()
 
@@ -101,12 +108,21 @@ class AnimatedArpeggioWidget(QWidget):
 
     # -- public API ----------------------------------------------------------
 
+    def _should_animate(self) -> bool:
+        return animations_enabled() if self._animate is None else bool(self._animate)
+
     def play_intro(self, with_sound: bool = True) -> None:
         """Start (or restart) the letter glow animation, and the jingle."""
         # Sound first, so loading the playback module on the first click
         # cannot put the letters ahead of the jingle (see AnimatedLogoWidget).
         if with_sound and self._play_sound:
             self._do_play_sound()
+        if not self._should_animate():
+            self._animating = False
+            self._timer.stop()
+            self._clock.invalidate()
+            self.update()
+            return
         self._clock.restart()
         self._animating = True
         self._timer.start(_FRAME_MS)
