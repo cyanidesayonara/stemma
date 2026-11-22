@@ -139,3 +139,33 @@ def test_badge_redetection_does_not_bypass_running_worker(controls, redetect):
 
     assert len(_GatedWorker.instances) == 1
     assert len(_running()) == 1
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        lambda c: c.start_detection(),
+        lambda c: c.start_detection(1.0, 2.0),
+        PlayerControls._redetect_key_only,
+        PlayerControls._redetect_bpm_only,
+    ],
+    ids=["whole-song", "loop", "key-only", "bpm-only"],
+)
+def test_detection_ignores_recording_takes(controls, start, request):
+    """A take is the player's own playing, not the song: mixing it in
+    shifted the song's key, beats, chords, and sections (seen as different
+    sections in the take screenshot, v3.1 release prep)."""
+    zeros = np.zeros((100, 2), dtype=np.float32)
+    controls._player.stems = {
+        "vocals": zeros, "drums": zeros,
+        "recording_take1": zeros, "recording_take2": zeros,
+    }
+    controls._player.sections = []  # whole song analysed: loop runs as a loop
+
+    start(controls)
+
+    assert _GatedWorker.instances, "no detection started"
+    assert set(_GatedWorker.instances[-1].kwargs["stems"]) == {"vocals", "drums"}
+    if request.node.callspec.id == "loop":
+        # Still a region run: the stems check must not hide a whole-song one.
+        assert _GatedWorker.instances[-1].kwargs["start_sec"] == 1.0
