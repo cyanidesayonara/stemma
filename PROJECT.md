@@ -165,7 +165,7 @@ stemma/
 - Speed and pitch are applied live in the callback: `StreamingStretcher` paths (src/stretch.py) stretch the mix as it plays, primed off the audio thread when built or seeked. Positions, loop points, beats, and chords stay in song frames at any speed; clicks are mixed after stretching. Recording takes get their own unpitched path unless they follow the pitch
 - A-B loop: `set_loop_a()`, `set_loop_b()`, `set_looping()`, `clear_loop()`. While looping is on and the region is valid (`B > A`), **Stop** seeks to loop A (not track start); **seek** clamps into `[A, B)` (outside snaps to A)
 - Metronome and count-in settings (BPM, volume, beats, loop-repeat count-in)
-- Recording: full-duplex `sd.Stream` captures input at the playback frame position; position-indexed buffer auto-handles loop wraps; saves as `recording_takeN.wav` with optional latency offset via `np.roll`; `recording_saved` signal
+- Recording: full-duplex `sd.Stream` captures input at the playback frame position; position-indexed buffer auto-handles loop wraps; saves as `recording_takeN.wav` with optional latency offset via `np.roll`; `recording_saved` signal; a take that is digital silence (peak below -80 dBFS, as when Windows denies microphone access) is kept and followed by `recording_silent`, which the window shows as a warning pointing to the microphone privacy settings
 - Tracks playback position for UI sync
 - PortAudioError on open/start and mid-playback stream loss (`finished_callback` or inactive stream): stream cleanup, pause, and **`playback_failed`** signal (user-facing message for UI dialogs)
 

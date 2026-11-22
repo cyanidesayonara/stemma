@@ -44,6 +44,20 @@ PITCH_MAX_SEMITONES = 7
 # whether to apply pitch transposition.
 RECORDING_STEM_PREFIX = "recording_take"
 
+# A take whose peak stays below -80 dBFS is digital silence. A real input
+# left unplayed still shows its noise floor (around -70 to -60 dBFS);
+# Windows denying microphone access delivers exact zeros with no error.
+SILENT_TAKE_PEAK = 1e-4
+SILENT_TAKE_MESSAGE = (
+    "The take you just recorded is silent: no sound reached stemma from "
+    "the input.\n\n"
+    "If Windows is blocking the microphone, open Settings > Privacy & "
+    "security > Microphone and allow microphone access for stemma (for "
+    "the downloaded version, turn on \"Let desktop apps access your "
+    "microphone\"). Also check the input device in Edit > Preferences.\n\n"
+    "The take is kept; delete it if you do not need it."
+)
+
 # Output frames a new or re-seeked stretch path prepares before the audio
 # callback reads it, so its first block costs no more than any other.
 _PRIME_FRAMES = 2048
@@ -191,6 +205,10 @@ class MultiTrackPlayer(QObject):
     # A take could not be written (disk full, folder not writable). The
     # take stays in memory so the next Stop can try again.
     recording_save_failed = Signal(str)
+    # A take was saved but holds digital silence: usually Windows denied
+    # microphone access, which records zeros without any error. *str* is
+    # a short user-facing message. Emitted after recording_saved.
+    recording_silent = Signal(str)
     loop_wrapped = Signal()  # A-B loop repeated (wrapped back to A)
 
     def __init__(self) -> None:
@@ -282,6 +300,7 @@ class MultiTrackPlayer(QObject):
         # against saving a full-length silent WAV when playback is
         # stopped before any input was captured (e.g. during count-in).
         self._recording_frames_captured: int = 0
+        self._last_take_silent: bool = False
         # Why the last take failed to save; "" when none has failed.
         self._take_save_error: str = ""
         self._input_device: int | None = None
@@ -670,9 +689,19 @@ class MultiTrackPlayer(QObject):
                 "it."
             )
             return None
+        # max/min rather than abs: no temporary copy of a long take.
+        peak = max(float(buf.max(initial=0.0)), -float(buf.min(initial=0.0)))
+        self._last_take_silent = peak < SILENT_TAKE_PEAK
         self._recording_buffer = None
         self._take_save_error = ""
         return path
+
+    def _announce_saved_take(self, path: str) -> None:
+        """Emit ``recording_saved``, then ``recording_silent`` if it was."""
+        self.recording_saved.emit(path)
+        if self._last_take_silent:
+            self._last_take_silent = False
+            self.recording_silent.emit(SILENT_TAKE_MESSAGE)
 
     @property
     def has_unsaved_take(self) -> bool:
@@ -1086,7 +1115,7 @@ class MultiTrackPlayer(QObject):
             path = self.save_recording(self._recording_song_dir)
             if path:
                 self._recording_armed = False
-                self.recording_saved.emit(path)
+                self._announce_saved_take(path)
         elif had_buffer:
             self._recording_buffer = None
         if self._loop_region_is_active():
@@ -1543,7 +1572,7 @@ class MultiTrackPlayer(QObject):
                 path = self.save_recording(self._recording_song_dir)
                 if path:
                     self._recording_armed = False
-                    self.recording_saved.emit(path)
+                    self._announce_saved_take(path)
             elif had_buffer:
                 self._recording_buffer = None
             return
