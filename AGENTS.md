@@ -11,7 +11,7 @@ mute/solo any stem, and play along with your instrument.
 
 Local-only. No cloud, no subscriptions, no command line needed by the end user.
 
-Latest stable release: **v3.0.0**. See "Current Status" below.
+Latest stable release: **v3.1.0**. See "Current Status" below.
 
 Canonical documents:
 
@@ -81,10 +81,10 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Set on 2026-11-21, after the v3.0.0 release:
+Set with the v3.1.0 release prep on 2026-11-22:
 
-- Latest stable: **v3.0.0** (the practice cockpit, [#131](https://github.com/cyanidesayonara/stemma/issues/131))
-- Next: v3.1, song sections and scrolling chord lane ([#133](https://github.com/cyanidesayonara/stemma/issues/133)); then v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132))
+- Latest stable: **v3.1.0** (the chord lane and experimental song sections, [#133](https://github.com/cyanidesayonara/stemma/issues/133))
+- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132)); the post-3.0 robustness and accessibility backlog continues in [#188](https://github.com/cyanidesayonara/stemma/issues/188)
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.

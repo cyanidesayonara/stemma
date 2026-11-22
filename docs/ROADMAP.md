@@ -1,6 +1,6 @@
 # Roadmap
 
-Latest stable release: **v3.0.0**.
+Latest stable release: **v3.1.0**.
 
 This document is intentionally short. GitHub issues hold acceptance criteria,
 discussion, and live status; `../CHANGELOG.md` records only shipped releases.
@@ -28,12 +28,19 @@ scope or date. Each upcoming version has a GitHub milestone.
   ([#146](https://github.com/cyanidesayonara/stemma/issues/146)),
   changelog, tag, and Store submission.
 
-## v3.1 -- song structure and chord lane
+## v3.1 -- song structure and chord lane (shipped)
 
 - [#133: song sections and scrolling chord lane](https://github.com/cyanidesayonara/stemma/issues/133)
-  builds section-aware loops and read-ahead chord presentation on the
-  existing beat/chord analysis. It comes before setlists: it reuses
-  detection stemma already ships and changes practice the most.
+  — released in v3.1.0: a chord lane with an overview row and an
+  eight-bar read-ahead row under the stem lanes, and experimental song
+  sections with snap-to-section loops, both built on the existing
+  beat/chord analysis.
+- [#188: post-3.0 robustness and accessibility](https://github.com/cyanidesayonara/stemma/issues/188)
+  and [#237: post-3.0 audit](https://github.com/cyanidesayonara/stemma/issues/237)
+  — output-device loss, the bundled YouTube JavaScript runtime, silent-take
+  warning, atomic exports, data folder on a disconnected drive, menu
+  accelerators, and an accessible waveform shipped in v3.1.0; the rest of
+  #188 continues.
 
 ## v3.2 -- library and setlists
 

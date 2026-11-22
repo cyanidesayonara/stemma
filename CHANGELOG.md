@@ -9,6 +9,32 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v3.1.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.1.0) - 2026-11-22
+
+- A chord lane under the stem waveforms: the whole song's chords on the
+  waveform's timeline, plus the current bar and the next seven large enough
+  to read ahead while playing. Click a chord to jump to it; View > Chord
+  Lane hides it.
+- Song sections (experimental): a ruler above the waveforms splits the song
+  into sections on its bar lines, with the same letter for sections that
+  sound alike. Click one to jump to it; double-click it, or press Shift+L,
+  to loop it on its bar lines. Saved songs gain sections once.
+- YouTube import keeps working with YouTube's JavaScript checks: stemma now
+  ships its own small JavaScript runtime (QuickJS-ng) for yt-dlp.
+- Losing the audio output device during playback (a headset unplugged)
+  pauses and says so, instead of appearing to play on.
+- A recorded take that comes back silent, usually because Windows blocks
+  microphone access, is kept with a warning that points to the setting.
+- Keyboard and screen readers: the waveform is a Tab stop announced as the
+  playback position, with the loop points; Ctrl+O imports a song, Ctrl+,
+  opens Preferences, and Ctrl+Q quits.
+- Safer files: an export that fails leaves no partial file; a data folder
+  on a disconnected drive is kept for next time instead of being forgotten;
+  the library keeps its songs when its folder moves or its index is locked.
+- Quitting with a take that could not be saved asks first, the logo sounds
+  play again, the logo now ends the transport row, and the About dialog
+  credits the author.
+
 ## [v3.0.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.0.0) - 2026-11-19
 
 - A new practice cockpit: a stacked waveform with one colored lane per stem

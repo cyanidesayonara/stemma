@@ -41,9 +41,9 @@
     {
       "id": "detect",
       "title": "It reads the song for you",
-      "body": "The key and tempo are detected for you, and the chord under the playhead is shown as the song plays. Transpose it, and the readouts follow.",
+      "body": "The key and tempo are detected for you, and a chord lane under the waveform shows the chords coming up, so you can read ahead as you play. Transpose it, and the chords follow.",
       "covers": [
-        "Automatic key and tempo detection, with a live chord readout"
+        "Automatic key and tempo detection, with a chord lane that reads the chords ahead"
       ]
     },
     {

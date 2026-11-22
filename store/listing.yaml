@@ -1,5 +1,5 @@
 # Informational only. Release authority is the git tag / synced version.py.
-listing_version: "3.0.0"
+listing_version: "3.1.0"
 
 # Live Microsoft Store product identity (apps.microsoft.com).
 # Snapshot of published copy before the 2.6.0 submission:
@@ -39,8 +39,9 @@ description: |
   and chord readouts follow. Count yourself in, play along to the metronome,
   and record your take against the backing to hear how it really sat.
 
-  stemma reads the song as you work: tempo, musical key, and the chord
-  under the playhead, updated as it plays. Every stem gets its own colored
+  stemma reads the song as you work: tempo, musical key, and a chord
+  lane under the waveform with the chords coming up in the next bars, so
+  you can read ahead as you play. Every stem gets its own colored
   lane in the waveform, so you can see where each part plays and click
   anywhere to jump there. There are per-stem volume faders, and a library
   that remembers exactly where you left off -- song, position, mix, loop,
@@ -66,7 +67,7 @@ features:
   - "A-B loop to drill a difficult passage"
   - "Loop Trainer: speed steps up on every repeat until you reach full tempo"
   - "Transpose up or down seven semitones, tempo unchanged"
-  - "Automatic key and tempo detection, with a live chord readout"
+  - "Automatic key and tempo detection, with a chord lane that reads the chords ahead"
   - "Beat-synced metronome with tap tempo and nudge"
   - "Count-in before playback and before each loop repeat"
   - "Record your own take over the backing track"
@@ -160,3 +161,28 @@ whats_new:
     Fixes: changing loop points quickly no longer crashes the app, the chord
     readout follows the pitch shift, the synced metronome keeps the real
     tempo, and a YouTube download that fails once is retried.
+  "3.1.0": |
+    What's new in version 3.1.0
+
+    A chord lane under the waveform: the whole song's chords, plus the next
+    bars large enough to read ahead while you play. Click a chord to jump
+    to it.
+
+    Song sections (experimental): stemma splits the song into sections on
+    its bar lines, with the same letter for parts that sound alike.
+    Double-click a section, or press Shift+L, to loop it.
+
+    YouTube import works with YouTube's newer checks.
+
+    If your headphones or speakers disconnect during playback, stemma pauses
+    and tells you.
+
+    A silent recording, usually Windows blocking the microphone, now comes
+    with a warning that points to the setting.
+
+    Keyboard and screen readers: the waveform is a Tab stop that announces
+    the playback position and loop points, and Ctrl+O, Ctrl+, and Ctrl+Q
+    import, open Preferences, and quit.
+
+    Safer files: a failed export leaves no partial file, and a data folder
+    on a disconnected drive is kept for next time.

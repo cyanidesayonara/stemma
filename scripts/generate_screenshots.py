@@ -132,7 +132,7 @@ SHOTS = (
     ),
     Shot(
         "03_detected", "loaded", "light",
-        caption="Key, chords, and tempo detected for you",
+        caption="Key and tempo detected, with the chords ahead in a lane",
     ),
     Shot(
         "04_import", "import", "dark",
