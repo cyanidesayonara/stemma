@@ -105,6 +105,9 @@ def fit_spinbox_width(spin: QSpinBox, sample: str | None = None) -> None:
     """Size a spinbox to its widest expected display value."""
     if sample is None:
         sample = f"{spin.prefix()}{spin.maximum()}{spin.suffix()}"
+    # Measure in the stylesheet's font: before polish fontMetrics() is the
+    # application default, which ignores the scaled text size (#188).
+    spin.ensurePolished()
     metrics = spin.fontMetrics()
     content = QSize(metrics.horizontalAdvance(sample) + 8, metrics.height())
     option = QStyleOptionSpinBox()
@@ -120,6 +123,7 @@ def fit_spinbox_width(spin: QSpinBox, sample: str | None = None) -> None:
 
 def fit_combo_width(combo: QComboBox, extra: int = 0) -> None:
     """Size a combo box to its widest entry."""
+    combo.ensurePolished()  # Measure in the stylesheet font, as above.
     metrics = combo.fontMetrics()
     widest = max(
         (metrics.horizontalAdvance(combo.itemText(index))

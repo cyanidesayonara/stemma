@@ -13,7 +13,16 @@ import os
 import random
 
 import soundfile as sf
-from PySide6.QtCore import QByteArray, QEvent, QPointF, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QEvent,
+    QPointF,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Slot,
+)
 from PySide6.QtGui import (
     QColor,
     QGuiApplication,
@@ -80,7 +89,12 @@ from src.ui.player_controls import (
     _format_time,
     shutdown_peak_pool,
 )
-from src.ui.styles import apply_tooltip_palette, get_colors, get_stylesheet
+from src.ui.styles import (
+    apply_tooltip_palette,
+    get_colors,
+    get_stylesheet,
+    scaled_font_size,
+)
 from src.ui.waveform_stack_widget import lane_label
 from src.version import __version__
 
@@ -98,6 +112,26 @@ _FIRST_RUN_SIZE = QSize(1360, 820)
 # keeps clear of the title bar and taskbar.
 _FIRST_RUN_SIDE_MARGIN = 16
 _FIRST_RUN_HEIGHT_SHARE = 0.92
+# The smallest window the layout is designed for, and the room a minimum
+# leaves for the title bar on a screen shorter than that (#188).
+_MINIMUM_SIZE = QSize(900, 600)
+_MINIMUM_TITLE_BAR_ALLOWANCE = 40
+
+
+def minimum_window_size(area: QRect) -> QSize:
+    """The window minimum for a screen whose available area is *area*.
+
+    900 x 600 is larger than a 1080p screen at 200 % scale (960 x 516
+    available), which left the window unable to fit; on such a screen the
+    minimum shrinks to fit, and the content scrolls.
+    """
+    return QSize(
+        min(_MINIMUM_SIZE.width(), area.width()),
+        min(
+            _MINIMUM_SIZE.height(),
+            area.height() - _MINIMUM_TITLE_BAR_ALLOWANCE,
+        ),
+    )
 
 
 def loop_export_frames(
@@ -179,7 +213,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("stemma")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(_MINIMUM_SIZE)
 
         self._library = library
         self._player = player
@@ -591,7 +625,7 @@ class MainWindow(QMainWindow):
                 "color: #cdd6f4;"
                 "padding: 6px 14px;"
                 "border-radius: 6px;"
-                "font-size: 11pt;"
+                f"font-size: {scaled_font_size(11)};"
             )
             self._volume_toast = toast
 
@@ -931,16 +965,18 @@ class MainWindow(QMainWindow):
         until it was enlarged (#159). On a screen the target does not fit
         (1366 x 768, or 1920 x 1080 at 125 %) the window takes nearly the
         full width, so the practice cards stay on one row, and 92 % of the
-        height. The minimum stays at 900 x 600 for small screens.
+        height. The minimum stays at 900 x 600 for small screens, unless the
+        screen is smaller still (see minimum_window_size).
         """
         screen = self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
             return
         area = screen.availableGeometry()
-        width = max(900, min(
+        minimum = minimum_window_size(area)
+        width = max(minimum.width(), min(
             _FIRST_RUN_SIZE.width(), area.width() - _FIRST_RUN_SIDE_MARGIN,
         ))
-        height = max(600, min(
+        height = max(minimum.height(), min(
             _FIRST_RUN_SIZE.height(),
             int(area.height() * _FIRST_RUN_HEIGHT_SHARE),
         ))
@@ -953,8 +989,15 @@ class MainWindow(QMainWindow):
         y = area.y() + max(0, (area.height() - height - frame_extra) // 2)
         self.move(x, y)
 
+    def _fit_minimum_to_screen(self) -> None:
+        """Shrink the window minimum on a screen smaller than it."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            self.setMinimumSize(minimum_window_size(screen.availableGeometry()))
+
     def _restore_state(self) -> None:
         """Restore saved window geometry and state."""
+        self._fit_minimum_to_screen()
         # A value of the wrong type (a hand-edited or damaged setting) made
         # restoreGeometry raise and hung startup on the splash (#182).
         geometry = self._settings.value("window/geometry")

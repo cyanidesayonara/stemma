@@ -35,6 +35,7 @@ from src.ui.styles import (
     STEM_COLORS_DARK,
     STEM_COLORS_LIGHT,
     recording_color,
+    scaled_px,
 )
 
 MAX_RECORDING_TAKES = 2
@@ -73,7 +74,7 @@ class StemRow(QWidget):
         color = palette.get(stem_name, "#95a5a6")
 
         self._label = QLabel(stem_name.capitalize())
-        self._label.setFixedWidth(70)
+        self._label.setFixedWidth(scaled_px(70))
         self._label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._label.setStyleSheet(
             f"color: {color}; font-weight: bold;"

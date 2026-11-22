@@ -33,7 +33,7 @@ from src.ui.control_primitives import (
     make_toggle_icon,
     show_preset_value,
 )
-from src.ui.styles import DARK_COLORS
+from src.ui.styles import DARK_COLORS, scaled_px
 
 
 def _record_icon(colors: dict[str, str]):
@@ -101,7 +101,7 @@ class TransportBar(QWidget):
         transport.addWidget(self._record_button)
 
         self._time_label = QLabel("0:00 / 0:00")
-        self._time_label.setFixedWidth(100)
+        self._time_label.setFixedWidth(scaled_px(100))
         self._time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         transport.addWidget(self._time_label)
 
@@ -126,7 +126,9 @@ class TransportBar(QWidget):
         self._master_volume_combo = QComboBox()
         make_display_combo(self._master_volume_combo)
         add_volume_presets(self._master_volume_combo)
-        self._master_volume_combo.setFixedSize(70, COMPACT_BUTTON)
+        self._master_volume_combo.setFixedSize(
+            scaled_px(70), COMPACT_BUTTON,
+        )
         self._master_volume_combo.setToolTip("Master volume")
         self._master_volume_combo.setAccessibleName("Master volume preset")
         self._master_volume_combo.activated.connect(self._on_master_preset)
@@ -142,6 +144,27 @@ class TransportBar(QWidget):
         self._logo.setAccessibleName("stemma logo")
         transport.addWidget(self._logo)
         layout.addLayout(transport)
+        self._row = transport
+
+    def resizeEvent(self, event) -> None:  # noqa: ANN001
+        super().resizeEvent(event)
+        self._fit_logo()
+
+    def _fit_logo(self) -> None:
+        """Drop the logo when the controls alone need the whole row.
+
+        At a large Windows text size in a small window the row cannot get
+        its minimum width, and the time readout was drawn over "Vol:"
+        (#188). The logo is decoration, so it gives way first, and comes
+        back once the row has room for it again.
+        """
+        logo_room = self._logo.sizeHint().width() + self._row.spacing()
+        controls = self._row.minimumSize().width()
+        if not self._logo.isHidden():
+            controls -= logo_room
+        fits = self.width() >= controls + logo_room
+        if fits == self._logo.isHidden():
+            self._logo.setVisible(fits)
 
     @property
     def play_button(self) -> QPushButton:
