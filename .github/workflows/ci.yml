@@ -92,7 +92,11 @@ jobs:
   youtube-smoke-test:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # issues: write lets the lock-age check open its stale-lock issue.
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -118,3 +122,27 @@ jobs:
 
       - name: Run YouTube download smoke test
         run: python scripts/smoke_youtube_download.py
+
+      # The two steps below only warn: they run even when the locked smoke
+      # test failed, and never fail the job themselves (#260). See "Keeping
+      # YouTube import working" in docs/DEVELOPMENT.md.
+      - name: Check yt-dlp lock age
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check_ytdlp_lock_age.py --open-issue
+
+      # Last, because it replaces the locked yt-dlp in this job's Python.
+      - name: Canary smoke test on the newest yt-dlp
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade "yt-dlp[default]"
+          python -m pip show yt-dlp yt-dlp-ejs
+          python scripts/smoke_youtube_download.py
+          if ($LASTEXITCODE -ne 0) {
+            echo "::warning title=yt-dlp canary::The newest yt-dlp also fails the YouTube smoke test."
+            exit 1
+          }
+          echo "::notice title=yt-dlp canary::The newest yt-dlp passes the YouTube smoke test."

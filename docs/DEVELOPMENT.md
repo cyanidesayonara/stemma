@@ -161,22 +161,28 @@ eventually stops importing from YouTube. The lock was created on
         `workflow_dispatch`.
       - Nothing in stemma needs to change until then.
 
-### Automation still to build
+### Automated checks
 
-- **A canary job.** Run the smoke test against the newest `yt-dlp` next to
-  the lock, so the weekly run answers step 3.2 by itself. Report it as a
-  warning, so a canary failure never fails CI.
-- **A lock-age check.** In the scheduled run, warn when the locked `yt-dlp`
-  is more than 60 days older than the newest PyPI release. That catches
-  drift before users do. To survive the 60-day schedule pause, have it open
-  or update an issue rather than only fail a run.
-- **A lock-ejs check.** A fast test that, when `yt-dlp`'s metadata is
-  installed, compares its `default` extra's `yt-dlp-ejs` pin with the
-  locked `yt-dlp-ejs`.
-- **A lock-refresh workflow.** A `workflow_dispatch` job on `windows-latest`
-  with Python 3.12 that runs step 1 and opens a PR. Dependabot runs on
-  Linux, and this lock must be compiled on Windows with Python 3.12, as
-  above.
+These checks run after the locked smoke test, even when it fails, and only
+warn. They never fail the job (#260).
+
+- **Canary.** `youtube-smoke-test` ends by installing the newest
+  `yt-dlp[default]` and running the smoke test again. A
+  `yt-dlp canary` notice or warning in the run summary answers step 3.2.
+- **Lock age.** `scripts/check_ytdlp_lock_age.py --open-issue` compares
+  the PyPI upload dates of the locked and the newest `yt-dlp`. When the lock
+  is more than 60 days behind, it warns and opens a "yt-dlp release lock is
+  behind" issue, or comments on the open one. The issue stays visible even
+  if the schedule pauses later. Run it locally without `--open-issue`.
+- **Lock-ejs test.** `tests/test_dependency_locks.py` checks that the
+  locked `yt-dlp-ejs` is the one the locked `yt-dlp`'s `default` extra
+  names. It runs wherever the installed `yt-dlp` is the locked one, as in
+  CI, and skips elsewhere.
+
+Still to build: a lock-refresh workflow, a `workflow_dispatch` job on
+`windows-latest` with Python 3.12 that runs step 1 and opens a PR.
+Dependabot runs on Linux, and this lock must be compiled on Windows with
+Python 3.12, as above.
 
 ## Testing
 

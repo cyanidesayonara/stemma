@@ -178,6 +178,22 @@ def test_youtube_ejs_and_workflows_wired():
     assert "pip install --require-hashes -r requirements-release.txt" in yt_commands
     assert "scripts/fetch_js_runtime.py" in yt_commands
     assert "scripts/smoke_youtube_download.py" in yt_commands
+    # The lock-age check and the canary warn without failing the job, and
+    # run even after the locked smoke test fails (#260).
+    warn_steps = {
+        name: step for step in yt_job["steps"]
+        if (name := step.get("name", "")) in (
+            "Check yt-dlp lock age", "Canary smoke test on the newest yt-dlp",
+        )
+    }
+    assert len(warn_steps) == 2
+    for step in warn_steps.values():
+        assert step.get("continue-on-error") is True
+        assert "!cancelled()" in str(step.get("if", ""))
+    assert yt_job["steps"][-1]["name"] == (
+        "Canary smoke test on the newest yt-dlp"
+    )
+    assert yt_job.get("permissions", {}).get("issues") == "write"
 
     release_workflow = yaml.safe_load(
         (_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
@@ -197,3 +213,33 @@ def test_youtube_ejs_and_workflows_wired():
     assert "YouTube JS runtime:" in diag_step["run"]
 
 
+
+
+def test_locked_yt_dlp_ejs_is_the_one_yt_dlp_expects():
+    """yt-dlp hash-checks the solver scripts; another version is skipped.
+
+    pip-compile cannot see yt-dlp's ``default`` extra pin, so the lock could
+    pick a newer yt-dlp-ejs than yt-dlp accepts (#260). Checked when the
+    installed yt-dlp is the locked one, as in CI.
+    """
+    from importlib import metadata
+
+    try:
+        installed = metadata.version("yt-dlp")
+    except metadata.PackageNotFoundError:
+        pytest.skip("yt-dlp is not installed")
+    if Version(installed) != _locked_version("yt-dlp"):
+        pytest.skip(f"installed yt-dlp {installed} is not the locked one")
+
+    expected = None
+    for line in metadata.requires("yt-dlp") or []:
+        requirement = Requirement(line)
+        if (requirement.name.lower() == "yt-dlp-ejs" and requirement.marker
+                and requirement.marker.evaluate({"extra": "default"})):
+            expected = requirement.specifier
+    assert expected is not None, "yt-dlp no longer pins yt-dlp-ejs"
+    locked = _locked_version("yt-dlp-ejs")
+    assert locked in expected, (
+        f"yt-dlp {installed} expects yt-dlp-ejs{expected}, but the lock has "
+        f"{locked}. Pin it with --upgrade-package (docs/DEVELOPMENT.md)."
+    )
