@@ -332,7 +332,10 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
 
+        # Qt's standard Preferences and Quit keys are empty on Windows, so
+        # the accelerators are spelled out; Ctrl+O is the standard Open.
         import_action = file_menu.addAction("&Import Song…")
+        import_action.setShortcut(QKeySequence.StandardKey.Open)
         import_action.triggered.connect(self._on_import)
 
         export_action = file_menu.addAction("&Export Mix…")
@@ -344,10 +347,12 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         quit_action = file_menu.addAction("&Quit")
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
         quit_action.triggered.connect(self.close)
 
         edit_menu = menu_bar.addMenu("&Edit")
         prefs_action = edit_menu.addAction("&Preferences…")
+        prefs_action.setShortcut(QKeySequence("Ctrl+,"))
         prefs_action.triggered.connect(self._on_preferences)
 
         # The corner theme button takes no focus, so the keyboard reaches
@@ -794,7 +799,10 @@ class MainWindow(QMainWindow):
                 ("N", "Next song"),
                 ("P", "Previous song"),
             )),
-            ("Help", (
+            ("App", (
+                ("Ctrl+O", "Import a song"),
+                ("Ctrl+,", "Preferences"),
+                ("Ctrl+Q", "Quit"),
                 ("F1", "This dialog"),
             )),
         ),
@@ -802,6 +810,10 @@ class MainWindow(QMainWindow):
 
     def _on_keyboard_shortcuts(self) -> None:
         """Show a dialog listing all keyboard shortcuts."""
+        self._build_shortcuts_dialog().exec()
+
+    def _build_shortcuts_dialog(self) -> QDialog:
+        """Build the keyboard shortcuts dialog without running it."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Keyboard Shortcuts")
 
@@ -838,8 +850,7 @@ class MainWindow(QMainWindow):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(dlg.accept)
         layout.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
-
-        dlg.exec()
+        return dlg
 
     def _on_about(self) -> None:
         """Show the About dialog with an interactive animated logo."""
