@@ -237,3 +237,28 @@ def test_locked_yt_dlp_ejs_is_the_one_yt_dlp_expects():
         f"yt-dlp {installed} expects yt-dlp-ejs{expected}, but the lock has "
         f"{locked}. Pin it with --upgrade-package (docs/DEVELOPMENT.md)."
     )
+
+
+def test_ytdlp_lock_refresh_workflow_is_wired():
+    """The lock-refresh workflow compiles where the lock is made (#260)."""
+    workflow = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "refresh-ytdlp-lock.yml")
+        .read_text(encoding="utf-8")
+    )
+    # PyYAML reads the bare "on" key as True.
+    assert set(workflow[True]) == {"workflow_dispatch"}
+    job = workflow["jobs"]["refresh"]
+    assert job["runs-on"] == "windows-latest"
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["permissions"] == {
+        "contents": "write", "pull-requests": "write", "actions": "write",
+    }
+    setup = next(step for step in job["steps"]
+                 if str(step.get("uses", "")).startswith("actions/setup-python"))
+    assert setup["with"]["python-version"] == "3.12"
+    runs = "\n".join(str(step.get("run", "")) for step in job["steps"])
+    assert "scripts/refresh_ytdlp_lock.py" in runs
+    assert "pip install --require-hashes -r requirements-release.txt" in runs
+    assert "gh workflow run ci.yml" in runs
+    # Inputs reach the scripts through env:, never interpolated into them.
+    assert not re.search(r"\$\{\{\s*(?:github\.event\.)?inputs\.", runs)
