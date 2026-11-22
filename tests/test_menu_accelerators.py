@@ -4,7 +4,9 @@ import pytest
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication
 
+from src.ui.styles import get_stylesheet
 from tests.test_section_ruler import _main_window
+from tests.widget_visual import deterministic_render_state
 
 
 @pytest.fixture(scope="module")
@@ -52,9 +54,6 @@ def test_accelerators_do_not_clash_with_window_shortcuts(window):
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_shortcuts_dialog_fits_a_1366x768_screen(app, window, theme):
     """About 728 px is left after the taskbar, title bar included (#186)."""
-    from src.ui.styles import get_stylesheet
-    from tests.widget_visual import deterministic_render_state
-
     with deterministic_render_state():
         app.setStyleSheet(get_stylesheet(theme))
         dialog = window._build_shortcuts_dialog()

@@ -332,8 +332,9 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
 
-        # Qt's standard Preferences and Quit keys are empty on Windows, so
-        # the accelerators are spelled out; Ctrl+O is the standard Open.
+        # Qt's standard Preferences and Quit keys have no Ctrl binding on
+        # Windows (only the Settings and Exit hardware keys), so those
+        # accelerators are spelled out; Ctrl+O is the standard Open.
         import_action = file_menu.addAction("&Import Song…")
         import_action.setShortcut(QKeySequence.StandardKey.Open)
         import_action.triggered.connect(self._on_import)
