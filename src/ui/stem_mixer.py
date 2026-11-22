@@ -164,6 +164,10 @@ class StemRow(QWidget):
         """Add a take control to the row's reserved slot."""
         self._take_slot.layout().addWidget(widget)
 
+    def last_tab_widget(self) -> QWidget:
+        """Return the last focusable control in this row."""
+        return self._vol_combo
+
     def _on_mute(self, checked: bool) -> None:
         self._player.set_mute(self._stem_name, checked)
         self.mix_changed.emit()
@@ -285,11 +289,16 @@ class RecordingStemRow(StemRow):
     def set_nudge(self, value: int) -> None:
         self._nudge_spin.setValue(value)
 
+    def last_tab_widget(self) -> QWidget:
+        """Return the last focusable control in this recording row."""
+        return self._delete_btn
+
 
 class StemMixer(QWidget):
     """Own stem and recording rows plus their visible section frames."""
 
     mix_changed = Signal()
+    rows_changed = Signal()
 
     def __init__(
         self,
@@ -357,6 +366,14 @@ class StemMixer(QWidget):
         """Return stem row names in display order (source stems, then recordings)."""
         return list(self._stem_rows) + list(self._recording_rows)
 
+    def last_tab_widget(self) -> QWidget | None:
+        """Return the last focusable control across mixer rows, if any."""
+        if self._recording_rows:
+            return next(reversed(self._recording_rows.values())).last_tab_widget()
+        if self._stem_rows:
+            return next(reversed(self._stem_rows.values())).last_tab_widget()
+        return None
+
     def set_stem_names(self, stem_names: list[str]) -> None:
         """Replace source rows while preserving matching player state."""
         saved_muted = set(self._player.muted_stems)
@@ -365,7 +382,7 @@ class StemMixer(QWidget):
             row.setParent(None)
             row.deleteLater()
         self._stem_rows.clear()
-        self.clear_recording_rows()
+        self._clear_recording_widgets()
 
         for name in stem_names:
             row = StemRow(name, self._player, self._theme)
@@ -376,6 +393,7 @@ class StemMixer(QWidget):
                 row.set_muted(True)
             if name in saved_soloed:
                 row.set_soloed(True)
+        self.rows_changed.emit()
 
     def restore_stem_state(
         self,
@@ -404,6 +422,7 @@ class StemMixer(QWidget):
         self._recording_rows[stem_name] = row
         self._recordings_label.setVisible(True)
         self._recordings_frame.setVisible(True)
+        self.rows_changed.emit()
         return row
 
     def remove_recording_row(self, stem_name: str) -> None:
@@ -414,14 +433,19 @@ class StemMixer(QWidget):
         if not self._recording_rows:
             self._recordings_label.setVisible(False)
             self._recordings_frame.setVisible(False)
+        self.rows_changed.emit()
 
-    def clear_recording_rows(self) -> None:
+    def _clear_recording_widgets(self) -> None:
         for row in self._recording_rows.values():
             row.setParent(None)
             row.deleteLater()
         self._recording_rows.clear()
         self._recordings_label.setVisible(False)
         self._recordings_frame.setVisible(False)
+
+    def clear_recording_rows(self) -> None:
+        self._clear_recording_widgets()
+        self.rows_changed.emit()
 
     def apply_theme(self, theme: str) -> None:
         self._theme = theme
