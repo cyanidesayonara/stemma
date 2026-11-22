@@ -1,5 +1,6 @@
 """Tests for the YouTube downloader module."""
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
@@ -658,3 +659,90 @@ class TestNoColourCodes:
         with caplog.at_level("WARNING"):
             describe_error("\x1b[0;31mERROR:\x1b[0m something odd", "ctx")
         assert "\x1b" not in caplog.text
+
+
+class TestJsRuntimeAndLogging:
+    """YouTube extraction/download bundles QuickJS-ng and logs yt-dlp warnings."""
+
+    def test_bundled_js_runtime_prefers_meipass_js_runtime_dir(
+        self, tmp_path, monkeypatch,
+    ):
+        frozen_qjs = tmp_path / "js_runtime" / "qjs.exe"
+        frozen_qjs.parent.mkdir(parents=True)
+        frozen_qjs.write_bytes(b"qjs-frozen")
+        dev_qjs = tmp_path / "build" / "js-runtime" / "qjs.exe"
+        dev_qjs.parent.mkdir(parents=True)
+        dev_qjs.write_bytes(b"qjs-dev")
+        monkeypatch.setattr(downloader, "app_root", lambda: str(tmp_path))
+
+        assert downloader.bundled_js_runtime() == str(frozen_qjs)
+        assert downloader.js_runtimes_option() == {
+            "quickjs": {"path": str(frozen_qjs)},
+        }
+
+    def test_bundled_js_runtime_finds_dev_build_qjs(
+        self, tmp_path, monkeypatch,
+    ):
+        dev_qjs = tmp_path / "build" / "js-runtime" / "qjs.exe"
+        dev_qjs.parent.mkdir(parents=True)
+        dev_qjs.write_bytes(b"qjs-dev")
+        monkeypatch.setattr(downloader, "app_root", lambda: str(tmp_path))
+
+        assert downloader.bundled_js_runtime() == str(dev_qjs)
+        assert downloader.js_runtimes_option() == {
+            "quickjs": {"path": str(dev_qjs)},
+        }
+
+    def test_js_runtimes_option_falls_back_to_supported_path_runtimes(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(downloader, "bundled_js_runtime", lambda: None)
+
+        assert downloader.js_runtimes_option() == {
+            "deno": {},
+            "quickjs": {},
+            "node": {},
+            "bun": {},
+        }
+
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_extract_metadata_enables_js_runtimes_and_logs_warnings(
+        self, mock_ydl_class, caplog,
+    ):
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = {"title": "T", "uploader": "U"}
+
+        extract_metadata("https://youtu.be/abc123")
+        opts = mock_ydl_class.call_args[0][0]
+        assert opts["no_warnings"] is False
+        assert opts["js_runtimes"] == downloader.js_runtimes_option()
+        yt_logger = opts["logger"]
+        with caplog.at_level(logging.WARNING, logger="stemma"):
+            yt_logger.warning("\x1b[33mwarn text\x1b[0m")
+            yt_logger.error("err text")
+        assert "yt-dlp: warn text" in caplog.text
+        assert "yt-dlp: err text" in caplog.text
+        assert "\x1b" not in caplog.text
+
+    def test_download_options_enables_js_runtimes_and_logs_warnings(self):
+        opts = downloader._download_options("stem", None)
+        assert opts["no_warnings"] is False
+        assert opts["js_runtimes"] == downloader.js_runtimes_option()
+        assert isinstance(opts["logger"], downloader._YtDlpLogger)
+
+    def test_ytdlp_logger_strips_ansi_and_forwards_levels(self, caplog):
+        yt_logger = downloader._YtDlpLogger()
+        with caplog.at_level(logging.DEBUG, logger="stemma"):
+            yt_logger.debug("\x1b[34mdebug line\x1b[0m")
+            yt_logger.warning("\x1b[33mwarn line\x1b[0m")
+            yt_logger.error("\x1b[31merror line\x1b[0m")
+            yt_logger.warning("   ")
+
+        levels = [(r.levelno, r.message) for r in caplog.records]
+        assert (logging.DEBUG, "yt-dlp: debug line") in levels
+        assert (logging.WARNING, "yt-dlp: warn line") in levels
+        assert (logging.ERROR, "yt-dlp: error line") in levels
+        assert len(levels) == 3
+

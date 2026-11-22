@@ -11,6 +11,7 @@ _DIAGNOSTICS = {
     "onnxruntime_version": "1.24.4",
     "librosa_version": "1.0.0",
     "soxr_version": "1.1.0",
+    "youtube_js_runtime": "quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
     "available_providers": [
         "DmlExecutionProvider",
         "CPUExecutionProvider",
@@ -41,6 +42,10 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
     monkeypatch.setattr(
         "src.diagnostics.collect_stretch_check", lambda: "1.1.0",
     )
+    monkeypatch.setattr(
+        "src.diagnostics.collect_youtube_js_check",
+        lambda: "quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
+    )
 
     diagnostics = collect_diagnostics()
 
@@ -49,6 +54,7 @@ def test_collect_diagnostics_reports_versions_and_providers(monkeypatch):
         "onnxruntime_version": "1.24.4",
         "librosa_version": "1.0.0",
         "soxr_version": "1.1.0",
+        "youtube_js_runtime": "quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -65,6 +71,7 @@ def test_format_diagnostics_is_human_readable():
         "onnxruntime_version": "1.24.4",
         "librosa_version": "1.0.0",
         "soxr_version": "1.1.0",
+        "youtube_js_runtime": "quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
         "available_providers": [
             "DmlExecutionProvider",
             "CPUExecutionProvider",
@@ -76,6 +83,7 @@ def test_format_diagnostics_is_human_readable():
         "ONNX Runtime version: 1.24.4",
         "librosa version: 1.0.0",
         "soxr version: 1.1.0 (live speed and pitch ran)",
+        "YouTube JS runtime: quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -118,6 +126,7 @@ def test_diagnostics_file_is_atomic_utf8_and_returns_success(
         "ONNX Runtime version: 1.24.4",
         "librosa version: 1.0.0",
         "soxr version: 1.1.0 (live speed and pitch ran)",
+        "YouTube JS runtime: quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)",
         "Available ONNX providers: "
         "DmlExecutionProvider, CPUExecutionProvider",
         "Provider selected per cached model: (no models cached)",
@@ -353,3 +362,61 @@ def test_format_diagnostics_marks_a_failed_stretch_check():
     assert "soxr version: unavailable (ImportError: no soxr)" in output
     # the release workflow requires a version number on this line
     assert "soxr version: 1" not in output
+
+
+def test_collect_youtube_js_check_reports_supported_runtime(monkeypatch):
+    from src.diagnostics import collect_youtube_js_check
+
+    fake_solver = SimpleNamespace(core=lambda: "core-js", lib=lambda: "lib-js")
+    fake_ejs = SimpleNamespace(
+        version="0.8.0",
+        yt=SimpleNamespace(solver=fake_solver),
+    )
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs", fake_ejs)
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs.yt", fake_ejs.yt)
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs.yt.solver", fake_solver)
+
+    fake_info = SimpleNamespace(name="quickjs-ng", version="0.18.0", supported=True)
+    fake_ydl = SimpleNamespace(
+        _js_runtimes={"quickjs": SimpleNamespace(info=fake_info)},
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "yt_dlp",
+        SimpleNamespace(YoutubeDL=lambda _opts: fake_ydl),
+    )
+
+    assert collect_youtube_js_check() == "quickjs-ng 0.18.0 (yt-dlp-ejs 0.8.0)"
+
+
+def test_collect_youtube_js_check_reports_missing_ejs(monkeypatch):
+    from src.diagnostics import collect_youtube_js_check
+
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs", None)
+
+    assert collect_youtube_js_check().startswith("unavailable (")
+
+
+def test_collect_youtube_js_check_reports_missing_runtime(monkeypatch):
+    from src.diagnostics import collect_youtube_js_check
+
+    fake_solver = SimpleNamespace(core=lambda: "core-js", lib=lambda: "lib-js")
+    fake_ejs = SimpleNamespace(
+        version="0.8.0",
+        yt=SimpleNamespace(solver=fake_solver),
+    )
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs", fake_ejs)
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs.yt", fake_ejs.yt)
+    monkeypatch.setitem(sys.modules, "yt_dlp_ejs.yt.solver", fake_solver)
+
+    fake_ydl = SimpleNamespace(
+        _js_runtimes={"quickjs": SimpleNamespace(info=None)},
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "yt_dlp",
+        SimpleNamespace(YoutubeDL=lambda _opts: fake_ydl),
+    )
+
+    assert collect_youtube_js_check() == "unavailable (no supported JS runtime)"
+

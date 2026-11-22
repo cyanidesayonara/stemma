@@ -252,6 +252,7 @@ stemma/
 - Metadata extraction (title, artist) via yt-dlp without downloading
 - Audio download as MP3 (bestaudio + FFmpegExtractAudio, 320kbps)
 - Prefers bundled ffmpeg via imageio-ffmpeg when available; falls back to ffmpeg on PATH
+- Uses bundled QuickJS-ng (`qjs.exe`) and `yt-dlp-ejs` when present (falling back to supported runtimes on PATH), and forwards `yt-dlp` warnings and errors to the `stemma` logger
 - Progress callback support for UI integration
 - **`styles.py`** — Shared dark/light theme tokens and stylesheets
 

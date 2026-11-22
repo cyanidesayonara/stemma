@@ -162,3 +162,38 @@ def test_partner_center_workflow_uses_store_environment_and_env_tag():
                 "into bash instead of passing them through env:"
             )
 
+
+def test_youtube_ejs_and_workflows_wired():
+    assert "yt-dlp-ejs" in _floating_requirements()
+    _locked_version("yt-dlp-ejs")
+
+    ci_workflow = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    yt_job = ci_workflow["jobs"].get("youtube-smoke-test")
+    assert yt_job is not None
+    assert "schedule" in str(yt_job.get("if", ""))
+    assert "workflow_dispatch" in str(yt_job.get("if", ""))
+    yt_commands = "\n".join(str(s.get("run", "")) for s in yt_job["steps"])
+    assert "pip install --require-hashes -r requirements-release.txt" in yt_commands
+    assert "scripts/fetch_js_runtime.py" in yt_commands
+    assert "scripts/smoke_youtube_download.py" in yt_commands
+
+    release_workflow = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    )
+    build_steps = release_workflow["jobs"]["build"]["steps"]
+    step_names = [s.get("name", "") for s in build_steps]
+    fetch_idx = next(
+        i for i, s in enumerate(build_steps)
+        if "scripts/fetch_js_runtime.py" in str(s.get("run", ""))
+    )
+    pyinstaller_idx = step_names.index("Build executable")
+    assert fetch_idx < pyinstaller_idx
+
+    diag_step = next(
+        s for s in build_steps if s.get("name") == "Validate frozen diagnostics"
+    )
+    assert "YouTube JS runtime:" in diag_step["run"]
+
+
