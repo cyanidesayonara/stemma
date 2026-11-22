@@ -166,14 +166,18 @@ eventually stops importing from YouTube. The lock was created on
 These checks run after the locked smoke test, even when it fails, and only
 warn. They never fail the job (#260).
 
-- **Canary.** `youtube-smoke-test` ends by installing the newest
-  `yt-dlp[default]` and running the smoke test again. A
-  `yt-dlp canary` notice or warning in the run summary answers step 3.2.
+- **Canary.** `youtube-smoke-test` ends by upgrading `yt-dlp` to the newest
+  release, installing the `yt-dlp-ejs` version it names
+  (`scripts/check_ytdlp_lock_age.py --print-expected-ejs`), and running the
+  smoke test again. The rest of the release lock stays, as in a lock
+  refresh. A `yt-dlp canary` notice or warning in the run summary, naming
+  the version it tested, answers step 3.2.
 - **Lock age.** `scripts/check_ytdlp_lock_age.py --open-issue` compares
   the PyPI upload dates of the locked and the newest `yt-dlp`. When the lock
   is more than 60 days behind, it warns and opens a "yt-dlp release lock is
-  behind" issue, or comments on the open one. The issue stays visible even
-  if the schedule pauses later. Run it locally without `--open-issue`.
+  behind" issue. If one is open, it retitles it and comments only when a
+  newer release has come out since. The issue stays visible even if the
+  schedule pauses later. Run it locally without `--open-issue`.
 - **Lock-ejs test.** `tests/test_dependency_locks.py` checks that the
   locked `yt-dlp-ejs` is the one the locked `yt-dlp`'s `default` extra
   names. It runs wherever the installed `yt-dlp` is the locked one, as in

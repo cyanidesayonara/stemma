@@ -1,6 +1,7 @@
 """Tests for scripts/check_ytdlp_lock_age.py (#260)."""
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -79,12 +80,55 @@ def test_stale_lock_opens_an_issue():
 
 
 def test_stale_lock_comments_on_the_open_issue():
+    """A newer release since the issue opened: retitle it and comment."""
     run, calls = _fake_gh([
         {"number": 7, "title": "Something else about yt-dlp"},
-        {"number": 12, "title": f"{age_script.ISSUE_TITLE} (a vs b)"},
+        {"number": 12, "title": f"{age_script.ISSUE_TITLE} (2026.7.4 vs x)"},
     ])
     assert age_script.report_issue(_STALE, 60, run=run) == "commented"
+    assert calls[-2][:4] == ["gh", "issue", "edit", "12"]
+    assert calls[-2][-1] == _STALE.title
     assert calls[-1][:4] == ["gh", "issue", "comment", "12"]
+
+
+def test_unchanged_stale_lock_does_not_comment_again():
+    run, calls = _fake_gh([{"number": 12, "title": _STALE.title}])
+    assert age_script.report_issue(_STALE, 60, run=run) == "unchanged"
+    assert [c[:3] for c in calls] == [["gh", "issue", "list"]]
+
+
+def test_gh_failure_is_a_warning_not_a_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(age_script, "fetch_pypi", lambda: _pypi(
+        "2026.10.26", {
+            "2026.7.4": "2026-07-04T20:00:00Z",
+            "2026.10.26": "2026-10-26T01:00:00Z",
+        },
+    ))
+    monkeypatch.setattr(
+        age_script.Path, "read_text", lambda *_a, **_k: _LOCK,
+    )
+
+    def failing_gh(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, ["gh"])
+
+    monkeypatch.setattr(age_script, "report_issue", failing_gh)
+    assert age_script.main(["--open-issue"]) == 1
+    assert "could not file the issue" in capsys.readouterr().out
+
+
+def test_print_expected_ejs_reads_the_default_extra(monkeypatch, capsys):
+    monkeypatch.setattr(age_script.metadata, "requires", lambda _name: [
+        "yt-dlp-ejs==0.9.1; extra == 'default'",
+        "yt-dlp-ejs==0.9.1; extra == 'pin'",
+        "requests>=2.32; extra == 'default'",
+    ])
+    assert age_script.main(["--print-expected-ejs"]) == 0
+    assert capsys.readouterr().out.strip() == "==0.9.1"
+
+
+def test_print_expected_ejs_fails_without_a_pin(monkeypatch):
+    monkeypatch.setattr(age_script.metadata, "requires", lambda _name: [])
+    assert age_script.main(["--print-expected-ejs"]) == 1
 
 
 def test_main_warns_and_files_only_when_stale(monkeypatch, capsys):
