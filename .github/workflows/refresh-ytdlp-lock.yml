@@ -41,7 +41,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install pip-tools
-        run: python -m pip install "pip-tools>=7.6.0" packaging
+        # Capped below the next major, so a new pip-tools cannot reformat
+        # the whole lock in a "yt-dlp only" pull request.
+        run: python -m pip install "pip-tools>=7.6.0,<8" packaging
 
       - name: Refresh the lock
         id: refresh

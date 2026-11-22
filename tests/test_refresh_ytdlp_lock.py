@@ -159,3 +159,55 @@ def test_unreachable_pypi_is_an_error(repo, monkeypatch, capsys):
     monkeypatch.setattr(refresh_script, "fetch_release", offline)
     assert refresh_script.main([]) == 1
     assert "::error" in capsys.readouterr().out
+
+
+def test_older_yt_dlp_is_refused_without_allow_downgrade(repo, monkeypatch,
+                                                          capsys):
+    monkeypatch.setattr(
+        refresh_script, "fetch_release",
+        lambda _v: _release("2026.8.19", "0.8.0"),
+    )
+    monkeypatch.setattr(refresh_script.subprocess, "run",
+                        lambda *a, **k: pytest.fail("compiled a downgrade"))
+    assert refresh_script.main(["--yt-dlp", "2026.8.19"]) == 1
+    assert "--allow-downgrade" in capsys.readouterr().out
+
+
+def test_allow_downgrade_rolls_back(repo, monkeypatch):
+    monkeypatch.setattr(
+        refresh_script, "fetch_release",
+        lambda _v: _release("2026.8.19", "0.8.0"),
+    )
+    ran = []
+    monkeypatch.setattr(
+        refresh_script.subprocess, "run",
+        lambda command, **_k: ran.append(command)
+        or SimpleNamespace(returncode=0),
+    )
+    assert refresh_script.main(
+        ["--yt-dlp", "2026.8.19", "--allow-downgrade"],
+    ) == 0
+    assert "yt-dlp==2026.8.19" in ran[0]
+
+
+@pytest.mark.parametrize("text, expected", [
+    (None, None), ("", None), ("   ", None),
+    ("2026.08.19", "2026.8.19"), (" 2026.11.20 ", "2026.11.20"),
+])
+def test_parse_version_normalises(text, expected):
+    assert refresh_script.parse_version(text) == expected
+
+
+def test_parse_version_rejects_a_non_version(repo, capsys):
+    with pytest.raises(ValueError):
+        refresh_script.parse_version("v1; rm")
+    assert refresh_script.main(["--yt-dlp", "latest!"]) == 1
+    assert "is not a yt-dlp version" in capsys.readouterr().out
+
+
+def test_versions_compare_as_versions_not_strings():
+    refresh = refresh_script.Refresh(
+        old_yt_dlp="2026.8.19", old_ejs="0.8.0",
+        yt_dlp="2026.08.19", ejs="0.8.0", range_moved=False,
+    )
+    assert not refresh.changed

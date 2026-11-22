@@ -108,11 +108,16 @@ eventually stops importing from YouTube. The lock was created on
 
 ### Routine
 
-1. **Every release** refreshes the three pieces in its release prep PR.
-   Substeps 1 to 3 are automated: run the "Refresh yt-dlp lock (manual)"
-   workflow from `main` (see "Automated checks"), or
-   `python scripts/refresh_ytdlp_lock.py` on Windows with Python 3.12 and
-   pip-tools. By hand:
+1. **Every release** refreshes the three pieces before it is tagged.
+   Substeps 1 to 3 are automated:
+   - Run the "Refresh yt-dlp lock (manual)" workflow from `main` (see
+     "Automated checks"). It opens its own pull request, to merge before
+     the release prep PR.
+   - Or run `python scripts/refresh_ytdlp_lock.py` on Windows with Python
+     3.12 and pip-tools, inside the release prep PR. It refuses an older
+     yt-dlp than the locked one unless given `--allow-downgrade`.
+
+   By hand:
    1. Find the newest `yt-dlp` on PyPI. Its `default` extra names the
       `yt-dlp-ejs` version it expects: the `Requires-Dist: yt-dlp-ejs==...`
       line on its PyPI page or in the installed METADATA.

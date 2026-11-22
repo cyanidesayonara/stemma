@@ -162,3 +162,16 @@ def test_main_fails_when_pypi_is_unreachable(monkeypatch, capsys):
     monkeypatch.setattr(age_script, "fetch_pypi", offline)
     assert age_script.main([]) == 1
     assert "could not check" in capsys.readouterr().out
+
+
+def test_ejs_pin_reads_the_default_extra_only():
+    assert age_script.ejs_pin([
+        "yt-dlp-ejs==0.9.1; extra == 'pin'",
+        "yt-dlp-ejs==0.9.0; extra == 'default'",
+    ]) == "==0.9.0"
+    with pytest.raises(ValueError):
+        age_script.ejs_pin(["yt-dlp-ejs==0.9.1; extra == 'pin'"])
+
+
+def test_locked_version_reads_any_package():
+    assert age_script.locked_version(_LOCK, "yt-dlp-ejs") == "0.8.0"

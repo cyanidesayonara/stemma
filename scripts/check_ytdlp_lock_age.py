@@ -56,12 +56,27 @@ class LockAge:
         return f"{ISSUE_TITLE} ({self.locked} vs {self.latest})"
 
 
-def locked_version(lock_text: str) -> str:
-    """Return the ``yt-dlp==`` version pinned in a pip-compile lock."""
-    match = re.search(r"^yt-dlp==(\S+)", lock_text, re.MULTILINE)
+def locked_version(lock_text: str, name: str = "yt-dlp") -> str:
+    """Return the ``name==`` version pinned in a pip-compile lock."""
+    match = re.search(rf"^{re.escape(name)}==(\S+)", lock_text, re.MULTILINE)
     if match is None:
-        raise ValueError("requirements-release.txt does not pin yt-dlp")
+        raise ValueError(f"requirements-release.txt does not pin {name}")
     return match.group(1)
+
+
+def ejs_pin(requires: list[str]) -> str:
+    """The yt-dlp-ejs specifier in yt-dlp's ``default`` extra (``==0.8.0``).
+
+    *requires* are yt-dlp's ``Requires-Dist`` lines, from the installed
+    metadata or PyPI's ``requires_dist``. Shared by the canary and the lock
+    refresh, so both agree on the version yt-dlp accepts.
+    """
+    for line in requires:
+        requirement = Requirement(line)
+        if (requirement.name.lower() == "yt-dlp-ejs" and requirement.marker
+                and requirement.marker.evaluate({"extra": "default"})):
+            return str(requirement.specifier)
+    raise ValueError("yt-dlp does not pin yt-dlp-ejs")
 
 
 def expected_ejs_specifier() -> str:
@@ -70,12 +85,7 @@ def expected_ejs_specifier() -> str:
     yt-dlp hash-checks the solver scripts, so only this version works with
     it. pip-compile and a plain ``pip install yt-dlp`` do not see the pin.
     """
-    for line in metadata.requires("yt-dlp") or []:
-        requirement = Requirement(line)
-        if (requirement.name.lower() == "yt-dlp-ejs" and requirement.marker
-                and requirement.marker.evaluate({"extra": "default"})):
-            return str(requirement.specifier)
-    raise ValueError("the installed yt-dlp does not pin yt-dlp-ejs")
+    return ejs_pin(metadata.requires("yt-dlp") or [])
 
 
 def _upload_time(pypi: dict, version: str) -> datetime:

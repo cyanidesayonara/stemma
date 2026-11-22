@@ -27,9 +27,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from packaging.requirements import Requirement
-from packaging.version import Version
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# One reading of the lock and of yt-dlp's yt-dlp-ejs pin, shared with the
+# canary, so the two never disagree on the version yt-dlp accepts.
+from scripts.check_ytdlp_lock_age import ejs_pin, locked_version  # noqa: E402
+
 REQUIREMENTS = ROOT / "requirements.txt"
 LOCK = ROOT / "requirements-release.txt"
 LOCK_INPUT = "requirements-release.in"
@@ -49,7 +57,13 @@ class Refresh:
     @property
     def changed(self) -> bool:
         """True when the lock gets a different yt-dlp or yt-dlp-ejs."""
-        return (self.old_yt_dlp, self.old_ejs) != (self.yt_dlp, self.ejs)
+        return ((Version(self.old_yt_dlp), Version(self.old_ejs))
+                != (Version(self.yt_dlp), Version(self.ejs)))
+
+    @property
+    def downgrade(self) -> bool:
+        """True when the target yt-dlp is older than the locked one."""
+        return Version(self.yt_dlp) < Version(self.old_yt_dlp)
 
 
 def fetch_release(version: str | None) -> dict:
@@ -65,25 +79,31 @@ def fetch_release(version: str | None) -> dict:
 
 def expected_ejs(release: dict) -> str:
     """The exact yt-dlp-ejs version a yt-dlp release's default extra pins."""
-    for line in release["info"].get("requires_dist") or []:
-        requirement = Requirement(line)
-        if (requirement.name.lower() == "yt-dlp-ejs" and requirement.marker
-                and requirement.marker.evaluate({"extra": "default"})):
-            pins = [spec.version for spec in requirement.specifier
-                    if spec.operator == "=="]
-            if len(pins) == 1:
-                return pins[0]
-    raise ValueError(
-        f"yt-dlp {release['info']['version']} does not pin one yt-dlp-ejs"
-    )
+    version = release["info"]["version"]
+    try:
+        specifier = SpecifierSet(
+            ejs_pin(release["info"].get("requires_dist") or []),
+        )
+    except ValueError:
+        specifier = SpecifierSet()
+    pins = [spec.version for spec in specifier if spec.operator == "=="]
+    if len(pins) != 1:
+        raise ValueError(f"yt-dlp {version} does not pin one yt-dlp-ejs")
+    return pins[0]
 
 
-def locked(lock_text: str, name: str) -> str:
-    """The version *name* is pinned to in a pip-compile lock."""
-    match = re.search(rf"^{re.escape(name)}==(\S+)", lock_text, re.MULTILINE)
-    if match is None:
-        raise ValueError(f"requirements-release.txt does not pin {name}")
-    return match.group(1)
+def parse_version(text: str | None) -> str | None:
+    """Normalise a requested yt-dlp version, or None for the newest.
+
+    Rejects anything that is not a version before it reaches the PyPI URL.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        return str(Version(text))
+    except InvalidVersion:
+        raise ValueError(f"{text!r} is not a yt-dlp version") from None
 
 
 def move_ejs_range(requirements_text: str, ejs: str) -> tuple[str, bool]:
@@ -128,8 +148,8 @@ def plan(version: str | None, fetch=None) -> Refresh:
     ejs = expected_ejs(release)
     _, range_moved = move_ejs_range(requirements_text, ejs)
     return Refresh(
-        old_yt_dlp=locked(lock_text, "yt-dlp"),
-        old_ejs=locked(lock_text, "yt-dlp-ejs"),
+        old_yt_dlp=locked_version(lock_text, "yt-dlp"),
+        old_ejs=locked_version(lock_text, "yt-dlp-ejs"),
         yt_dlp=release["info"]["version"],
         ejs=ejs,
         range_moved=range_moved,
@@ -156,10 +176,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="yt-dlp version (default: newest on PyPI)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the plan without changing files")
+    parser.add_argument("--allow-downgrade", action="store_true",
+                        help="allow a yt-dlp older than the locked one")
     args = parser.parse_args(argv)
 
     try:
-        refresh = plan(args.version or None)
+        refresh = plan(parse_version(args.version))
     except (OSError, ValueError, KeyError) as exc:
         print(f"::error title=yt-dlp lock refresh::{exc}")
         return 1
@@ -168,6 +190,11 @@ def main(argv: list[str] | None = None) -> int:
           f"yt-dlp-ejs {refresh.old_ejs} -> {refresh.ejs}"
           + (" (requirements.txt range moves)" if refresh.range_moved
              else ""))
+    if refresh.downgrade and not args.allow_downgrade:
+        print(f"::error title=yt-dlp lock refresh::yt-dlp {refresh.yt_dlp} "
+              f"is older than the locked {refresh.old_yt_dlp}. Pass "
+              "--allow-downgrade to roll back on purpose.")
+        return 1
     write_outputs(refresh)
     if args.dry_run or not refresh.changed:
         if not refresh.changed:
