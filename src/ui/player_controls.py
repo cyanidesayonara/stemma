@@ -33,7 +33,11 @@ from src.beat_detector import (
 )
 from src.metronome import tap_tempo
 from src.model_manager import model_label
-from src.player import SPEED_PRESETS, MultiTrackPlayer
+from src.player import (
+    RECORDING_STEM_PREFIX,
+    SPEED_PRESETS,
+    MultiTrackPlayer,
+)
 from src.qt_signal_utils import safe_disconnect
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.control_primitives import format_time as _format_time
@@ -1240,6 +1244,17 @@ class PlayerControls(QWidget):
         self._model_manager = manager
         self._beat_model_path = manager.beat_model_path()
 
+    def _analysis_stems(self) -> dict:
+        """The song's own stems for detection, without recording takes.
+
+        A take is the player's playing over the song, not the song: mixing
+        it in shifted the detected key, beats, chords, and sections.
+        """
+        return {
+            name: audio for name, audio in self._player.stems.items()
+            if not name.startswith(RECORDING_STEM_PREFIX)
+        }
+
     def start_detection(
         self,
         start_sec: float | None = None,
@@ -1542,7 +1557,7 @@ class PlayerControls(QWidget):
             return
 
         worker = DetectionWorker(
-            stems=dict(self._player.stems),
+            stems=self._analysis_stems(),
             sample_rate=self._player.sample_rate,
             model_path=self._beat_model_path,
             start_sec=start_sec,
@@ -1712,7 +1727,7 @@ class PlayerControls(QWidget):
         self._song_info_bar.show_key_status("Key: detecting...")
 
         worker = DetectionWorker(
-            stems=dict(self._player.stems),
+            stems=self._analysis_stems(),
             sample_rate=self._player.sample_rate,
             model_path=self._beat_model_path,
         )
@@ -1752,7 +1767,7 @@ class PlayerControls(QWidget):
         self._song_info_bar.show_bpm_status("Tempo: detecting...")
 
         worker = DetectionWorker(
-            stems=dict(self._player.stems),
+            stems=self._analysis_stems(),
             sample_rate=self._player.sample_rate,
             model_path=self._beat_model_path,
         )
