@@ -137,6 +137,75 @@ class TestResolveDataDir:
         ) is True
 
 
+class TestUnreachableDataDir:
+    """A custom folder on a disconnected drive is kept for next time."""
+
+    @pytest.fixture
+    def setup(self, tmp_path, settings_ini, monkeypatch):
+        fake_user = tmp_path / "userdata"
+        monkeypatch.setattr(
+            "src.data_paths.platform_user_data_dir", lambda: str(fake_user)
+        )
+        custom = os.path.join("X:\\", "music", "stemma")
+        settings_ini.setValue("paths/data_dir", custom)
+        monkeypatch.setattr(
+            "src.data_paths._location_reachable", lambda path: False
+        )
+        app_root = tmp_path / "repo"
+        app_root.mkdir()
+        return fake_user, custom, str(app_root)
+
+    def test_falls_back_for_this_session(self, setup, settings_ini):
+        fake_user, custom, app_root = setup
+        assert resolve_data_dir(app_root, settings_ini) == str(fake_user)
+
+    def test_keeps_the_setting(self, setup, settings_ini):
+        _fake_user, custom, app_root = setup
+        resolve_data_dir(app_root, settings_ini)
+        assert settings_ini.value("paths/data_dir", "") == custom
+        assert not settings_ini.value(
+            "internal/data_dir_was_reset", False, type=bool
+        )
+
+    def test_notice_names_the_folder_once(self, setup, settings_ini):
+        _fake_user, custom, app_root = setup
+        resolve_data_dir(app_root, settings_ini)
+        msg = consume_data_dir_reset_notice(settings_ini)
+        assert msg and custom in msg
+        assert "next time" in msg
+        assert consume_data_dir_reset_notice(settings_ini) is None
+
+    def test_no_legacy_migration_into_fallback(self, setup, settings_ini):
+        fake_user, _custom, app_root = setup
+        legacy = os.path.join(app_root, "data")
+        os.makedirs(legacy)
+        with open(os.path.join(legacy, "library.json"), "w") as fh:
+            fh.write("[]")
+        resolve_data_dir(app_root, settings_ini)
+        assert not os.path.exists(os.path.join(fake_user, "library.json"))
+        assert not settings_ini.value(
+            "migration/repo_data_migrated", False, type=bool
+        )
+
+    def test_reachable_again_uses_the_folder(
+        self, tmp_path, settings_ini, monkeypatch,
+    ):
+        custom = tmp_path / "custom"
+        settings_ini.setValue("paths/data_dir", str(custom))
+        monkeypatch.setattr(
+            "src.data_paths._location_reachable", lambda path: True
+        )
+        assert resolve_data_dir(str(tmp_path), settings_ini) == str(custom)
+
+
+def test_location_reachable_for_existing_and_missing_roots(tmp_path):
+    from src.data_paths import _location_reachable
+
+    assert _location_reachable(str(tmp_path / "not" / "yet" / "made"))
+    # A relative path has no root to lose.
+    assert _location_reachable("relative/data")
+
+
 def test_consume_data_dir_reset_notice_once(settings_ini):
     settings_ini.setValue("internal/data_dir_was_reset", True)
     assert consume_data_dir_reset_notice(settings_ini)

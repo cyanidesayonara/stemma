@@ -300,7 +300,12 @@ class PreferencesDialog(QDialog):
 
     def _on_accept(self) -> None:
         new_dir = self._data_dir_edit.text().strip()
-        if new_dir:
+        old_raw = self._settings.value("paths/data_dir", "")
+        old_dir = old_raw.strip() if isinstance(old_raw, str) else ""
+        # Only a changed folder is checked: the saved one may sit on a
+        # drive that is disconnected this session, and that must not stop
+        # the other preferences from saving.
+        if new_dir and new_dir != old_dir:
             try:
                 os.makedirs(new_dir, exist_ok=True)
                 probe = os.path.join(new_dir, ".stemma_write_test")
@@ -315,9 +320,6 @@ class PreferencesDialog(QDialog):
                     f"{describe_error(exc, 'Data folder check failed')}",
                 )
                 return
-
-        old_raw = self._settings.value("paths/data_dir", "")
-        old_dir = old_raw.strip() if isinstance(old_raw, str) else ""
 
         self._settings.setValue("paths/data_dir", new_dir)
         if new_dir != old_dir:
