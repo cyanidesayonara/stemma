@@ -2,17 +2,24 @@
 
 Each stem gets an equal vertical slice with colored bars, a small label on
 the left, and shared playback cursor / loop markers across the full height.
-Supports click-to-seek and drag-to-seek.
+Supports click-to-seek and drag-to-seek. For keyboard and screen-reader
+users it is a Tab stop exposed as a "Playback position" slider: the window's
+Left/Right/Home/End shortcuts seek while it has focus, and assistive tools
+read the position as its value text and the loop points as its description
+(#188).
 """
 
 from __future__ import annotations
 
 import math
+import weakref
 from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
+    QAccessible,
+    QAccessibleValueChangeEvent,
     QColor,
     QFont,
     QFontMetrics,
@@ -23,7 +30,7 @@ from PySide6.QtGui import (
     QPaintEvent,
     QPen,
 )
-from PySide6.QtWidgets import QWidget, QSizePolicy
+from PySide6.QtWidgets import QAccessibleWidget, QSizePolicy, QWidget
 
 from src.ui.styles import DARK_COLORS
 
@@ -51,6 +58,8 @@ _BAR_RADIUS = 1.0
 _CURSOR_GLOW_WIDTH = 6
 _LABEL_WIDTH = 52
 _LABEL_PADDING = 4
+
+_FOCUS_RING_WIDTH = 2.0
 
 _MUTED_LANE_OPACITY = 0.15
 # A dimmed lane needs more opacity to stay legible against a light background;
@@ -97,6 +106,56 @@ def lane_label(stem_name: str) -> str:
     return stem_name[:6].capitalize()
 
 
+class _WaveformAccessible(QAccessibleWidget):
+    """Screen-reader view of the waveform: a slider with spoken text.
+
+    Deliberately no ``QAccessibleValueInterface``: a Python
+    ``interface_cast`` returning ``self`` is not a valid C++ interface
+    pointer, and Qt's UI Automation bridge crashed the app (access
+    violation) as soon as Narrator or any UIA client queried it (#253
+    review). The position is spoken through the value text instead; the
+    keyboard seeks.
+    """
+
+    def __init__(self, widget: "WaveformStackWidget") -> None:
+        QAccessibleWidget.__init__(self, widget, QAccessible.Role.Slider)
+        # Weak: PySide keeps the interface wrapper alive after Qt deletes
+        # it, and it must not pin the widget too.
+        self._waveform_ref = weakref.ref(widget)
+
+    def text(self, kind: QAccessible.Text) -> str:
+        w = self._waveform_ref()
+        if w is None:
+            return ""
+        if kind == QAccessible.Text.Name:
+            return "Playback position"
+        if kind == QAccessible.Text.Value:
+            return w.accessible_value_text()
+        # Qt's UI Automation bridge reads HelpText from Help, newer
+        # clients read Description: name the loop points in both.
+        if kind in (QAccessible.Text.Description, QAccessible.Text.Help):
+            return w.accessible_description_text()
+        return super().text(kind)
+
+
+def _accessible_factory(key: str, obj) -> QAccessibleWidget | None:
+    """Give every WaveformStackWidget its slider interface."""
+    if isinstance(obj, WaveformStackWidget):
+        return _WaveformAccessible(obj)
+    return None
+
+
+_factory_installed = False
+
+
+def _install_accessible_factory() -> None:
+    """Register the factory once per process (Qt keeps a list of them)."""
+    global _factory_installed
+    if not _factory_installed:
+        QAccessible.installFactory(_accessible_factory)
+        _factory_installed = True
+
+
 @dataclass
 class _StemLane:
     name: str
@@ -124,6 +183,14 @@ class WaveformStackWidget(QWidget):
         self._seeking: bool = False
         self._loading: bool = False
         self._shimmer_phase: float = 0.0
+        # Whole second last announced to assistive tools: the playhead
+        # moves 30 times a second, a screen reader needs far fewer updates.
+        self._announced_second: int = -1
+
+        _install_accessible_factory()
+        # A Tab stop, not a click-focus one: clicking to seek must not pull
+        # focus away from the control the user was working with.
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         self._shimmer_timer = QTimer(self)
         self._shimmer_timer.setInterval(30)  # ~33fps
@@ -269,6 +336,72 @@ class WaveformStackWidget(QWidget):
         self._position_ratio = new_ratio
         if not self._seeking and old_px != new_px:
             self.update()
+        self._announce_position()
+
+    # -- Accessibility --
+
+    def position_seconds(self) -> float:
+        """The playhead in seconds (0 with no song)."""
+        return self._position_ratio * max(0.0, self._total_seconds)
+
+    def total_seconds(self) -> float:
+        """The song length in seconds (0 with no song)."""
+        return self._total_seconds
+
+    def seek_to_seconds(self, seconds: float) -> None:
+        """Seek as a click would, clamped to the song; no-op without one."""
+        if self._total_seconds <= 0:
+            return
+        seconds = max(0.0, min(self._total_seconds, seconds))
+        self._position_ratio = seconds / self._total_seconds
+        self.update()
+        self.seek_requested.emit(seconds)
+
+    def accessible_value_text(self) -> str:
+        """What a screen reader says for the position: "1:23 of 4:56"."""
+        if self._total_seconds <= 0:
+            return "No song loaded"
+        return (
+            f"{format_loop_time(self.position_seconds())} of "
+            f"{format_loop_time(self._total_seconds)}"
+        )
+
+    def accessible_description_text(self) -> str:
+        """Names the loop points, which are otherwise only drawn."""
+        if self._total_seconds <= 0:
+            return ""
+        parts = [
+            f"loop point {letter} at "
+            f"{format_loop_time(ratio * self._total_seconds)}"
+            for letter, ratio in self._loop_points()
+        ]
+        if not parts:
+            return ""
+        text = ", ".join(parts)
+        return text[0].upper() + text[1:] + "."
+
+    def draws_focus_ring(self) -> bool:
+        """True when the keyboard focus ring is drawn."""
+        return self.hasFocus()
+
+    def _announce_position(self) -> None:
+        """Tell assistive tools the value changed, once per whole second."""
+        if not QAccessible.isActive():
+            return
+        second = int(self.position_seconds())
+        if second == self._announced_second:
+            return
+        self._announced_second = second
+        event = QAccessibleValueChangeEvent(self, float(second))
+        QAccessible.updateAccessibility(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().focusOutEvent(event)
+        self.update()
 
     def set_loop_markers(
         self, a_ratio: float | None, b_ratio: float | None
@@ -357,6 +490,9 @@ class WaveformStackWidget(QWidget):
 
             if self._lanes:
                 self._draw_lanes(painter, w, h)
+            # Under the loop markers, so their tags stay on top of it.
+            if self.draws_focus_ring():
+                self._draw_focus_ring(painter, w, h)
 
             if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
                 self._draw_loop_region(painter, w, h)
@@ -366,6 +502,17 @@ class WaveformStackWidget(QWidget):
             self._draw_cursor(painter, w, h)
         finally:
             painter.end()
+
+    def _draw_focus_ring(self, painter: QPainter, w: int, h: int) -> None:
+        """Accent outline while the waveform has keyboard focus."""
+        pen = QPen(self._accent_color, _FOCUS_RING_WIDTH)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        inset = _FOCUS_RING_WIDTH / 2
+        painter.drawRoundedRect(
+            QRectF(inset, inset, w - _FOCUS_RING_WIDTH, h - _FOCUS_RING_WIDTH),
+            4.0, 4.0,
+        )
 
     def _draw_lanes(self, painter: QPainter, w: int, h: int) -> None:
         font = QFont()
@@ -613,7 +760,4 @@ class WaveformStackWidget(QWidget):
     def _seek_to_x(self, x: float) -> None:
         if self._total_seconds <= 0 or self.width() <= 0:
             return
-        ratio = self._ratio_for_x(x)
-        self._position_ratio = ratio
-        self.update()
-        self.seek_requested.emit(ratio * self._total_seconds)
+        self.seek_to_seconds(self._ratio_for_x(x) * self._total_seconds)
