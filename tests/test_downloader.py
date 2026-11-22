@@ -746,3 +746,18 @@ class TestJsRuntimeAndLogging:
         assert (logging.ERROR, "yt-dlp: error line") in levels
         assert len(levels) == 3
 
+    @patch("src.audio_io.imageio_ffmpeg.get_ffmpeg_exe",
+           return_value="/bundled/ffmpeg")
+    @patch("src.downloader.yt_dlp.YoutubeDL")
+    def test_extract_metadata_passes_ffmpeg_location(
+        self, mock_ydl_class, mock_get,
+    ):
+        mock_ydl = MagicMock()
+        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = {"title": "T", "uploader": "U"}
+
+        extract_metadata("https://youtu.be/abc123")
+        opts = mock_ydl_class.call_args[0][0]
+        assert opts["ffmpeg_location"] == "/bundled/ffmpeg"
+

@@ -28,7 +28,12 @@ mm_datas, mm_binaries, mm_hiddenimports = collect_all(
     "PySide6.QtMultimedia"
 )
 _qjs_exe = os.path.join("build", "js-runtime", "qjs.exe")
-qjs_binaries = [(_qjs_exe, "js_runtime")] if os.path.isfile(_qjs_exe) else []
+if not os.path.isfile(_qjs_exe):
+    raise FileNotFoundError(
+        f"Bundled JS runtime not found at {_qjs_exe}. "
+        "Run 'python scripts/fetch_js_runtime.py' first."
+    )
+qjs_binaries = [(_qjs_exe, "js_runtime")]
 
 # -- Analysis -----------------------------------------------------------------
 

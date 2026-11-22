@@ -28,7 +28,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 # Packages pinned to exactly the locked version.
 _LOCKED_EXACT = ("PySide6",)
 # Packages whose range must stay on the locked minor version.
-_LOCKED_MINOR = ("librosa",)
+_LOCKED_MINOR = ("librosa", "yt-dlp-ejs")
 
 
 def _floating_requirements() -> dict[str, Requirement]:

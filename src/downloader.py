@@ -120,7 +120,7 @@ def js_runtimes_option() -> dict[str, dict[str, str]]:
 
 def _base_ydl_options() -> dict:
     """Common yt-dlp options shared by metadata extraction and download."""
-    return {
+    opts = {
         "quiet": True,
         "no_warnings": False,
         "noplaylist": True,
@@ -129,6 +129,10 @@ def _base_ydl_options() -> dict:
         "logger": _YtDlpLogger(),
         "js_runtimes": js_runtimes_option(),
     }
+    ffmpeg_exe = _get_ffmpeg_exe()
+    if ffmpeg_exe:
+        opts["ffmpeg_location"] = ffmpeg_exe
+    return opts
 
 
 def _remove_leftovers(stem: str) -> None:
@@ -252,10 +256,6 @@ def _download_options(
         ],
         "progress_hooks": [],
     }
-
-    ffmpeg_exe = _get_ffmpeg_exe()
-    if ffmpeg_exe:
-        opts["ffmpeg_location"] = ffmpeg_exe
 
     if progress_callback is not None:
         opts["progress_hooks"].append(progress_callback)

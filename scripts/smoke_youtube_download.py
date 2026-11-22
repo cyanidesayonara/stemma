@@ -17,20 +17,30 @@ from src.audio_io import audio_duration  # noqa: E402
 from src.diagnostics import collect_youtube_js_check  # noqa: E402
 from src.downloader import download_audio, extract_metadata  # noqa: E402
 
-DEFAULT_SMOKE_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+DEFAULT_SMOKE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 _FORBIDDEN_WARNINGS = (
     "without a js runtime",
     "no supported javascript runtime",
+    "challenge solving failed",
+    "signature solving failed",
+    "error solving",
+    "challenge solver",
+    "remote component",
 )
 
 
-class _WarningRecorder(logging.Handler):
+class _LogRecorder(logging.Handler):
     def __init__(self) -> None:
-        super().__init__(level=logging.WARNING)
-        self.messages: list[str] = []
+        super().__init__(level=logging.DEBUG)
+        self.warnings: list[str] = []
+        self.debugs: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(self.format(record))
+        text = self.format(record)
+        if record.levelno >= logging.WARNING:
+            self.warnings.append(text)
+        else:
+            self.debugs.append(text)
 
 
 def run_smoke(url: str) -> int:
@@ -42,7 +52,9 @@ def run_smoke(url: str) -> int:
         return 1
 
     stemma_logger = logging.getLogger("stemma")
-    recorder = _WarningRecorder()
+    prev_level = stemma_logger.level
+    recorder = _LogRecorder()
+    stemma_logger.setLevel(logging.DEBUG)
     stemma_logger.addHandler(recorder)
     try:
         title, artist = extract_metadata(url)
@@ -71,8 +83,22 @@ def run_smoke(url: str) -> int:
                 return 1
     finally:
         stemma_logger.removeHandler(recorder)
+        stemma_logger.setLevel(prev_level)
 
-    for warning in recorder.messages:
+    solver_lines = [
+        line for line in recorder.debugs
+        if "solving js challenges using" in line.lower()
+    ]
+    for line in solver_lines:
+        print(line)
+    if not any("quickjs" in line.lower() for line in solver_lines):
+        print(
+            "QuickJS challenge solver was not invoked during smoke download",
+            file=sys.stderr,
+        )
+        return 1
+
+    for warning in recorder.warnings:
         print(f"Warning logged: {warning}")
         lowered = warning.lower()
         for forbidden in _FORBIDDEN_WARNINGS:
