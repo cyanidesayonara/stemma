@@ -94,6 +94,7 @@ from src.ui.styles import (
     get_colors,
     get_stylesheet,
     scaled_font_size,
+    scaled_px,
 )
 from src.ui.waveform_stack_widget import lane_label
 from src.version import __version__
@@ -214,6 +215,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("stemma")
         self.setMinimumSize(_MINIMUM_SIZE)
+        self._screen_hooked = False
 
         self._library = library
         self._player = player
@@ -922,7 +924,6 @@ class MainWindow(QMainWindow):
         """
         dlg = QDialog(self)
         dlg.setWindowTitle("About stemma")
-        dlg.setFixedSize(540, 280)
 
         outer = QHBoxLayout(dlg)
         outer.setContentsMargins(20, 20, 20, 20)
@@ -954,6 +955,11 @@ class MainWindow(QMainWindow):
         right.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignRight)
 
         outer.addLayout(right)
+        # Fixed at 540 x 280 for 100 % text; at a larger text size the
+        # width grows with the text and the height fits the wrapped info.
+        width = scaled_px(540)
+        height = max(280, outer.totalHeightForWidth(width))
+        dlg.setFixedSize(width, height)
         dlg.logo = logo
         dlg.info_label = info
         return dlg
@@ -1390,6 +1396,15 @@ class MainWindow(QMainWindow):
     def showEvent(self, event) -> None:  # noqa: N802
         """Play the main logo intro animation on first show."""
         super().showEvent(event)
+        # The window now has its real screen (restored geometry may put it
+        # on another monitor); follow it there when it moves.
+        self._fit_minimum_to_screen()
+        handle = self.windowHandle()
+        if handle is not None and not self._screen_hooked:
+            self._screen_hooked = True
+            handle.screenChanged.connect(
+                lambda _screen: self._fit_minimum_to_screen()
+            )
         if self._intro_pending:
             self._intro_pending = False
             QTimer.singleShot(300, self._player_controls.play_intro_animation)

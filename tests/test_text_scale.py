@@ -82,7 +82,12 @@ def test_scaled_pt(points, scale, expected):
     assert text_scale.scaled_pt(points, scale) == expected
 
 
+_TOGGLE_RULE = re.compile(r"QPushButton#theme-toggle \{[^}]*\}")
+
+
 def _font_sizes(sheet: str) -> list[float]:
+    """Font sizes outside the theme toggle, which stays at 12pt."""
+    sheet = _TOGGLE_RULE.sub("", sheet)
     return [float(v) for v in re.findall(r"font-size:\s*([\d.]+)pt", sheet)]
 
 
@@ -93,6 +98,43 @@ def test_stylesheet_scales_every_font_size(reset_scale, theme):
     styles.set_text_scale(1.5)
     scaled = _font_sizes(styles.get_stylesheet(theme))
     assert scaled == [round(v * 1.5, 1) for v in base]
+
+
+def test_theme_toggle_glyph_keeps_its_size(reset_scale):
+    """Its fixed 30 x 26 button showed only the middle of a 27pt sun."""
+    styles.set_text_scale(2.25)
+    rule = _TOGGLE_RULE.search(styles.get_stylesheet("dark")).group(0)
+    assert "font-size: 12pt" in rule
+
+
+def test_scaled_text_height_adds_the_text_growth(reset_scale):
+    assert styles.scaled_text_height(28) == 28
+    styles.set_text_scale(2.25)
+    # 10pt is 13.3 px; at 225 % it is 30 px, 16.7 px taller.
+    assert styles.scaled_text_height(28) == 45
+
+
+def test_stem_volume_combo_holds_100_percent(qapp, reset_scale):
+    """At 225 % every stem row showed ")0%"."""
+    from unittest.mock import MagicMock
+
+    from src.ui.stem_mixer import StemRow
+
+    player = MagicMock()
+    player.muted_stems = set()
+    player.soloed_stems = set()
+    player.volumes = {}
+    try:
+        styles.set_text_scale(2.25)
+        qapp.setStyleSheet(styles.get_stylesheet("dark"))
+        row = StemRow("vocals", player)
+        combo = row._vol_combo
+        combo.ensurePolished()
+        text = combo.fontMetrics().horizontalAdvance("100%")
+        assert combo.width() > text + 24
+        assert combo.height() >= combo.fontMetrics().height()
+    finally:
+        qapp.setStyleSheet("")
 
 
 def test_default_stylesheet_is_unchanged(reset_scale):

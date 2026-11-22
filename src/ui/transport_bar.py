@@ -33,7 +33,7 @@ from src.ui.control_primitives import (
     make_toggle_icon,
     show_preset_value,
 )
-from src.ui.styles import DARK_COLORS, scaled_px
+from src.ui.styles import DARK_COLORS, scaled_px, scaled_text_height
 
 
 def _record_icon(colors: dict[str, str]):
@@ -127,7 +127,7 @@ class TransportBar(QWidget):
         make_display_combo(self._master_volume_combo)
         add_volume_presets(self._master_volume_combo)
         self._master_volume_combo.setFixedSize(
-            scaled_px(70), COMPACT_BUTTON,
+            scaled_px(70), scaled_text_height(COMPACT_BUTTON),
         )
         self._master_volume_combo.setToolTip("Master volume")
         self._master_volume_combo.setAccessibleName("Master volume preset")

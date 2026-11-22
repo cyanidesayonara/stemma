@@ -36,6 +36,7 @@ from src.ui.styles import (
     STEM_COLORS_LIGHT,
     recording_color,
     scaled_px,
+    scaled_text_height,
 )
 
 MAX_RECORDING_TAKES = 2
@@ -136,7 +137,10 @@ class StemRow(QWidget):
         self._vol_combo = QComboBox()
         make_display_combo(self._vol_combo)
         add_volume_presets(self._vol_combo)
-        self._vol_combo.setFixedSize(70, COMPACT_BUTTON)  # room for the chevron
+        # Room for the chevron, and for 100% at a larger text size.
+        self._vol_combo.setFixedSize(
+            scaled_px(70), scaled_text_height(COMPACT_BUTTON),
+        )
         self._vol_combo.setToolTip(f"{display} volume")
         self._vol_combo.setAccessibleName(f"{display} volume preset")
         self._vol_combo.activated.connect(self._on_vol_combo)

@@ -166,7 +166,8 @@ QPushButton#theme-toggle {{
     padding: 2px 8px;
     min-height: 0;
     min-width: 0;
-    font-size: {pt(12)};
+    /* Not scaled: the sun and moon fill a fixed 30 x 26 button. */
+    font-size: 12pt;
     color: {c["text"]};
 }}
 
@@ -648,6 +649,19 @@ def scaled_font_size(points: float) -> str:
 def scaled_px(pixels: int) -> int:
     """Grow a fixed text-box width (sized at 100 % text) with the text."""
     return round(pixels * _text_scale)
+
+
+# The body text (10pt) in pixels at 96 dpi.
+_BODY_TEXT_PX = 10 * 96 / 72
+
+
+def scaled_text_height(pixels: int) -> int:
+    """Grow a fixed text-box height by what the body text grew.
+
+    Only the text grows, not the padding and border around it, so this
+    adds the extra text height instead of multiplying the whole box.
+    """
+    return pixels + round(_BODY_TEXT_PX * (_text_scale - 1))
 
 
 def get_stylesheet(theme: str) -> str:
