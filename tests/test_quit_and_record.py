@@ -509,3 +509,69 @@ class TestQuitWithUnsavedTake:
         assert "session" in caplog.text.lower()
         assert "settings broke" in caplog.text
         stub.hide.assert_called_once()  # the close still goes ahead
+
+
+class TestSilentTake:
+    """Denied microphone access records digital silence with no error
+    (#188): the take is kept, but the user is told where to look."""
+
+    def _stop_with_take(self, player, tmp_path, level):
+        player.set_recording_song_dir(str(tmp_path))
+        player._allocate_recording_buffer()
+        player._recording_buffer[:4410] = level
+        player._recording_frames_captured = 4410
+        events = []
+        player.recording_saved.connect(lambda p: events.append(("saved", p)))
+        player.recording_silent.connect(lambda m: events.append(("silent", m)))
+        player.stop()
+        return events
+
+    def test_silent_take_is_saved_then_reported(self, armed_player, tmp_path):
+        events = self._stop_with_take(armed_player, tmp_path, 0.0)
+        assert [kind for kind, _ in events] == ["saved", "silent"]
+        message = events[1][1]
+        assert "Privacy" in message and "Microphone" in message
+        assert "Preferences" in message
+        assert list(tmp_path.glob("recording_take1.wav"))
+
+    def test_quiet_noise_floor_is_not_silent(self, armed_player, tmp_path):
+        # About -70 dBFS: a real input left unplayed, not a blocked one.
+        events = self._stop_with_take(armed_player, tmp_path, 3e-4)
+        assert [kind for kind, _ in events] == ["saved"]
+
+    def test_audible_take_is_not_reported(self, armed_player, tmp_path):
+        events = self._stop_with_take(armed_player, tmp_path, 0.2)
+        assert [kind for kind, _ in events] == ["saved"]
+
+    def test_failed_save_is_not_reported_as_silent(
+        self, armed_player, tmp_path,
+    ):
+        armed_player.set_recording_song_dir(str(tmp_path))
+        armed_player._allocate_recording_buffer()
+        armed_player._recording_frames_captured = 100
+        silent = []
+        armed_player.recording_silent.connect(silent.append)
+        with patch(
+            "src.player.sf.write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            armed_player.stop()
+        assert silent == []
+
+    def test_main_window_warns_about_a_silent_take(self, app):
+        from src.ui.main_window import MainWindow
+
+        window = MagicMock()
+        window._suppress_recording_reload = False
+        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+            MainWindow._on_recording_silent(window, "Silent.")
+        assert warn.call_args.args[1:] == ("Recording", "Silent.")
+
+    def test_main_window_stays_quiet_while_quitting(self, app):
+        from src.ui.main_window import MainWindow
+
+        window = MagicMock()
+        window._suppress_recording_reload = True
+        with patch("src.ui.main_window.QMessageBox.warning") as warn:
+            MainWindow._on_recording_silent(window, "Silent.")
+        warn.assert_not_called()

@@ -306,6 +306,15 @@ class MainWindow(QMainWindow):
         """A take could not be written; the player kept it in memory."""
         QMessageBox.warning(self, "Recording", message)
 
+    def _on_recording_silent(self, message: str) -> None:
+        """A saved take holds only silence: point to the input settings.
+
+        Skipped while quitting, when no modal box may open.
+        """
+        if self._suppress_recording_reload:
+            return
+        QMessageBox.warning(self, "Recording", message)
+
     def _setup_ui(self) -> None:
         """Build the main window layout."""
         self._library_panel = LibraryPanel(self._library)
@@ -1489,6 +1498,7 @@ class MainWindow(QMainWindow):
         self._player.recording_save_failed.connect(
             self._on_recording_save_failed
         )
+        self._player.recording_silent.connect(self._on_recording_silent)
 
     # ------------------------------------------------------------------
     # Slots
