@@ -5,12 +5,14 @@ the left, and shared playback cursor / loop markers across the full height.
 Supports click-to-seek and drag-to-seek. For keyboard and screen-reader
 users it is a Tab stop exposed as a "Playback position" slider: the window's
 Left/Right/Home/End shortcuts seek while it has focus, and assistive tools
-read and set the position through its accessible value (#188).
+read the position as its value text and the loop points as its description
+(#188).
 """
 
 from __future__ import annotations
 
 import math
+import weakref
 from dataclasses import dataclass
 
 import numpy as np
@@ -18,7 +20,6 @@ from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QAccessible,
     QAccessibleValueChangeEvent,
-    QAccessibleValueInterface,
     QColor,
     QFont,
     QFontMetrics,
@@ -59,8 +60,6 @@ _LABEL_WIDTH = 52
 _LABEL_PADDING = 4
 
 _FOCUS_RING_WIDTH = 2.0
-# Assistive tools step the position by this much, like the Left/Right keys.
-_ACCESSIBLE_STEP_SECONDS = 5.0
 
 _MUTED_LANE_OPACITY = 0.15
 # A dimmed lane needs more opacity to stay legible against a light background;
@@ -107,43 +106,36 @@ def lane_label(stem_name: str) -> str:
     return stem_name[:6].capitalize()
 
 
-class _WaveformAccessible(QAccessibleWidget, QAccessibleValueInterface):
-    """Screen-reader view of the waveform: a seconds-valued slider."""
+class _WaveformAccessible(QAccessibleWidget):
+    """Screen-reader view of the waveform: a slider with spoken text.
+
+    Deliberately no ``QAccessibleValueInterface``: a Python
+    ``interface_cast`` returning ``self`` is not a valid C++ interface
+    pointer, and Qt's UI Automation bridge crashed the app (access
+    violation) as soon as Narrator or any UIA client queried it (#253
+    review). The position is spoken through the value text instead; the
+    keyboard seeks.
+    """
 
     def __init__(self, widget: "WaveformStackWidget") -> None:
         QAccessibleWidget.__init__(self, widget, QAccessible.Role.Slider)
-        QAccessibleValueInterface.__init__(self)
-        self._waveform = widget
-
-    def interface_cast(self, kind):  # noqa: D401 - Qt override
-        if kind == QAccessible.InterfaceType.ValueInterface:
-            return self
-        return super().interface_cast(kind)
+        # Weak: PySide keeps the interface wrapper alive after Qt deletes
+        # it, and it must not pin the widget too.
+        self._waveform_ref = weakref.ref(widget)
 
     def text(self, kind: QAccessible.Text) -> str:
-        w = self._waveform
+        w = self._waveform_ref()
+        if w is None:
+            return ""
         if kind == QAccessible.Text.Name:
             return "Playback position"
         if kind == QAccessible.Text.Value:
             return w.accessible_value_text()
-        if kind == QAccessible.Text.Description:
+        # Qt's UI Automation bridge reads HelpText from Help, newer
+        # clients read Description: name the loop points in both.
+        if kind in (QAccessible.Text.Description, QAccessible.Text.Help):
             return w.accessible_description_text()
         return super().text(kind)
-
-    def currentValue(self) -> float:  # noqa: N802 - Qt override
-        return self._waveform.position_seconds()
-
-    def setCurrentValue(self, value) -> None:  # noqa: N802 - Qt override
-        self._waveform.seek_to_seconds(float(value))
-
-    def minimumValue(self) -> float:  # noqa: N802 - Qt override
-        return 0.0
-
-    def maximumValue(self) -> float:  # noqa: N802 - Qt override
-        return max(0.0, self._waveform.total_seconds())
-
-    def minimumStepSize(self) -> float:  # noqa: N802 - Qt override
-        return _ACCESSIBLE_STEP_SECONDS
 
 
 def _accessible_factory(key: str, obj) -> QAccessibleWidget | None:
@@ -498,6 +490,9 @@ class WaveformStackWidget(QWidget):
 
             if self._lanes:
                 self._draw_lanes(painter, w, h)
+            # Under the loop markers, so their tags stay on top of it.
+            if self.draws_focus_ring():
+                self._draw_focus_ring(painter, w, h)
 
             if self._loop_a_ratio is not None and self._loop_b_ratio is not None:
                 self._draw_loop_region(painter, w, h)
@@ -505,8 +500,6 @@ class WaveformStackWidget(QWidget):
                 self._draw_single_marker(painter, w, h)
 
             self._draw_cursor(painter, w, h)
-            if self.draws_focus_ring():
-                self._draw_focus_ring(painter, w, h)
         finally:
             painter.end()
 

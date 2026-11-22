@@ -43,30 +43,33 @@ def test_value_text_reads_position_of_length(wave):
     assert _iface(wave).text(QAccessible.Text.Value) == "1:23 of 4:56"
 
 
-def test_value_interface_exposes_seconds(wave):
-    value = _iface(wave).valueInterface()
-    assert value is not None
-    assert value.minimumValue() == 0.0
-    assert value.maximumValue() == pytest.approx(296.0)
-    assert value.currentValue() == pytest.approx(83.0)
-    assert value.minimumStepSize() == pytest.approx(5.0)
+def test_no_value_interface_is_claimed(wave):
+    """A Python value interface crashed Qt's UI Automation bridge (an
+    invalid C++ pointer from interface_cast): Narrator or any UIA client
+    took the app down (#253 review). Offscreen tests cannot see that
+    crash, so guard against the interface coming back."""
+    iface = _iface(wave)
+    assert iface.valueInterface() is None
+    assert "interface_cast" not in vars(type(iface))
 
 
-def test_setting_the_value_seeks(wave):
+def test_seek_to_seconds_clamps(wave):
     seeks = []
     wave.seek_requested.connect(seeks.append)
-    _iface(wave).valueInterface().setCurrentValue(120.0)
-    _iface(wave).valueInterface().setCurrentValue(999.0)
-    assert seeks == [pytest.approx(120.0), pytest.approx(296.0)]
+    wave.seek_to_seconds(120.0)
+    wave.seek_to_seconds(999.0)
+    wave.seek_to_seconds(-5.0)
+    assert seeks == [
+        pytest.approx(120.0), pytest.approx(296.0), pytest.approx(0.0),
+    ]
 
 
 def test_no_song_reads_as_empty(app):
     w = WaveformStackWidget()
-    iface = _iface(w)
-    assert iface.text(QAccessible.Text.Value) == "No song loaded"
+    assert _iface(w).text(QAccessible.Text.Value) == "No song loaded"
     seeks = []
     w.seek_requested.connect(seeks.append)
-    iface.valueInterface().setCurrentValue(10.0)
+    w.seek_to_seconds(10.0)
     assert seeks == []
     w.deleteLater()
 
@@ -77,6 +80,8 @@ def test_description_names_the_loop_points(wave):
     text = _iface(wave).text(QAccessible.Text.Description)
     assert "Loop point A at 0:12" in text
     assert "loop point B at 0:21" in text
+    # UI Automation's HelpText comes from Help.
+    assert _iface(wave).text(QAccessible.Text.Help) == text
 
 
 def test_lone_loop_point_is_named(wave):
