@@ -283,10 +283,9 @@ class PlayerControls(QWidget):
         controls_layout = QVBoxLayout(self._controls_widget)
         controls_layout.setContentsMargins(0, 0, 0, 0)
 
+        self._waveform_panel = WaveformPanel(self)
         self._song_info_bar = SongInfoBar(self)
         self._practice_rack = PracticeRack(self._song_info_bar, self)
-        self._transport_bar = TransportBar(self)
-        self._waveform_panel = WaveformPanel(self)
         self._stem_mixer = StemMixer(self._player, self)
 
         # The waveform takes a tall window's spare height up to its cap.
@@ -319,7 +318,10 @@ class PlayerControls(QWidget):
         # Anchored below the scroll area rather than inside it: play, stop,
         # record, and the master volume stay put no matter how far the
         # practice content is scrolled, and they sit closest to the mixer a
-        # player reaches for between takes.
+        # player reaches for between takes. Constructed after the scroll area
+        # so Tab order follows the top-to-bottom layout rather than jumping
+        # to the transport before the cards (#188).
+        self._transport_bar = TransportBar(self)
         self._transport_bar.setVisible(False)
         layout.addWidget(self._transport_bar)
 
@@ -330,6 +332,7 @@ class PlayerControls(QWidget):
 
         self._bind_component_aliases()
         self._connect_component_signals()
+        self._sync_tab_order()
 
         self._pitch_debounce = QTimer(self)
         self._pitch_debounce.setSingleShot(True)
@@ -460,6 +463,17 @@ class PlayerControls(QWidget):
             self._request_bpm_redetection
         )
         self._stem_mixer.mix_changed.connect(self._on_mixer_mix_changed)
+        self._stem_mixer.rows_changed.connect(self._sync_tab_order)
+
+    def _sync_tab_order(self) -> None:
+        """Keep the anchored transport after the practice cards and mixer."""
+        anchor = (
+            self._stem_mixer.last_tab_widget()
+            or self._practice_rack.last_tab_widget()
+        )
+        for widget in self._transport_bar.tab_order_widgets():
+            QWidget.setTabOrder(anchor, widget)
+            anchor = widget
 
     def _request_key_redetection(self) -> None:
         if self._player.stems:

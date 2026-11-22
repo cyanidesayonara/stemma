@@ -511,6 +511,10 @@ class PracticeRack(QWidget):
     def pitch_spin(self) -> PitchSpinBox:
         return self._pitch_spin
 
+    def last_tab_widget(self) -> QWidget:
+        """Return the last focusable control in the practice cards."""
+        return self._count_in_repeats
+
     def _emit_speed_changed(self, _index: int) -> None:
         speed = self._speed_combo.currentData()
         if speed is not None:

@@ -191,6 +191,16 @@ class TransportBar(QWidget):
     def record_icon(self):
         return self._record_icon
 
+    def tab_order_widgets(self) -> tuple[QWidget, ...]:
+        """Return focusable transport controls in left-to-right Tab order."""
+        return (
+            self._play_button,
+            self._stop_button,
+            self._record_button,
+            self._master_volume_slider,
+            self._master_volume_combo,
+        )
+
     def _on_master_volume_changed(self, value: int) -> None:
         show_preset_value(self._master_volume_combo, value)
         self.master_volume_changed.emit(value / 100.0)
