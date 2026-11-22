@@ -92,7 +92,11 @@ jobs:
   youtube-smoke-test:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # issues: write lets the lock-age check open its stale-lock issue.
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -118,3 +122,36 @@ jobs:
 
       - name: Run YouTube download smoke test
         run: python scripts/smoke_youtube_download.py
+
+      # The two steps below only warn: they run even when the locked smoke
+      # test failed, and never fail the job themselves (#260). See "Keeping
+      # YouTube import working" in docs/DEVELOPMENT.md.
+      - name: Check yt-dlp lock age
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check_ytdlp_lock_age.py --open-issue
+
+      # Last, because it replaces the locked yt-dlp in this job's Python.
+      # Only yt-dlp and the yt-dlp-ejs it names change, as a lock refresh
+      # would; the rest of the release lock stays. pwsh does not stop on a
+      # failed native command, so each one checks $LASTEXITCODE.
+      - name: Canary smoke test on the newest yt-dlp
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          function Stop-Canary($message) {
+            echo "::warning title=yt-dlp canary::$message"
+            exit 1
+          }
+          python -m pip install --upgrade --upgrade-strategy only-if-needed yt-dlp
+          if ($LASTEXITCODE -ne 0) { Stop-Canary "Could not install the newest yt-dlp." }
+          $ejs = python scripts/check_ytdlp_lock_age.py --print-expected-ejs
+          if ($LASTEXITCODE -ne 0) { Stop-Canary "Could not read the yt-dlp-ejs version the newest yt-dlp expects." }
+          python -m pip install "yt-dlp-ejs$ejs"
+          if ($LASTEXITCODE -ne 0) { Stop-Canary "Could not install yt-dlp-ejs$ejs." }
+          $version = python -c "import yt_dlp.version; print(yt_dlp.version.__version__)"
+          python scripts/smoke_youtube_download.py
+          if ($LASTEXITCODE -ne 0) { Stop-Canary "yt-dlp $version (yt-dlp-ejs$ejs) also fails the YouTube smoke test." }
+          echo "::notice title=yt-dlp canary::yt-dlp $version (yt-dlp-ejs$ejs) passes the YouTube smoke test."
