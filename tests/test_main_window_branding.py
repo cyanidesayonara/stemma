@@ -129,3 +129,24 @@ def test_player_side_stops_at_the_transport_row(window, app):
     assert splitter.sizes()[1] > 0
     assert transport.width() >= transport.minimumSizeHint().width()
     assert transport.logo.geometry().right() < transport.width()
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.25])
+def test_about_dialog_fits_its_text(window, app, scale):
+    """At 150 % text the fixed 540 x 280 dialog cut its last lines (#188)."""
+    from src.ui.styles import set_text_scale
+
+    set_text_scale(scale)
+    try:
+        app.setStyleSheet(get_stylesheet("dark"))
+        dlg = window._build_about_dialog()
+        dlg.show()
+        app.processEvents()
+        info = dlg.info_label
+        assert info.height() >= info.heightForWidth(info.width())
+        assert info.geometry().bottom() < dlg.height()
+        dlg.close()
+        dlg.deleteLater()
+    finally:
+        set_text_scale(1.0)
+        app.setStyleSheet("")

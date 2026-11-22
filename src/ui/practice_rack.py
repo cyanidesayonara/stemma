@@ -37,7 +37,7 @@ from src.ui.control_primitives import (
     show_preset_value,
 )
 from src.ui.song_info_bar import SongInfoBar
-from src.ui.styles import DARK_COLORS
+from src.ui.styles import DARK_COLORS, scaled_px
 
 
 def _make_card(
@@ -133,7 +133,7 @@ class PracticeRack(QWidget):
         count_in.setContentsMargins(0, 0, 0, 0)
 
         self._count_in_label = QLabel("")
-        self._count_in_label.setFixedWidth(32)
+        self._count_in_label.setFixedWidth(scaled_px(32))
         self._count_in_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         count_in.addWidget(self._count_in_label)
 
@@ -407,7 +407,8 @@ class PracticeRack(QWidget):
         self._metronome_volume_combo = QComboBox()
         make_display_combo(self._metronome_volume_combo)
         add_volume_presets(self._metronome_volume_combo)
-        self._metronome_volume_combo.setFixedWidth(70)  # room for the chevron
+        # Room for the chevron, and for 100% at a larger text size.
+        self._metronome_volume_combo.setFixedWidth(scaled_px(70))
         self._metronome_volume_combo.setToolTip("Metronome volume")
         self._metronome_volume_combo.setAccessibleName(
             "Metronome volume preset"

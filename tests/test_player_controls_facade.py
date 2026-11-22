@@ -765,14 +765,18 @@ def test_first_run_window_size(qapp, available, expected):
 
 
 def test_first_run_window_stays_on_a_short_screen():
-    """A 1920x1080 screen at 200% is 516 px tall: the title bar went off."""
+    """A 1920x1080 screen at 200% is 516 px tall: the title bar went off.
+
+    The minimum now shrinks to fit (#188), so the window does too.
+    """
     stub = MagicMock()
     stub.screen.return_value.availableGeometry.return_value = QRect(
         0, 0, 960, 516,
     )
-    stub.frameGeometry.return_value.height.return_value = 639
-    stub.geometry.return_value.height.return_value = 600
+    stub.frameGeometry.return_value.height.return_value = 515
+    stub.geometry.return_value.height.return_value = 476
     MainWindow._apply_first_run_size(stub)
+    stub.resize.assert_called_once_with(944, 476)
     assert stub.move.call_args.args == (8, 0)
 
 

@@ -7,10 +7,12 @@ coding agent -- without launching the app and importing a song by hand.
 
     python scripts/render_ui_review.py [--out DIR] [--stems 2|4|6]
         [--sizes 900x600,1366x768,1920x1080] [--themes dark,light]
+        [--text-scale 1.5]
 
 It writes one PNG per state, theme, and size plus an ``index.html`` contact
 sheet to ``build/ui-review/`` (ignored by git). Render once on ``main`` and
 once on a branch with different ``--out`` directories to compare.
+``--text-scale`` renders as Windows "Make text bigger" would (1.0-2.25).
 
 The window runs against a private data directory with a generated song and
 a throwaway settings file per window, so the real library, session, and
@@ -290,10 +292,16 @@ def close_window(app, window) -> None:
     pump(app, 0.2)
 
 
-def render(out_dir, sizes, themes, stem_count) -> list[dict]:
+def render(
+    out_dir, sizes, themes, stem_count, text_scale: float = 1.0,
+) -> list[dict]:
     """Render every state/theme/size and return one record per image."""
     data_dir = os.path.join(DEFAULT_OUT, ".data")
     app = start_app(data_dir)
+
+    from src.ui.styles import set_text_scale
+
+    set_text_scale(text_scale)
 
     from src.data_paths import platform_user_data_dir
 
@@ -397,11 +405,19 @@ def main(argv: list[str] | None = None) -> None:
         default=",".join(DEFAULT_THEMES),
         help="comma-separated: dark,light",
     )
+    parser.add_argument(
+        "--text-scale",
+        type=float,
+        default=1.0,
+        help='Windows "Make text bigger" factor, 1.0-2.25',
+    )
     args = parser.parse_args(argv)
 
     out_dir = os.path.abspath(args.out)
     themes = tuple(t for t in args.themes.split(",") if t)
-    records = render(out_dir, args.sizes, themes, args.stems)
+    records = render(
+        out_dir, args.sizes, themes, args.stems, args.text_scale,
+    )
     index = write_index(
         out_dir, records, f"stemma UI review ({os.path.basename(out_dir)})",
     )

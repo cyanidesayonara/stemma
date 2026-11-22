@@ -10,6 +10,7 @@ Applied globally via QApplication.setStyleSheet().
 import os
 
 from src.paths import app_root
+from src.ui.text_scale import clamp_text_scale, scaled_pt
 
 STEM_COLORS_DARK = {
     "vocals": "#bfa3dc",   # Purple (brand)
@@ -133,8 +134,16 @@ def _icon_button_size_rules() -> str:
 
 def _generate_stylesheet(
     c: dict[str, str], chevron: str = "", chevron_up: str = "",
+    text_scale: float = 1.0,
 ) -> str:
-    """Generate a QSS stylesheet from a color token dict."""
+    """Generate a QSS stylesheet from a color token dict.
+
+    Every font size is multiplied by *text_scale*, the Windows "Make text
+    bigger" factor (#188).
+    """
+    def pt(points: float) -> str:
+        return scaled_pt(points, text_scale)
+
     return f"""
 QMainWindow, QDialog {{
     background-color: {c["base"]};
@@ -157,6 +166,7 @@ QPushButton#theme-toggle {{
     padding: 2px 8px;
     min-height: 0;
     min-width: 0;
+    /* Not scaled: the sun and moon fill a fixed 30 x 26 button. */
     font-size: 12pt;
     color: {c["text"]};
 }}
@@ -189,7 +199,7 @@ QWidget {{
     background-color: {c["base"]};
     color: {c["text"]};
     font-family: "Segoe UI", sans-serif;
-    font-size: 10pt;
+    font-size: {pt(10)};
 }}
 
 QLabel {{
@@ -197,7 +207,7 @@ QLabel {{
 }}
 
 QLabel#title-label {{
-    font-size: 12pt;
+    font-size: {pt(12)};
     font-weight: bold;
     color: {c["text"]};
 }}
@@ -481,7 +491,7 @@ QToolTip {{
     border: 1px solid {c["surface1"]};
     border-radius: 4px;
     padding: 4px 8px;
-    font-size: 9pt;
+    font-size: {pt(9)};
 }}
 
 QFrame#card-frame {{
@@ -614,9 +624,64 @@ THEMES = {
 }
 
 
+# The Windows text size the stylesheets are generated for; main.py sets it
+# once at startup from text_scale.text_scale_factor().
+_text_scale = 1.0
+_scaled_stylesheets: dict[tuple[str, float], str] = {}
+
+
+def set_text_scale(scale: float) -> None:
+    """Set the text size factor that get_stylesheet() applies."""
+    global _text_scale
+    _text_scale = clamp_text_scale(scale)
+
+
+def get_text_scale() -> float:
+    """Return the text size factor that get_stylesheet() applies."""
+    return _text_scale
+
+
+def scaled_font_size(points: float) -> str:
+    """A QSS ``font-size`` value for *points* at the current text size."""
+    return scaled_pt(points, _text_scale)
+
+
+def scaled_px(pixels: int) -> int:
+    """Grow a fixed text-box width (sized at 100 % text) with the text."""
+    return round(pixels * _text_scale)
+
+
+# The body text (10pt) in pixels at 96 dpi.
+_BODY_TEXT_PX = 10 * 96 / 72
+
+
+def scaled_text_height(pixels: int) -> int:
+    """Grow a fixed text-box height by what the body text grew.
+
+    Only the text grows, not the padding and border around it, so this
+    adds the extra text height instead of multiplying the whole box.
+    """
+    return pixels + round(_BODY_TEXT_PX * (_text_scale - 1))
+
+
 def get_stylesheet(theme: str) -> str:
-    """Return the QSS stylesheet for the given theme name."""
-    return THEMES[theme]["stylesheet"]
+    """Return the QSS stylesheet for the given theme name.
+
+    At a text size above 100 % the sheet is generated once per theme with
+    its font sizes scaled.
+    """
+    entry = THEMES[theme]
+    if _text_scale == 1.0:
+        return entry["stylesheet"]
+    key = (theme, _text_scale)
+    if key not in _scaled_stylesheets:
+        _scaled_stylesheets[key] = _generate_stylesheet(
+            entry["colors"],
+            _chevron_path(theme),
+            _chevron_path(theme, "up"),
+            text_scale=_text_scale,
+        )
+    return _scaled_stylesheets[key]
 
 
 def get_colors(theme: str) -> dict[str, str]:

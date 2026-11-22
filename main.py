@@ -22,7 +22,12 @@ from src.diagnostics import (
 from src.paths import app_root
 from src.settings_store import open_settings
 from src.ui.splash_screen import SplashScreen
-from src.ui.styles import apply_tooltip_palette, get_stylesheet
+from src.ui.styles import (
+    apply_tooltip_palette,
+    get_stylesheet,
+    set_text_scale,
+)
+from src.ui.text_scale import text_scale_factor
 from src.version import __version__
 
 _ROOT_DIR = app_root()
@@ -114,6 +119,8 @@ def main() -> int:
         theme = settings.value("theme", "dark")
         if theme not in ("dark", "light"):
             theme = "dark"
+        # Windows "Make text bigger" scales every stylesheet font (#188).
+        set_text_scale(text_scale_factor())
         qapp.setStyleSheet(get_stylesheet(theme))
         apply_tooltip_palette(theme)
 
