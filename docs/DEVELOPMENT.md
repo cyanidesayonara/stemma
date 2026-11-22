@@ -109,6 +109,10 @@ eventually stops importing from YouTube. The lock was created on
 ### Routine
 
 1. **Every release** refreshes the three pieces in its release prep PR.
+   Substeps 1 to 3 are automated: run the "Refresh yt-dlp lock (manual)"
+   workflow from `main` (see "Automated checks"), or
+   `python scripts/refresh_ytdlp_lock.py` on Windows with Python 3.12 and
+   pip-tools. By hand:
    1. Find the newest `yt-dlp` on PyPI. Its `default` extra names the
       `yt-dlp-ejs` version it expects: the `Requires-Dist: yt-dlp-ejs==...`
       line on its PyPI page or in the installed METADATA.
@@ -183,10 +187,24 @@ warn. They never fail the job (#260).
   names. It runs wherever the installed `yt-dlp` is the locked one, as in
   CI, and skips elsewhere.
 
-Still to build: a lock-refresh workflow, a `workflow_dispatch` job on
-`windows-latest` with Python 3.12 that runs step 1 and opens a PR.
-Dependabot runs on Linux, and this lock must be compiled on Windows with
-Python 3.12, as above.
+- **Lock refresh.** The "Refresh yt-dlp lock (manual)" workflow
+  (`.github/workflows/refresh-ytdlp-lock.yml`) runs from `main` on
+  `windows-latest` with Python 3.12, because Dependabot runs on Linux and
+  this lock must be compiled on Windows. Leave the version input empty for
+  the newest yt-dlp.
+  - `scripts/refresh_ytdlp_lock.py` reads the `yt-dlp-ejs` version from
+    the release's `default` extra on PyPI. It moves the `requirements.txt`
+    range if the minor version changes, and compiles the lock with both
+    versions pinned.
+  - The workflow checks that the new lock installs and that
+    `tests/test_dependency_locks.py` passes. It then pushes
+    `chore/refresh-yt-dlp-<version>`, opens a pull request, and starts CI
+    on the branch with `workflow_dispatch`, since a push made with
+    `GITHUB_TOKEN` starts no workflow itself.
+  - If the repository does not allow Actions to open pull requests, the
+    run summary links to the compare page instead.
+  - QuickJS-ng is not touched. The pull request lists what is left to
+    check before merging.
 
 ## Testing
 

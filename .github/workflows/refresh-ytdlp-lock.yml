@@ -1,0 +1,119 @@
+# Refresh the release lock's yt-dlp and the yt-dlp-ejs it expects, on a
+# branch, then open a pull request and run CI on it (#260). This is step 1
+# of "Keeping YouTube import working" in docs/DEVELOPMENT.md. The lock is
+# Windows/Python 3.12 specific, so it is compiled here, not by Dependabot.
+#
+# Actions may not be allowed to open pull requests in this repository
+# ("Allow GitHub Actions to create and approve pull requests"). If not, the
+# run summary links to a ready compare page instead. CI is started with
+# workflow_dispatch, because a push made with GITHUB_TOKEN starts no
+# workflow of its own.
+
+name: Refresh yt-dlp lock (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      yt_dlp_version:
+        description: "yt-dlp version (empty = newest on PyPI)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      YT_DLP_VERSION: ${{ inputs.yt_dlp_version }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-tools
+        run: python -m pip install "pip-tools>=7.6.0" packaging
+
+      - name: Refresh the lock
+        id: refresh
+        run: |
+          if ($env:YT_DLP_VERSION) {
+            python scripts/refresh_ytdlp_lock.py --yt-dlp "$env:YT_DLP_VERSION"
+          } else {
+            python scripts/refresh_ytdlp_lock.py
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Nothing to refresh
+        if: steps.refresh.outputs.changed != 'true'
+        run: echo "::notice title=yt-dlp lock refresh::The lock already has the requested yt-dlp and yt-dlp-ejs."
+
+      - name: Check the new lock installs
+        if: steps.refresh.outputs.changed == 'true'
+        run: |
+          python -m pip install --require-hashes -r requirements-release.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -r requirements-dev.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest tests/test_dependency_locks.py -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Push a branch, open a pull request, and run CI
+        if: steps.refresh.outputs.changed == 'true'
+        env:
+          OLD_YT_DLP: ${{ steps.refresh.outputs.old_yt_dlp }}
+          OLD_EJS: ${{ steps.refresh.outputs.old_ejs }}
+          NEW_YT_DLP: ${{ steps.refresh.outputs.yt_dlp }}
+          NEW_EJS: ${{ steps.refresh.outputs.ejs }}
+          RANGE_MOVED: ${{ steps.refresh.outputs.range_moved }}
+        run: |
+          $branch = "chore/refresh-yt-dlp-$env:NEW_YT_DLP"
+          $title = "chore: refresh the yt-dlp lock to $env:NEW_YT_DLP"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # pip-compile may write CRLF on Windows; the repository stores LF.
+          git config core.autocrlf true
+          git switch -c $branch
+          git add requirements-release.txt requirements.txt
+          git commit -m $title -m "yt-dlp $env:OLD_YT_DLP -> $env:NEW_YT_DLP, yt-dlp-ejs $env:OLD_EJS -> $env:NEW_EJS." -m "Part of #260."
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push -u origin $branch
+          if ($LASTEXITCODE -ne 0) {
+            echo "::error title=yt-dlp lock refresh::Could not push $branch. Does it already exist?"
+            exit 1
+          }
+
+          $range = if ($env:RANGE_MOVED -eq "true") { "The yt-dlp-ejs range in requirements.txt moves to the new minor version." } else { "requirements.txt is unchanged." }
+          $body = @"
+          Made by the "Refresh yt-dlp lock" workflow (step 1 of "Keeping YouTube import working" in docs/DEVELOPMENT.md).
+
+          - yt-dlp $env:OLD_YT_DLP -> $env:NEW_YT_DLP
+          - yt-dlp-ejs $env:OLD_EJS -> $env:NEW_EJS (the version yt-dlp's default extra names)
+          - $range
+
+          Before merging:
+          - Check the yt-dlp-ejs release notes for a QuickJS-ng change (scripts/fetch_js_runtime.py).
+          - Check that the dispatched CI run on this branch passes, including youtube-smoke-test.
+          - Run the independent review, and ship the change as a patch release.
+
+          Part of #260.
+          "@
+          gh pr create --base main --head $branch --title $title --body $body
+          if ($LASTEXITCODE -ne 0) {
+            $compare = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/compare/main...$($branch)?expand=1"
+            echo "::warning title=yt-dlp lock refresh::Actions may not open pull requests here. Open it from $compare"
+            "Open the pull request: $compare" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+          gh workflow run ci.yml --ref $branch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "CI started on $branch." >> $env:GITHUB_STEP_SUMMARY
