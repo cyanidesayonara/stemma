@@ -487,7 +487,6 @@ class TestClickUtils:
         assert ci.shape[1] == 2
 
 
-
 def _broken_write(path, *args, **kwargs):
     """Stand-in writer that leaves a partial file and fails (disk full)."""
     with open(path, "wb") as fh:

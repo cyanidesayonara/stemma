@@ -9,6 +9,7 @@ from PySide6.QtCore import QSettings
 from src.data_paths import (
     consume_data_dir_reset_notice,
     legacy_repo_data_dir,
+    location_reachable,
     platform_user_data_dir,
     resolve_data_dir,
 )
@@ -149,7 +150,7 @@ class TestUnreachableDataDir:
         custom = os.path.join("X:\\", "music", "stemma")
         settings_ini.setValue("paths/data_dir", custom)
         monkeypatch.setattr(
-            "src.data_paths._location_reachable", lambda path: False
+            "src.data_paths.location_reachable", lambda path: False
         )
         app_root = tmp_path / "repo"
         app_root.mkdir()
@@ -193,17 +194,44 @@ class TestUnreachableDataDir:
         custom = tmp_path / "custom"
         settings_ini.setValue("paths/data_dir", str(custom))
         monkeypatch.setattr(
-            "src.data_paths._location_reachable", lambda path: True
+            "src.data_paths.location_reachable", lambda path: True
         )
         assert resolve_data_dir(str(tmp_path), settings_ini) == str(custom)
 
 
-def test_location_reachable_for_existing_and_missing_roots(tmp_path):
-    from src.data_paths import _location_reachable
+def _missing_drive_letter() -> str:
+    for letter in "ZYXWVUTSRQPONMLKJIHGFED":
+        if not os.path.isdir(f"{letter}:\\"):
+            return letter
+    pytest.skip("every drive letter is in use")
 
-    assert _location_reachable(str(tmp_path / "not" / "yet" / "made"))
+
+def test_location_reachable_for_existing_roots(tmp_path):
+    assert location_reachable(str(tmp_path / "not" / "yet" / "made"))
     # A relative path has no root to lose.
-    assert _location_reachable("relative/data")
+    assert location_reachable("relative/data")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="drive letters are Windows-only")
+def test_location_on_a_missing_drive_is_unreachable():
+    letter = _missing_drive_letter()
+    assert not location_reachable(f"{letter}:\\music\\stemma")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="drive letters are Windows-only")
+def test_missing_drive_keeps_the_setting_end_to_end(
+    tmp_path, settings_ini, monkeypatch,
+):
+    fake_user = tmp_path / "userdata"
+    monkeypatch.setattr(
+        "src.data_paths.platform_user_data_dir", lambda: str(fake_user)
+    )
+    custom = f"{_missing_drive_letter()}:\\music\\stemma"
+    settings_ini.setValue("paths/data_dir", custom)
+
+    assert resolve_data_dir(str(tmp_path), settings_ini) == str(fake_user)
+    assert settings_ini.value("paths/data_dir") == custom
+    assert custom in consume_data_dir_reset_notice(settings_ini)
 
 
 def test_consume_data_dir_reset_notice_once(settings_ini):

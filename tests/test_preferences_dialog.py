@@ -197,3 +197,11 @@ def test_changed_unusable_data_folder_still_warns(
 
     assert len(warnings) == 1
     assert not settings_ini.value("paths/data_dir", "")
+
+
+def test_change_message_names_the_session_folder_when_old_is_unreachable():
+    from src.ui.preferences_dialog import data_dir_change_message
+
+    text = data_dir_change_message("X:\\old", session_dir="C:\\default")
+    assert "X:\\old" in text and "C:\\default" in text
+    assert "C:\\default" not in data_dir_change_message("X:\\old")

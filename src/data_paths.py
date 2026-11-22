@@ -23,14 +23,14 @@ _DATA_DIR_RESET_NOTICE = (
 )
 
 
-
-
 def _unavailable_notice(path: str) -> str:
+    """Startup notice for a custom data folder whose drive is missing."""
     return (
         f"Your data folder is not reachable:\n{path}\n\n"
         "Is its drive connected? For now stemma uses the default "
-        "location, and songs you import are saved there. Your folder "
-        "setting is kept: stemma tries it again next time it starts."
+        "location: songs you import are saved there, and models may "
+        "download again. Your folder setting is kept: stemma tries it "
+        "again next time it starts."
     )
 
 
@@ -51,7 +51,7 @@ def consume_data_dir_reset_notice(settings: QSettings) -> str | None:
     return _DATA_DIR_RESET_NOTICE
 
 
-def _location_reachable(path: str) -> bool:
+def location_reachable(path: str) -> bool:
     """True unless *path*'s drive or network share is missing.
 
     A folder on a disconnected USB drive or an offline share cannot be
@@ -148,7 +148,7 @@ def resolve_data_dir(app_root: str, settings: QSettings) -> str:
     custom = settings.value("paths/data_dir", "")
     if isinstance(custom, str) and custom.strip():
         path = os.path.normpath(os.path.expanduser(custom.strip()))
-        if not _location_reachable(path):
+        if not location_reachable(path):
             settings.setValue(_DATA_DIR_UNAVAILABLE_KEY, path)
             dest = platform_user_data_dir()
             os.makedirs(dest, exist_ok=True)

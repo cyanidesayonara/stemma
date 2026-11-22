@@ -38,19 +38,32 @@ from src.app_settings import (
     read_startup_play_sound,
     read_sync_recording_pitch,
 )
-from src.data_paths import platform_user_data_dir
+from src.data_paths import location_reachable, platform_user_data_dir
 from src.import_messages import describe_error
 from src.version import __version__
 
 
-def data_dir_change_message(old_dir: str) -> str:
-    """Text shown after the data folder setting changes."""
-    return (
+def data_dir_change_message(
+    old_dir: str, session_dir: str | None = None,
+) -> str:
+    """Text shown after the data folder setting changes.
+
+    *session_dir* is the folder this session fell back to because
+    *old_dir* was unreachable; songs imported meanwhile are there.
+    """
+    text = (
         "Restart stemma for the new data folder to take effect.\n\n"
         "Your songs are not moved automatically. To keep your library, "
         "close stemma and copy everything in the old folder into the new "
         f"one before opening it again:\n{old_dir}"
     )
+    if session_dir:
+        text += (
+            "\n\nThat folder is not reachable now, so this session uses "
+            "the default folder. Songs imported meanwhile are in:\n"
+            f"{session_dir}"
+        )
+    return text
 
 
 def _combo_int_data(combo: QComboBox, default: int = -1) -> int:
@@ -326,7 +339,14 @@ class PreferencesDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Preferences",
-                data_dir_change_message(old_dir or platform_user_data_dir()),
+                data_dir_change_message(
+                    old_dir or platform_user_data_dir(),
+                    session_dir=(
+                        platform_user_data_dir()
+                        if old_dir and not location_reachable(old_dir)
+                        else None
+                    ),
+                ),
             )
 
         self._settings.setValue(
