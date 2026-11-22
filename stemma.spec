@@ -6,6 +6,8 @@ mode incurs on every launch.  The output folder is zipped for distribution
 and will be bundled into an MSIX package for v2.0.
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
@@ -18,12 +20,20 @@ sd2_datas, sd2_binaries, sd2_hiddenimports = collect_all("_sounddevice_data")
 ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all(
     "imageio_ffmpeg"
 )
+ejs_datas, ejs_binaries, ejs_hiddenimports = collect_all("yt_dlp_ejs")
 svg_datas, svg_binaries, svg_hiddenimports = collect_all("PySide6.QtSvg")
 # QtMultimedia needs its backend DLLs and plugins, not just the Python
 # binding: a bare hiddenimport left the module unimportable at runtime.
 mm_datas, mm_binaries, mm_hiddenimports = collect_all(
     "PySide6.QtMultimedia"
 )
+_qjs_exe = os.path.join("build", "js-runtime", "qjs.exe")
+if not os.path.isfile(_qjs_exe):
+    raise FileNotFoundError(
+        f"Bundled JS runtime not found at {_qjs_exe}. "
+        "Run 'python scripts/fetch_js_runtime.py' first."
+    )
+qjs_binaries = [(_qjs_exe, "js_runtime")]
 
 # -- Analysis -----------------------------------------------------------------
 
@@ -35,6 +45,8 @@ a = Analysis(
         + sd_binaries
         + sd2_binaries
         + ffmpeg_binaries
+        + ejs_binaries
+        + qjs_binaries
         + svg_binaries
         + mm_binaries
     ),
@@ -46,6 +58,7 @@ a = Analysis(
     + sd_datas
     + sd2_datas
     + ffmpeg_datas
+    + ejs_datas
     + svg_datas
     + mm_datas,
     hiddenimports=[
@@ -54,6 +67,7 @@ a = Analysis(
         "sounddevice",
         "_sounddevice_data",
         "imageio_ffmpeg",
+        "yt_dlp_ejs",
         "PySide6.QtSvg",
         "PySide6.QtMultimedia",
         "sklearn.utils._typedefs",
@@ -66,6 +80,7 @@ a = Analysis(
     + sd_hiddenimports
     + sd2_hiddenimports
     + ffmpeg_hiddenimports
+    + ejs_hiddenimports
     + svg_hiddenimports
     + mm_hiddenimports,
     hookspath=[],

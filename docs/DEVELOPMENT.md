@@ -165,9 +165,11 @@ report: that is expected, and those models report `CPUExecutionProvider`.
 
 ## Packaging
 
-Build the one-folder application:
+Fetch the SHA-256 verified QuickJS-ng executable and build the one-folder
+application:
 
 ```powershell
+python scripts/fetch_js_runtime.py
 python -m PyInstaller --clean --noconfirm stemma.spec
 ```
 

@@ -51,6 +51,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: pytest -m "not slow and not hardware" -v --tb=short --timeout=120
 
+      - name: Fetch bundled JS runtime (QuickJS-ng)
+        run: python scripts/fetch_js_runtime.py
+
       - name: Build executable
         run: python -m PyInstaller --clean --noconfirm stemma.spec
 
@@ -88,6 +91,7 @@ jobs:
             'librosa version: \d+\.\d+',
             # a version only when live Speed and Pitch actually ran
             'soxr version: \d+\.\d+\S* \(live speed and pitch ran\)',
+            'YouTube JS runtime: quickjs-ng \d+\.\d+\S* \(yt-dlp-ejs \d+\.\d+',
             'DmlExecutionProvider'
           )
           foreach ($pattern in $required) {

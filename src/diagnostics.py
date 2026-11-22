@@ -104,6 +104,32 @@ def collect_stretch_check() -> str:
     return soxr.__version__
 
 
+def collect_youtube_js_check() -> str:
+    """Check yt-dlp-ejs solver scripts and a supported JS runtime."""
+    try:
+        # Deferred imports: an explicit smoke path; normal startup does not
+        # pull yt-dlp or yt-dlp-ejs until a URL import starts.
+        import yt_dlp
+        import yt_dlp_ejs
+        import yt_dlp_ejs.yt.solver
+
+        from src.downloader import js_runtimes_option
+
+        if not yt_dlp_ejs.yt.solver.core() or not yt_dlp_ejs.yt.solver.lib():
+            return "unavailable (empty yt-dlp-ejs scripts)"
+        ydl = yt_dlp.YoutubeDL({
+            "js_runtimes": js_runtimes_option(),
+            "quiet": True,
+        })
+        for runtime in (ydl._js_runtimes or {}).values():
+            info = getattr(runtime, "info", None)
+            if info is not None and info.supported:
+                return f"{info.name} {info.version} (yt-dlp-ejs {yt_dlp_ejs.version})"
+        return "unavailable (no supported JS runtime)"
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        return f"unavailable ({type(exc).__name__}: {exc})"
+
+
 def collect_diagnostics() -> dict[str, str | list[str]]:
     """Return app and ONNX Runtime version/provider diagnostics."""
     # Deferred import: diagnostics is an explicit smoke path, while normal
@@ -115,6 +141,7 @@ def collect_diagnostics() -> dict[str, str | list[str]]:
         "onnxruntime_version": ort.__version__,
         "librosa_version": collect_librosa_version(),
         "soxr_version": collect_stretch_check(),
+        "youtube_js_runtime": collect_youtube_js_check(),
         "available_providers": list(ort.get_available_providers()),
         "model_providers": [
             f"{name}: {provider}"
@@ -139,6 +166,7 @@ def format_diagnostics(
     else:
         lines.append(f"soxr version: {soxr_version}")
     lines += [
+        f"YouTube JS runtime: {diagnostics.get('youtube_js_runtime', 'unknown')}",
         f"Available ONNX providers: {providers}",
     ]
     model_providers = diagnostics.get("model_providers") or []

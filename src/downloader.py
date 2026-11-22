@@ -15,6 +15,7 @@ import yt_dlp
 from src.audio_io import ffmpeg_exe as _get_ffmpeg_exe
 from src.crash_log import logger
 from src.import_messages import strip_ansi
+from src.paths import app_root
 
 
 class DownloadError(Exception):
@@ -66,6 +67,72 @@ def is_transient_error(message: str) -> bool:
 def _clean_message(exc: BaseException) -> str:
     """A yt-dlp failure's text without colour codes, for log and UI."""
     return strip_ansi(str(exc)).strip()
+
+
+class _YtDlpLogger:
+    """Forward yt-dlp warnings, errors, and debug output to stemma's log."""
+
+    @staticmethod
+    def _clean(msg: object) -> str:
+        return strip_ansi(str(msg)).strip()
+
+    def debug(self, msg: object) -> None:
+        text = self._clean(msg)
+        if text:
+            logger.debug("yt-dlp: %s", text)
+
+    def warning(self, msg: object) -> None:
+        text = self._clean(msg)
+        if text:
+            logger.warning("yt-dlp: %s", text)
+
+    def error(self, msg: object) -> None:
+        text = self._clean(msg)
+        if text:
+            logger.error("yt-dlp: %s", text)
+
+
+def bundled_js_runtime() -> str | None:
+    """Return the path to the bundled QuickJS-ng executable, or None."""
+    root = app_root()
+    candidates = (
+        os.path.join(root, "js_runtime", "qjs.exe"),
+        os.path.join(root, "build", "js-runtime", "qjs.exe"),
+    )
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def js_runtimes_option() -> dict[str, dict[str, str]]:
+    """Return the yt-dlp ``js_runtimes`` mapping for extraction/download.
+
+    Prefers the bundled QuickJS-ng binary when present (frozen builds or local
+    builds after ``scripts/fetch_js_runtime.py``); otherwise enables all
+    yt-dlp-supported runtimes on PATH instead of deno-only.
+    """
+    qjs = bundled_js_runtime()
+    if qjs is not None:
+        return {"quickjs": {"path": qjs}}
+    return {"deno": {}, "quickjs": {}, "node": {}, "bun": {}}
+
+
+def _base_ydl_options() -> dict:
+    """Common yt-dlp options shared by metadata extraction and download."""
+    opts = {
+        "quiet": True,
+        "no_warnings": False,
+        "noplaylist": True,
+        # Plain text: the message ends up in the log and the import dialog.
+        "no_color": True,
+        "logger": _YtDlpLogger(),
+        "js_runtimes": js_runtimes_option(),
+    }
+    ffmpeg_exe = _get_ffmpeg_exe()
+    if ffmpeg_exe:
+        opts["ffmpeg_location"] = ffmpeg_exe
+    return opts
 
 
 def _remove_leftovers(stem: str) -> None:
@@ -151,12 +218,9 @@ def extract_metadata(url: str) -> tuple[str, str]:
         DownloadError: If the metadata extraction fails.
     """
     opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **_base_ydl_options(),
         "extract_flat": False,
         "skip_download": True,
-        "noplaylist": True,
-        "no_color": True,
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -177,13 +241,9 @@ def _download_options(
 ) -> dict:
     """Fresh yt-dlp options for one download attempt."""
     opts = {
+        **_base_ydl_options(),
         "format": "bestaudio/best",
         "outtmpl": stem,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        # Plain text: the message ends up in the log and the import dialog.
-        "no_color": True,
         # Never resume a failed attempt's partial file: a retry may pick
         # a different format (leftovers are also removed before retrying).
         "continuedl": False,
@@ -196,10 +256,6 @@ def _download_options(
         ],
         "progress_hooks": [],
     }
-
-    ffmpeg_exe = _get_ffmpeg_exe()
-    if ffmpeg_exe:
-        opts["ffmpeg_location"] = ffmpeg_exe
 
     if progress_callback is not None:
         opts["progress_hooks"].append(progress_callback)
