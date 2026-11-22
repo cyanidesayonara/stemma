@@ -55,7 +55,7 @@ A chord lane under the waveform: the whole song's chords, plus the next bars lar
 
 Song sections (experimental): stemma splits the song into sections on its bar lines, with the same letter for parts that sound alike. Double-click a section, or press Shift+L, to loop it.
 
-YouTube import works with YouTube's newer checks.
+YouTube import now uses its own JavaScript runtime for YouTube's checks.
 
 If your headphones or speakers disconnect during playback, stemma pauses and tells you.
 
@@ -77,7 +77,7 @@ Slow down or speed up from 0.5x to 2x without changing pitch
 A-B loop to drill a difficult passage
 Loop Trainer: speed steps up on every repeat until you reach full tempo
 Transpose up or down seven semitones, tempo unchanged
-Automatic key and tempo detection, with a chord lane that reads the chords ahead
+Automatic key and tempo detection, with a chord lane that shows the chords ahead
 Beat-synced metronome with tap tempo and nudge
 Count-in before playback and before each loop repeat
 Record your own take over the backing track

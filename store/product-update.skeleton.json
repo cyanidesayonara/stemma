@@ -24,7 +24,7 @@
       "A-B loop to drill a difficult passage",
       "Loop Trainer: speed steps up on every repeat until you reach full tempo",
       "Transpose up or down seven semitones, tempo unchanged",
-      "Automatic key and tempo detection, with a chord lane that reads the chords ahead",
+      "Automatic key and tempo detection, with a chord lane that shows the chords ahead",
       "Beat-synced metronome with tap tempo and nudge",
       "Count-in before playback and before each loop repeat",
       "Record your own take over the backing track",
@@ -46,7 +46,7 @@
       "play along",
       "stem separation"
     ],
-    "whatsNew": "What's new in version 3.1.0\n\nA chord lane under the waveform: the whole song's chords, plus the next bars large enough to read ahead while you play. Click a chord to jump to it.\n\nSong sections (experimental): stemma splits the song into sections on its bar lines, with the same letter for parts that sound alike. Double-click a section, or press Shift+L, to loop it.\n\nYouTube import works with YouTube's newer checks.\n\nIf your headphones or speakers disconnect during playback, stemma pauses and tells you.\n\nA silent recording, usually Windows blocking the microphone, now comes with a warning that points to the setting.\n\nKeyboard and screen readers: the waveform is a Tab stop that announces the playback position and loop points, and Ctrl+O, Ctrl+, and Ctrl+Q import, open Preferences, and quit.\n\nSafer files: a failed export leaves no partial file, and a data folder on a disconnected drive is kept for next time."
+    "whatsNew": "What's new in version 3.1.0\n\nA chord lane under the waveform: the whole song's chords, plus the next bars large enough to read ahead while you play. Click a chord to jump to it.\n\nSong sections (experimental): stemma splits the song into sections on its bar lines, with the same letter for parts that sound alike. Double-click a section, or press Shift+L, to loop it.\n\nYouTube import now uses its own JavaScript runtime for YouTube's checks.\n\nIf your headphones or speakers disconnect during playback, stemma pauses and tells you.\n\nA silent recording, usually Windows blocking the microphone, now comes with a warning that points to the setting.\n\nKeyboard and screen readers: the waveform is a Tab stop that announces the playback position and loop points, and Ctrl+O, Ctrl+, and Ctrl+Q import, open Preferences, and quit.\n\nSafer files: a failed export leaves no partial file, and a data folder on a disconnected drive is kept for next time."
   },
   "productId": "9P2W12L8F381",
   "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",

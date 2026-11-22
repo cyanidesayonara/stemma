@@ -18,7 +18,8 @@ published.
 - Song sections (experimental): a ruler above the waveforms splits the song
   into sections on its bar lines, with the same letter for sections that
   sound alike. Click one to jump to it; double-click it, or press Shift+L,
-  to loop it on its bar lines. Saved songs gain sections once.
+  to loop it on its bar lines. Saved songs are analysed again once,
+  when first opened.
 - YouTube import keeps working with YouTube's JavaScript checks: stemma now
   ships its own small JavaScript runtime (QuickJS-ng) for yt-dlp.
 - Losing the audio output device during playback (a headset unplugged)
@@ -33,6 +34,8 @@ published.
   the library keeps its songs when its folder moves or its index is locked.
 - Recorded takes no longer change the song's detected key, tempo, chords,
   and sections: detection listens to the song's own stems only.
+- Seeking at a changed speed or pitch no longer stutters, and the first
+  window opens larger.
 - Quitting with a take that could not be saved asks first, the logo sounds
   play again, the logo now ends the transport row, and the About dialog
   credits the author.
