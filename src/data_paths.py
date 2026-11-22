@@ -10,10 +10,12 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
 _DATA_DIR_RESET_FLAG = "internal/data_dir_was_reset"
+_DATA_DIR_UNAVAILABLE_KEY = "internal/data_dir_unavailable"
 _DATA_DIR_RESET_NOTICE = (
     "The saved data folder path was invalid or could not be used.\n\n"
     "Your library and models now use the default location. "
@@ -21,15 +23,43 @@ _DATA_DIR_RESET_NOTICE = (
 )
 
 
-def consume_data_dir_reset_notice(settings: QSettings) -> str | None:
-    """If startup recovered from a bad custom data path, return a one-shot message.
+def _unavailable_notice(path: str) -> str:
+    """Startup notice for a custom data folder whose drive is missing."""
+    return (
+        f"Your data folder is not reachable:\n{path}\n\n"
+        "Is its drive connected? For now stemma uses the default "
+        "location: songs you import are saved there, and models may "
+        "download again. Your folder setting is kept: stemma tries it "
+        "again next time it starts."
+    )
 
-    Clears the internal flag so the dialog is shown at most once.
+
+def consume_data_dir_reset_notice(settings: QSettings) -> str | None:
+    """If startup fell back from the custom data path, return a one-shot message.
+
+    Covers both an invalid path (the setting was cleared) and an
+    unreachable one (the setting was kept for the next start). Clears the
+    internal flags so the dialog is shown at most once.
     """
+    unavailable = settings.value(_DATA_DIR_UNAVAILABLE_KEY, "")
+    if isinstance(unavailable, str) and unavailable:
+        settings.remove(_DATA_DIR_UNAVAILABLE_KEY)
+        return _unavailable_notice(unavailable)
     if not settings.value(_DATA_DIR_RESET_FLAG, False, type=bool):
         return None
     settings.remove(_DATA_DIR_RESET_FLAG)
     return _DATA_DIR_RESET_NOTICE
+
+
+def location_reachable(path: str) -> bool:
+    """True unless *path*'s drive or network share is missing.
+
+    A folder on a disconnected USB drive or an offline share cannot be
+    created, but that is not a reason to forget it: the drive may be back
+    next time.
+    """
+    anchor = Path(path).anchor
+    return not anchor or os.path.isdir(anchor)
 
 
 def platform_user_data_dir() -> str:
@@ -109,13 +139,20 @@ def resolve_data_dir(app_root: str, settings: QSettings) -> str:
     needed) and no repo migration is performed. Otherwise the platform default
     user directory is used and legacy ``<app_root>/data`` may be merged in.
 
-    If the custom path is missing, not a directory, or cannot be created, the
-    setting is cleared, :func:`consume_data_dir_reset_notice` will report it,
-    and resolution continues with the default user directory.
+    If the custom path's drive or share is not reachable, the setting is
+    kept and this session alone uses the default user directory (without
+    legacy migration). If the path is not a directory or cannot be
+    created, the setting is cleared. Either way
+    :func:`consume_data_dir_reset_notice` reports it once.
     """
     custom = settings.value("paths/data_dir", "")
     if isinstance(custom, str) and custom.strip():
         path = os.path.normpath(os.path.expanduser(custom.strip()))
+        if not location_reachable(path):
+            settings.setValue(_DATA_DIR_UNAVAILABLE_KEY, path)
+            dest = platform_user_data_dir()
+            os.makedirs(dest, exist_ok=True)
+            return dest
         try:
             if os.path.lexists(path) and not os.path.isdir(path):
                 raise NotADirectoryError(path)

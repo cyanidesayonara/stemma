@@ -155,3 +155,53 @@ def test_dialog_combo_rule_leaves_cockpit_combos_alone(app):
         assert heights[0] < heights[1]
         cockpit.deleteLater()
         dialog.deleteLater()
+
+
+def test_unchanged_unreachable_data_folder_does_not_block_ok(
+    app, settings_ini, audio_devices, monkeypatch, tmp_path
+):
+    # The saved folder's drive is disconnected: startup fell back for this
+    # session and kept the setting, so OK must still save everything else.
+    saved = str(tmp_path / "file_not_folder")
+    open(saved, "w").close()
+    settings_ini.setValue("paths/data_dir", saved)
+    warnings = []
+    monkeypatch.setattr(
+        "src.ui.preferences_dialog.QMessageBox.warning",
+        lambda *args: warnings.append(args),
+    )
+    dialog = _dialog(monkeypatch, settings_ini)
+    dialog._export_combo.setCurrentIndex(dialog._export_combo.findData("mp3"))
+
+    dialog._on_accept()
+
+    assert warnings == []
+    assert settings_ini.value("paths/data_dir") == saved
+    assert settings_ini.value("export/default_format") == "mp3"
+
+
+def test_changed_unusable_data_folder_still_warns(
+    app, settings_ini, audio_devices, monkeypatch, tmp_path
+):
+    bad = str(tmp_path / "file_not_folder")
+    open(bad, "w").close()
+    warnings = []
+    monkeypatch.setattr(
+        "src.ui.preferences_dialog.QMessageBox.warning",
+        lambda *args: warnings.append(args),
+    )
+    dialog = _dialog(monkeypatch, settings_ini)
+    dialog._data_dir_edit.setText(bad)
+
+    dialog._on_accept()
+
+    assert len(warnings) == 1
+    assert not settings_ini.value("paths/data_dir", "")
+
+
+def test_change_message_names_the_session_folder_when_old_is_unreachable():
+    from src.ui.preferences_dialog import data_dir_change_message
+
+    text = data_dir_change_message("X:\\old", session_dir="C:\\default")
+    assert "X:\\old" in text and "C:\\default" in text
+    assert "C:\\default" not in data_dir_change_message("X:\\old")

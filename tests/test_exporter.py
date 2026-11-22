@@ -485,3 +485,49 @@ class TestClickUtils:
         ci = generate_count_in(2, 120.0, SAMPLE_RATE)
         assert ci.ndim == 2
         assert ci.shape[1] == 2
+
+
+def _broken_write(path, *args, **kwargs):
+    """Stand-in writer that leaves a partial file and fails (disk full)."""
+    with open(path, "wb") as fh:
+        fh.write(b"partial")
+    raise OSError(28, "No space left on device")
+
+
+class TestAtomicExport:
+    """A failed export never leaves a partial file at the destination."""
+
+    @pytest.mark.parametrize("ext", [".wav", ".mp3"])
+    def test_success_leaves_no_part_file(self, exporter, tmp_path, ext):
+        out = tmp_path / "out" / f"mix{ext}"
+        exporter.export_mix(str(out))
+        assert out.is_file() and out.stat().st_size > 0
+        assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+    @pytest.mark.parametrize("ext", [".wav", ".mp3"])
+    def test_failed_write_keeps_previous_file(
+        self, exporter, tmp_path, monkeypatch, ext,
+    ):
+        out = tmp_path / "out" / f"mix{ext}"
+        out.parent.mkdir()
+        out.write_bytes(b"previous export")
+        monkeypatch.setattr("src.exporter._write_audio_to", _broken_write)
+        with pytest.raises(OSError):
+            exporter.export_mix(str(out))
+        assert out.read_bytes() == b"previous export"
+        assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+    def test_failed_stem_write_leaves_nothing(
+        self, exporter, tmp_path, monkeypatch,
+    ):
+        out = tmp_path / "out" / "stem.wav"
+        monkeypatch.setattr("src.exporter._write_audio_to", _broken_write)
+        with pytest.raises(OSError):
+            exporter.export_stem("vocals", str(out))
+        assert list(out.parent.iterdir()) == []
+
+    def test_unsupported_extension_writes_nothing(self, exporter, tmp_path):
+        out = tmp_path / "out" / "mix.flac"
+        with pytest.raises(ValueError):
+            exporter.export_mix(str(out))
+        assert not out.parent.exists() or list(out.parent.iterdir()) == []

@@ -25,24 +25,50 @@ def _write_audio(
     sample_rate: int,
     mp3_bitrate: int = 320,
 ) -> None:
-    """Write audio data to a file, choosing format by extension.
+    """Write audio data to a file atomically, choosing format by extension.
+
+    The audio is written to ``<path>.part`` first and renamed over *path*
+    only once complete, so a failed export (disk full, device removed)
+    never leaves a truncated file behind or clobbers an earlier export.
 
     Args:
         path: Output file path (.wav or .mp3).
         audio: Audio array of shape (frames, channels), float32 in [-1, 1].
         sample_rate: Sample rate in Hz.
+        mp3_bitrate: Bitrate for MP3 output in kbps.
 
     Raises:
         ValueError: If the file extension is not supported.
     """
     ext = os.path.splitext(path)[1].lower()
-
-    if ext == ".wav":
-        sf.write(path, audio, sample_rate)
-    elif ext == ".mp3":
-        _write_mp3(path, audio, sample_rate, bitrate=mp3_bitrate)
-    else:
+    if ext not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported format '{ext}'. Use .wav or .mp3.")
+
+    part = f"{path}.part"
+    try:
+        _write_audio_to(part, audio, sample_rate, mp3_bitrate, ext)
+        os.replace(part, path)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
+
+
+def _write_audio_to(
+    path: str,
+    audio: np.ndarray,
+    sample_rate: int,
+    mp3_bitrate: int,
+    ext: str,
+) -> None:
+    """Encode *audio* into *path* as *ext* (".wav" or ".mp3")."""
+    if ext == ".wav":
+        # Explicit format: the temporary name does not end in .wav.
+        sf.write(path, audio, sample_rate, format="WAV")
+    else:
+        _write_mp3(path, audio, sample_rate, bitrate=mp3_bitrate)
 
 
 def _write_mp3(
