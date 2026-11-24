@@ -70,7 +70,8 @@ from src.beat_detector import DETECTION_VERSION
 from src.data_paths import consume_data_dir_reset_notice
 from src.exporter import ExportWorker, StemExporter, audible_stems
 from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
-from src.library import LibraryRecovery, SongLibrary
+from src.library import LibraryRecovery, Setlist, SongLibrary
+from src.play_queue import PlayQueue
 from src.separation_queue import SeparationQueue
 from src.model_manager import ModelManager
 from src.player import (
@@ -226,6 +227,8 @@ class MainWindow(QMainWindow):
         # The latest (song id, percent) report of the running separation.
         self._separation_percent: tuple[str | None, int] = (None, 0)
         self._export_worker: ExportWorker | None = None
+        self._play_queue = PlayQueue()
+        self._navigating_from_queue = False
         self._shuffle_queue: list[str] = []
         self._volume_toast: QLabel | None = None
         self._volume_toast_timer: QTimer | None = None
@@ -290,6 +293,11 @@ class MainWindow(QMainWindow):
     def player_controls(self) -> PlayerControls:
         """Public access for the player controls panel."""
         return self._player_controls
+
+    @property
+    def play_queue(self) -> PlayQueue:
+        """Playback queue and active setlist coordinator."""
+        return self._play_queue
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -441,6 +449,13 @@ class MainWindow(QMainWindow):
         self._player_controls.set_section_ruler_visible(
             self._section_ruler_action.isChecked()
         )
+        view_menu.addSeparator()
+        self._play_queue_action = view_menu.addAction("Play &Queue")
+        self._play_queue_action.setCheckable(True)
+        self._play_queue_action.setChecked(False)
+        self._play_queue_action.triggered.connect(
+            self._library_panel.set_queue_visible
+        )
 
         help_menu = menu_bar.addMenu("&Help")
 
@@ -555,6 +570,7 @@ class MainWindow(QMainWindow):
         # -- Library navigation --
         g(Qt.Key.Key_N, lambda: self._advance_song(1))
         g(Qt.Key.Key_P, lambda: self._advance_song(-1))
+        g(Qt.Key.Key_Q, self._library_panel.toggle_queue_visible)
 
         # -- Help -- unguarded: F-keys don't collide with text entry.
         u(Qt.Key.Key_F1, self._on_keyboard_shortcuts)
@@ -856,6 +872,7 @@ class MainWindow(QMainWindow):
             ("Library", (
                 ("N", "Next song"),
                 ("P", "Previous song"),
+                ("Q", "Toggle play queue"),
             )),
             ("App", (
                 ("Ctrl+O", "Import a song"),
@@ -1049,6 +1066,7 @@ class MainWindow(QMainWindow):
                 "session/shuffle_enabled",
                 self._library_panel.shuffle_enabled,
             )
+            self._save_play_queue_session()
             return
         self._settings.setValue(
             "session/song_id", self._current_song_id or ""
@@ -1157,13 +1175,22 @@ class MainWindow(QMainWindow):
                 f"{prefix}/det_ver",
                 DETECTION_VERSION if sections is not None else 0,
             )
-        # Library playback mode.
+        # Library playback mode and play queue.
         self._settings.setValue(
             "session/repeat_mode", self._library_panel.repeat_mode
         )
         self._settings.setValue(
             "session/shuffle_enabled", self._library_panel.shuffle_enabled
         )
+        self._save_play_queue_session()
+
+    def _save_play_queue_session(self) -> None:
+        """Persist play queue and active setlist context into QSettings."""
+        queue = self.__dict__.get("_play_queue")
+        if queue is not None:
+            self._settings.setValue(
+                "session/play_queue", json.dumps(queue.to_dict()),
+            )
 
     def _restore_session(self) -> None:
         """Reload the last song and player state from QSettings."""
@@ -1176,6 +1203,36 @@ class MainWindow(QMainWindow):
         self._library_panel.set_shuffle_enabled(bool(shuffle))
 
         song_id = self._settings.value("session/song_id", "")
+
+        queue = self.__dict__.get("_play_queue")
+        if queue is not None:
+            raw_queue = self._settings.value("session/play_queue", "")
+            if raw_queue:
+                try:
+                    loaded_queue = PlayQueue.from_dict(json.loads(str(raw_queue)))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    loaded_queue = PlayQueue()
+                valid_ids = [s.id for s in self._library.songs]
+                loaded_queue.prune(valid_ids)
+                if loaded_queue.is_setlist_active:
+                    get_sl = getattr(self._library, "get_setlist", None)
+                    sl = (
+                        get_sl(loaded_queue.context_id)
+                        if callable(get_sl)
+                        else None
+                    )
+                    if isinstance(sl, Setlist) and sl.song_ids:
+                        loaded_queue.sync_setlist(
+                            sl.id,
+                            sl.song_ids,
+                            name=sl.name,
+                            current_song_id=str(song_id) if song_id else None,
+                        )
+                    else:
+                        loaded_queue.clear_setlist()
+                self._play_queue = loaded_queue
+            self._refresh_queue_ui()
+
         if not song_id:
             return
 
@@ -1561,6 +1618,18 @@ class MainWindow(QMainWindow):
             lambda: self._advance_song(1)
         )
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
+        self._library_panel.play_next_requested.connect(self.play_next)
+        self._library_panel.add_to_queue_requested.connect(self.add_to_queue)
+        self._library_panel.queue_toggled.connect(
+            self._on_library_queue_toggled
+        )
+        qw = self._library_panel.queue_widget
+        qw.play_queued_index_requested.connect(self._on_queue_play_index)
+        qw.move_item_requested.connect(self._on_queue_move_item)
+        qw.remove_item_requested.connect(self._on_queue_remove_item)
+        qw.clear_queue_requested.connect(self._on_queue_clear)
+        qw.stop_setlist_requested.connect(self._on_queue_stop_setlist)
+        qw.play_context_song_requested.connect(self._on_queue_play_context_song)
         self._player.play_finished.connect(self._on_play_finished)
         self._player.playback_failed.connect(self._on_playback_failed)
         self._player.recording_unavailable.connect(
@@ -1608,6 +1677,17 @@ class MainWindow(QMainWindow):
             and self._session_restore_song_id != song_id
         ):
             self._session_restore_song_id = None
+
+        queue = self.__dict__.get("_play_queue")
+        if (
+            queue is not None
+            and not self._navigating_from_queue
+            and self._session_restore_song_id != song_id
+        ):
+            queue.record_history(self._current_song_id)
+            if queue.is_setlist_active:
+                queue.clear_setlist()
+            self._refresh_queue_ui()
 
         self._suppress_recording_reload = True
         try:
@@ -1910,35 +1990,185 @@ class MainWindow(QMainWindow):
                 row._nudge_spin.setValue(int(nudges[name]))
 
     # ------------------------------------------------------------------
-    # Autoplay / Next / Previous
+    # Autoplay / Next / Previous / Play Queue
     # ------------------------------------------------------------------
 
+    def _is_song_playable(self, song_id: str) -> bool:
+        """True when *song_id* exists in the library and is ready to play."""
+        return (
+            self._library.get_song(song_id) is not None
+            and not self._library_panel.is_song_separating(song_id)
+        )
+
+    def _refresh_queue_ui(self) -> None:
+        """Update the sidebar queue widget and badge from the queue model."""
+        queue = self.__dict__.get("_play_queue")
+        if queue is not None:
+            self._library_panel.update_queue_display(queue)
+
+    def _on_library_queue_toggled(self, visible: bool) -> None:
+        self._play_queue_action.blockSignals(True)
+        self._play_queue_action.setChecked(visible)
+        self._play_queue_action.blockSignals(False)
+
+    def play_next(self, song_id: str) -> None:
+        """Insert *song_id* at the front of the Up Next queue."""
+        if not self._is_song_playable(song_id):
+            return
+        self._play_queue.play_next(song_id)
+        self._refresh_queue_ui()
+
+    def add_to_queue(self, song_id: str) -> None:
+        """Append *song_id* to the end of the Up Next queue."""
+        if not self._is_song_playable(song_id):
+            return
+        self._play_queue.enqueue(song_id)
+        self._refresh_queue_ui()
+
+    def play_setlist(
+        self,
+        setlist_id: str,
+        start_song_id: str | None = None,
+    ) -> bool:
+        """Activate *setlist_id* and start playback from *start_song_id*."""
+        setlist = self._library.get_setlist(setlist_id)
+        if setlist is None or not setlist.song_ids:
+            return False
+        if start_song_id is not None:
+            if (
+                start_song_id not in setlist.song_ids
+                or not self._is_song_playable(start_song_id)
+            ):
+                return False
+            start_index = setlist.song_ids.index(start_song_id)
+        else:
+            start_index = next(
+                (
+                    idx
+                    for idx, sid in enumerate(setlist.song_ids)
+                    if self._is_song_playable(sid)
+                ),
+                -1,
+            )
+            if start_index < 0:
+                return False
+        target = self._play_queue.start_setlist(
+            setlist.id,
+            setlist.song_ids,
+            name=setlist.name,
+            start_index=start_index,
+        )
+        self._refresh_queue_ui()
+        if target is None:
+            return False
+        return self._load_and_autoplay_song(target, from_auto_finish=False)
+
+    def _on_queue_play_index(self, index: int) -> None:
+        """Remove queued entry at *index* and start playing it immediately."""
+        try:
+            song_id = self._play_queue.remove_at(index)
+        except IndexError:
+            return
+        if not self._is_song_playable(song_id):
+            self._refresh_queue_ui()
+            return
+        self._play_queue.record_history(
+            self.__dict__.get("_loading_song_id") or self._current_song_id
+        )
+        self._refresh_queue_ui()
+        self._load_and_autoplay_song(song_id, from_auto_finish=False)
+
+    def _on_queue_move_item(self, from_index: int, to_index: int) -> None:
+        try:
+            self._play_queue.move(from_index, to_index)
+        except IndexError:
+            return
+        self._refresh_queue_ui()
+
+    def _on_queue_remove_item(self, index: int) -> None:
+        try:
+            self._play_queue.remove_at(index)
+        except IndexError:
+            return
+        self._refresh_queue_ui()
+
+    def _on_queue_clear(self) -> None:
+        self._play_queue.clear_up_next()
+        self._refresh_queue_ui()
+
+    def _on_queue_stop_setlist(self) -> None:
+        self._play_queue.clear_setlist()
+        self._refresh_queue_ui()
+
+    def _on_queue_play_context_song(self, song_id: str) -> None:
+        if (
+            not self._play_queue.is_setlist_active
+            or self._play_queue.context_id is None
+        ):
+            return
+        self.play_setlist(self._play_queue.context_id, start_song_id=song_id)
+
     def _on_play_finished(self) -> None:
-        """Handle end-of-song: advance based on repeat mode."""
+        """Handle end-of-song: advance based on repeat mode or queue."""
         mode = self._library_panel.repeat_mode
         if mode == REPEAT_ONE:
             self._player.seek(0)
             self._player.play()
             return
+        queue = self.__dict__.get("_play_queue")
         if mode == REPEAT_OFF:
-            return  # Stop — current behaviour.
+            if queue is not None and (
+                queue.has_up_next or queue.is_setlist_active
+            ):
+                self._advance_song(1, from_auto_finish=True)
+            return
         # REPEAT_ALL → advance to the next song.
         self._advance_song(1)
 
-    def _advance_song(self, direction: int = 1) -> None:
-        """Move to the next or previous song in the library and play it.
+    def _advance_song(
+        self,
+        direction: int = 1,
+        *,
+        from_auto_finish: bool = False,
+    ) -> None:
+        """Move to the next or previous song and play it.
 
         *direction*: +1 for next, -1 for previous.
 
         Playback starts from the matching asynchronous load callback.
         """
-        next_id = self._get_next_song_id(direction)
+        if from_auto_finish:
+            next_id = self._get_next_song_id(
+                direction, from_auto_finish=True,
+            )
+        else:
+            next_id = self._get_next_song_id(direction)
         if next_id is None:
+            self._refresh_queue_ui()
             return
-        self._pending_autoplay_song_id = next_id
-        if not self._library_panel.select_song(next_id):
+        started = self._load_and_autoplay_song(
+            next_id, from_auto_finish=from_auto_finish,
+        )
+        if not started:
             self._pending_autoplay_song_id = None
-            return
+        self._refresh_queue_ui()
+
+    def _load_and_autoplay_song(
+        self,
+        next_id: str,
+        *,
+        from_auto_finish: bool = False,
+    ) -> bool:
+        """Select *next_id* and start playback when ready."""
+        self._navigating_from_queue = True
+        try:
+            self._pending_autoplay_song_id = next_id
+            if not self._library_panel.select_song(next_id):
+                self._pending_autoplay_song_id = None
+                return False
+        finally:
+            self._navigating_from_queue = False
+
         if self._pending_autoplay_song_id == next_id:
             # Selecting the already-current row emits no selection signal.
             self._pending_autoplay_song_id = None
@@ -1951,17 +2181,47 @@ class MainWindow(QMainWindow):
                     next_id,
                 )
             elif self._current_song_id == next_id:
+                if from_auto_finish:
+                    self._player.seek(0)
                 self._player.play()
+        return True
 
-    def _get_next_song_id(self, direction: int = 1) -> str | None:
-        """Resolve the next song ID respecting shuffle and repeat.
+    def _get_next_song_id(
+        self,
+        direction: int = 1,
+        *,
+        from_auto_finish: bool = False,
+    ) -> str | None:
+        """Resolve the next song ID using the queue, setlist, shuffle, and repeat.
 
         Shuffle only affects *forward* navigation (direction == 1).
-        Pressing Previous during shuffle falls through to sequential
-        behaviour — matching YouTube / Spotify semantics where "back"
-        means "the song I was just on", not "back in shuffle order".
+        Pressing Previous during shuffle pops play history first, then falls
+        through to sequential context order — matching YouTube / Spotify
+        semantics where "back" means "the song I was just on".
         """
         songs = self._library_panel.song_ids_in_order()
+        queue = self.__dict__.get("_play_queue")
+        if queue is not None:
+            current_song_id = (
+                self.__dict__.get("_loading_song_id") or self._current_song_id
+            )
+            repeat_mode = self._library_panel.repeat_mode
+            if direction >= 0:
+                return queue.advance_next(
+                    current_song_id,
+                    songs,
+                    repeat_mode=repeat_mode,
+                    shuffle_enabled=self._library_panel.shuffle_enabled,
+                    from_auto_finish=from_auto_finish,
+                    is_playable=self._is_song_playable,
+                )
+            return queue.advance_previous(
+                current_song_id,
+                songs,
+                repeat_mode=repeat_mode,
+                is_playable=self._is_song_playable,
+            )
+
         if not songs:
             return None
 
@@ -2006,6 +2266,9 @@ class MainWindow(QMainWindow):
         """Reset the shuffle queue when shuffle is toggled."""
         if not enabled:
             self._shuffle_queue.clear()
+        queue = self.__dict__.get("_play_queue")
+        if queue is not None:
+            queue.reset_shuffle()
 
     def _on_recording_saved(self, path: str) -> None:
         """Handle a newly saved recording: load it and add a UI row."""
@@ -2110,6 +2373,8 @@ class MainWindow(QMainWindow):
         """Unload the player if the removed song is the one loaded."""
         if song_id in (self._current_song_id, self._loading_song_id):
             self._on_close_song()
+        self._play_queue.remove_song(song_id)
+        self._refresh_queue_ui()
 
     def _on_import(self) -> None:
         """Open the import dialog."""
@@ -2258,6 +2523,8 @@ class MainWindow(QMainWindow):
                     "Could not roll back failed import %s: %s", song_id, exc,
                 )
         self._library_panel.refresh()
+        self._play_queue.remove_song(song_id)
+        self._refresh_queue_ui()
         # A damaged model was deleted by the worker; offer a fresh import,
         # which asks to download it again.
         if format_import_error(message) == MSG_MODEL_DAMAGED:

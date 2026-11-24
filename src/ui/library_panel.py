@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QStyle,
     QStyledItemDelegate,
     QVBoxLayout,
@@ -38,12 +39,14 @@ from PySide6.QtWidgets import (
 
 from src.import_messages import describe_error
 from src.library import LIBRARY_READ_ONLY_MESSAGE, Song, SongLibrary
+from src.play_queue import PlayQueue
 from src.ui.control_primitives import (
     COMPACT_BUTTON,
     add_disabled_pixmaps,
     fix_button_size,
     repolish,
 )
+from src.ui.play_queue_widget import PlayQueueWidget
 from src.ui.styles import DARK_COLORS, ON_ACCENT
 
 # Custom data roles for two-line display.
@@ -202,6 +205,27 @@ def _draw_next(p: QPainter, s: int) -> None:
     ]))
     # Vertical bar on right.
     p.drawRect(QRectF(s - m - bar_w, m, bar_w, s - 2 * m))
+
+
+def _draw_queue(p: QPainter, s: int) -> None:
+    """Play queue icon: stacked list lines with a small play triangle."""
+    m = s * 0.18
+    line_h = max(1.5, s * 0.10)
+    full_w = s - 2 * m
+    short_w = full_w * 0.52
+    p.drawRect(QRectF(m, s * 0.22, full_w, line_h))
+    p.drawRect(QRectF(m, s * 0.45, full_w, line_h))
+    p.drawRect(QRectF(m, s * 0.68, short_w, line_h))
+    # Small play indicator at bottom-right.
+    tri_left = m + short_w + s * 0.08
+    tri_right = s - m
+    tri_top = s * 0.56
+    tri_bottom = s * 0.84
+    p.drawPolygon(QPolygonF([
+        QPointF(tri_left, tri_top),
+        QPointF(tri_right, (tri_top + tri_bottom) / 2.0),
+        QPointF(tri_left, tri_bottom),
+    ]))
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +428,9 @@ class LibraryPanel(QWidget):
     song_removal_requested = Signal(str)  # emitted before files are deleted
     song_removed = Signal(str)  # emitted with the removed song's id
     cancel_separation_requested = Signal(str)  # song_id still separating
+    play_next_requested = Signal(str)
+    add_to_queue_requested = Signal(str)
+    queue_toggled = Signal(bool)
     repeat_mode_changed = Signal(str)
     shuffle_toggled = Signal(bool)
     previous_requested = Signal()
@@ -426,9 +453,25 @@ class LibraryPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        header = QLabel("Library")
-        header.setObjectName("title-label")
-        layout.addWidget(header)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        self._header_label = QLabel("Library")
+        self._header_label.setObjectName("title-label")
+        header_row.addWidget(self._header_label)
+        header_row.addStretch()
+        self._queue_count_label = QLabel("")
+        self._queue_count_label.setObjectName("subtle-label")
+        self._queue_count_label.setVisible(False)
+        header_row.addWidget(self._queue_count_label)
+        layout.addLayout(header_row)
+
+        # Page 0 keeps _search_edit as the first focusable control in the
+        # panel so window Tab order stays top-to-bottom across panels.
+        self._stack = QStackedWidget()
+
+        library_page = QWidget()
+        library_layout = QVBoxLayout(library_page)
+        library_layout.setContentsMargins(0, 0, 0, 0)
 
         self._search_edit = QLineEdit()
         self._search_edit.setPlaceholderText("Search songs…")
@@ -436,7 +479,7 @@ class LibraryPanel(QWidget):
         self._search_edit.setAccessibleName("Search songs")
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.textChanged.connect(self._apply_filter)
-        layout.addWidget(self._search_edit)
+        library_layout.addWidget(self._search_edit)
 
         self._list = QListWidget()
         self._song_delegate = _SongDelegate(self._list)
@@ -448,14 +491,26 @@ class LibraryPanel(QWidget):
             Qt.ContextMenuPolicy.CustomContextMenu
         )
         self._list.customContextMenuRequested.connect(self._on_context_menu)
-        layout.addWidget(self._list)
+        library_layout.addWidget(self._list)
 
         # A search with no match used to leave a blank list.
         self._no_match_label = QLabel("No songs match your search")
         self._no_match_label.setObjectName("subtle-label")
         self._no_match_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._no_match_label.setVisible(False)
-        layout.addWidget(self._no_match_label)
+        library_layout.addWidget(self._no_match_label)
+
+        self._remove_btn = QPushButton("Remove Selected")
+        self._remove_btn.setEnabled(False)
+        self._remove_btn.setToolTip("Remove selected song from library")
+        self._remove_btn.setAccessibleName("Remove selected song")
+        self._remove_btn.clicked.connect(self._on_remove_clicked)
+        library_layout.addWidget(self._remove_btn)
+
+        self._queue_widget = PlayQueueWidget()
+        self._stack.addWidget(library_page)
+        self._stack.addWidget(self._queue_widget)
+        layout.addWidget(self._stack, 1)
 
         # -- Playback control bar --
         ctrl_bar = QHBoxLayout()
@@ -494,6 +549,20 @@ class LibraryPanel(QWidget):
         self._shuffle_btn.toggled.connect(self._on_shuffle_toggled)
         ctrl_bar.addWidget(self._shuffle_btn)
 
+        # Play queue view toggle
+        self._queue_btn = QPushButton()
+        self._queue_btn.setObjectName("icon-btn")
+        self._queue_btn.setCheckable(True)
+        fix_button_size(self._queue_btn, COMPACT_BUTTON, COMPACT_BUTTON)
+        self._queue_btn.setToolTip("Play queue (Q)")
+        self._queue_btn.setAccessibleName("Play queue")
+        self._queue_btn.setIcon(
+            _make_toggle_icon(_draw_queue, icon_color, checked_icon_color)
+        )
+        self._queue_btn.setIconSize(QSize(_CTRL_ICON, _CTRL_ICON))
+        self._queue_btn.toggled.connect(self._on_queue_btn_toggled)
+        ctrl_bar.addWidget(self._queue_btn)
+
         ctrl_bar.addStretch()
 
         # Previous
@@ -520,12 +589,63 @@ class LibraryPanel(QWidget):
 
         layout.addLayout(ctrl_bar)
 
-        self._remove_btn = QPushButton("Remove Selected")
-        self._remove_btn.setEnabled(False)
-        self._remove_btn.setToolTip("Remove selected song from library")
-        self._remove_btn.setAccessibleName("Remove selected song")
-        self._remove_btn.clicked.connect(self._on_remove_clicked)
-        layout.addWidget(self._remove_btn)
+    # ------------------------------------------------------------------
+    # Play queue view
+    # ------------------------------------------------------------------
+
+    @property
+    def queue_widget(self) -> PlayQueueWidget:
+        """Embedded play queue management widget."""
+        return self._queue_widget
+
+    @property
+    def is_queue_visible(self) -> bool:
+        """True when the sidebar is showing the Play Queue view."""
+        return self._stack.currentIndex() == 1
+
+    def set_queue_visible(self, visible: bool) -> None:
+        """Switch between the Library collection view and the Play Queue view."""
+        visible = bool(visible)
+        target_index = 1 if visible else 0
+        changed = self._stack.currentIndex() != target_index
+        self._stack.setCurrentIndex(target_index)
+        if self._queue_btn.isChecked() != visible:
+            self._queue_btn.blockSignals(True)
+            self._queue_btn.setChecked(visible)
+            self._queue_btn.blockSignals(False)
+        self._header_label.setText("Play Queue" if visible else "Library")
+        if changed:
+            self.queue_toggled.emit(visible)
+
+    def toggle_queue_visible(self) -> None:
+        """Toggle between the Library view and the Play Queue view."""
+        self.set_queue_visible(not self.is_queue_visible)
+
+    def _on_queue_btn_toggled(self, checked: bool) -> None:
+        self.set_queue_visible(checked)
+
+    def update_queue_display(self, queue: PlayQueue) -> None:
+        """Refresh queue widget contents and sidebar count badge."""
+        self._queue_widget.refresh(queue, self._library)
+        count = len(queue)
+        has_setlist = queue.is_setlist_active
+        if has_setlist and count:
+            badge = f"Setlist: {count} queued"
+        elif has_setlist:
+            badge = "Setlist"
+        elif count:
+            badge = f"{count} queued"
+        else:
+            badge = ""
+        self._queue_count_label.setText(badge)
+        self._queue_count_label.setVisible(bool(badge))
+
+        if count:
+            self._queue_btn.setToolTip(f"Play queue ({count} up next) (Q)")
+            self._queue_btn.setAccessibleName(f"Play queue, {count} up next")
+        else:
+            self._queue_btn.setToolTip("Play queue (Q)")
+            self._queue_btn.setAccessibleName("Play queue")
 
     # ------------------------------------------------------------------
     # Repeat / Shuffle
@@ -621,27 +741,48 @@ class LibraryPanel(QWidget):
         self._shuffle_btn.setIcon(
             _make_toggle_icon(_draw_shuffle, icon_color, on_accent_color)
         )
+        self._queue_btn.setIcon(
+            _make_toggle_icon(_draw_queue, icon_color, on_accent_color)
+        )
         self._prev_btn.setIcon(_make_icon(_draw_prev, icon_color))
         self._next_btn.setIcon(_make_icon(_draw_next, icon_color))
 
         self._list.viewport().update()
+        self._queue_widget.apply_theme(theme, colors)
 
     # ------------------------------------------------------------------
     # Song list management
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Reload the song list from the library."""
-        self._list.clear()
-        for song in self._library.songs:
-            # Display text used for search filtering; delegate paints the rows.
-            item = QListWidgetItem(f"{song.artist} - {song.title}")
-            item.setData(Qt.ItemDataRole.UserRole, song.id)
-            item.setData(_ARTIST_ROLE, song.artist)
-            item.setData(_TITLE_ROLE, song.title)
-            self._apply_separating_state(item, song.id)
-            self._list.addItem(item)
+        """Reload the song list from the library without re-triggering selection."""
+        current = self._list.currentItem()
+        selected_id = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None
+            else None
+        )
+        selected_item = None
+        self._list.blockSignals(True)
+        try:
+            self._list.clear()
+            for song in self._library.songs:
+                # Display text used for search filtering; delegate paints the rows.
+                item = QListWidgetItem(f"{song.artist} - {song.title}")
+                item.setData(Qt.ItemDataRole.UserRole, song.id)
+                item.setData(_ARTIST_ROLE, song.artist)
+                item.setData(_TITLE_ROLE, song.title)
+                self._apply_separating_state(item, song.id)
+                self._list.addItem(item)
+                if selected_id and song.id == selected_id:
+                    selected_item = item
+            if selected_item is not None:
+                self._list.setCurrentItem(selected_item)
+        finally:
+            self._list.blockSignals(False)
         self._apply_filter(self._search_edit.text())
+        if selected_item is not None and not selected_item.isHidden():
+            self._remove_btn.setEnabled(bool(self._library.writable))
 
     # ------------------------------------------------------------------
     # Background-separation state
@@ -753,21 +894,37 @@ class LibraryPanel(QWidget):
             )
             menu.exec(self._list.mapToGlobal(pos))
             return
-        # Select the right-clicked item so _on_edit_song targets it,
-        # not whatever was previously selected.
-        self._list.setCurrentItem(item)
+        # Do not select the right-clicked item: right-clicking another song
+        # to queue or edit it must not interrupt the currently loaded song.
         menu = QMenu(self)
+        if song_id:
+            play_next = menu.addAction("Play Next")
+            play_next.triggered.connect(
+                lambda _checked=False, sid=song_id: (
+                    self.play_next_requested.emit(sid)
+                )
+            )
+            add_queue = menu.addAction("Add to Queue")
+            add_queue.triggered.connect(
+                lambda _checked=False, sid=song_id: (
+                    self.add_to_queue_requested.emit(sid)
+                )
+            )
+            menu.addSeparator()
         edit = menu.addAction("Edit...")
         edit.setEnabled(bool(self._library.writable))
-        edit.triggered.connect(self._on_edit_song)
+        edit.triggered.connect(
+            lambda _checked=False, sid=song_id: self._on_edit_song(sid)
+        )
         menu.exec(self._list.mapToGlobal(pos))
 
-    def _on_edit_song(self) -> None:
-        """Open the edit dialog for the currently selected song."""
-        current = self._list.currentItem()
-        if current is None:
-            return
-        song_id = current.data(Qt.ItemDataRole.UserRole)
+    def _on_edit_song(self, song_id: str | None = None) -> None:
+        """Open the edit dialog for *song_id* or the currently selected song."""
+        if song_id is None:
+            current = self._list.currentItem()
+            if current is None:
+                return
+            song_id = current.data(Qt.ItemDataRole.UserRole)
         if not song_id:
             return
         song = self._library.get_song(song_id)
