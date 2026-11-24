@@ -29,7 +29,8 @@ def source_audio(tmp_path):
 
 def _index(data_dir):
     with open(os.path.join(data_dir, "library.json"), encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    return data["songs"] if isinstance(data, dict) else data
 
 
 def _under(path, root):
