@@ -81,10 +81,11 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Set with the v3.1.0 release prep on 2026-11-22:
+Updated on 2026-11-24 after #188 closed (v3.1.0 released 2026-11-22):
 
 - Latest stable: **v3.1.0** (the chord lane and experimental song sections, [#133](https://github.com/cyanidesayonara/stemma/issues/133))
-- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132)); the post-3.0 robustness and accessibility backlog ([#188](https://github.com/cyanidesayonara/stemma/issues/188)) is complete
+- Completed post-3.0 backlog: [#188](https://github.com/cyanidesayonara/stemma/issues/188) is closed (Tab order, skippable splash and reduced motion, Windows text scaling, and yt-dlp lock automation landed after v3.1.0)
+- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132))
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.
