@@ -1623,6 +1623,8 @@ class MainWindow(QMainWindow):
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
         self._library_panel.play_next_requested.connect(self.play_next)
         self._library_panel.add_to_queue_requested.connect(self.add_to_queue)
+        self._library_panel.play_setlist_requested.connect(self.play_setlist)
+        self._library_panel.setlist_changed.connect(self._on_setlist_changed)
         self._library_panel.queue_toggled.connect(
             self._on_library_queue_toggled
         )
@@ -2111,6 +2113,28 @@ class MainWindow(QMainWindow):
             return
         self.play_setlist(self._play_queue.context_id, start_song_id=song_id)
 
+    def _on_setlist_changed(self, setlist_id: str) -> None:
+        """Keep the active play queue synced with setlist edits or deletions."""
+        queue = self.__dict__.get("_play_queue")
+        if (
+            queue is None
+            or not queue.is_setlist_active
+            or queue.context_id != setlist_id
+        ):
+            return
+        get_sl = getattr(self._library, "get_setlist", None)
+        sl = get_sl(setlist_id) if callable(get_sl) else None
+        if isinstance(sl, Setlist) and sl.song_ids:
+            queue.sync_setlist(
+                sl.id,
+                sl.song_ids,
+                name=sl.name,
+                current_song_id=self._current_song_id,
+            )
+        else:
+            queue.clear_setlist()
+        self._refresh_queue_ui()
+
     def _on_play_finished(self) -> None:
         """Handle end-of-song: advance based on repeat mode or queue."""
         mode = self._library_panel.repeat_mode
@@ -2166,9 +2190,35 @@ class MainWindow(QMainWindow):
         self._navigating_from_queue = True
         try:
             self._pending_autoplay_song_id = next_id
-            if not self._library_panel.select_song(next_id):
+            in_view = self._library_panel.select_song(next_id)
+            if not in_view:
+                if not self._is_song_playable(next_id):
+                    self._pending_autoplay_song_id = None
+                    return False
+                if (
+                    self._loading_song_id == next_id
+                    and self._stem_load_worker is not None
+                ):
+                    self._pending_autoplay_song_id = None
+                    self._active_load_autoplay = (
+                        self._stem_load_generation,
+                        next_id,
+                    )
+                    return True
+                if self._current_song_id == next_id:
+                    self._pending_autoplay_song_id = None
+                    if from_auto_finish:
+                        self._player.seek(0)
+                    self._player.play()
+                    return True
+                # Queued or active-setlist song may sit outside the currently
+                # filtered tag/setlist view; load directly without altering
+                # the user's library filter.
+                self._library_panel.clear_selection()
+                self._on_song_selected(next_id)
+                # A song with no stems on disk does not start loading.
                 self._pending_autoplay_song_id = None
-                return False
+                return self._loading_song_id == next_id
         finally:
             self._navigating_from_queue = False
 
@@ -2400,8 +2450,9 @@ class MainWindow(QMainWindow):
         )
         if dialog.exec():
             # The new row appears immediately; while its job runs it
-            # shows queue-driven progress and stays unselectable.
-            self._library_panel.refresh()
+            # shows queue-driven progress and stays unselectable. A setlist
+            # or tag view would not list it.
+            self._library_panel.set_collection_filter("all")
 
     # ------------------------------------------------------------------
     # Background separation queue
@@ -2504,7 +2555,9 @@ class MainWindow(QMainWindow):
             self._player_controls.hide_separation()
             if (self._current_song_id is None
                     and self._loading_song_id is None):
-                self._library_panel.select_song(song_id)
+                if not self._library_panel.select_song(song_id):
+                    # Outside the setlist or tag being browsed.
+                    self._on_song_selected(song_id)
 
     def _on_separation_failed(self, song_id: str, message: str) -> None:
         """Job failed or was cancelled: roll the library row back."""

@@ -19,10 +19,13 @@ from PySide6.QtGui import (
     QPolygonF,
 )
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -33,12 +36,21 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
+    QStyleOptionComboBox,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
 )
 
 from src.import_messages import describe_error
-from src.library import LIBRARY_READ_ONLY_MESSAGE, Song, SongLibrary
+from src.library import (
+    LIBRARY_READ_ONLY_MESSAGE,
+    PRACTICE_STATUSES,
+    Setlist,
+    Song,
+    SongLibrary,
+    normalize_tags,
+)
 from src.play_queue import PlayQueue
 from src.ui.control_primitives import (
     COMPACT_BUTTON,
@@ -47,7 +59,7 @@ from src.ui.control_primitives import (
     repolish,
 )
 from src.ui.play_queue_widget import PlayQueueWidget
-from src.ui.styles import DARK_COLORS, ON_ACCENT
+from src.ui.styles import DARK_COLORS, ON_ACCENT, scaled_px
 
 # Custom data roles for two-line display.
 _ARTIST_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -55,8 +67,17 @@ _TITLE_ROLE = Qt.ItemDataRole.UserRole + 2
 # Progress text while the song is still separating in the background
 # (e.g. "Separating... 42%"); unset/empty for ready songs.
 _PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 3
+# Precomputed lowercase search text covering artist, title, and tags.
+_SEARCH_TEXT_ROLE = Qt.ItemDataRole.UserRole + 4
 
 _CTRL_ICON = 18  # Icon size for library control buttons.
+
+_PRACTICE_STATUS_LABELS = {
+    "": "None",
+    "learning": "Learning",
+    "practicing": "Practicing",
+    "ready": "Ready",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +284,11 @@ class _SongDelegate(QStyledItemDelegate):
     def set_subtext_color(self, color: str) -> None:
         self._subtext_color = QColor(color)
 
+    @property
+    def playing_song(self) -> str | None:
+        """The song with the 'now playing' indicator."""
+        return self._playing_song_id
+
     def set_playing_song(self, song_id: str | None) -> None:
         """Set the currently playing song ID for the 'now playing' indicator."""
         self._playing_song_id = song_id
@@ -359,7 +385,7 @@ class _SongDelegate(QStyledItemDelegate):
 
 
 class EditSongDialog(QDialog):
-    """Small dialog for editing a song's title and artist."""
+    """Dialog for editing a song's title, artist, tags, and practice status."""
 
     def __init__(self, song: Song, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -382,6 +408,24 @@ class EditSongDialog(QDialog):
         form.addRow("Title:", self._title_edit)
         self._artist_edit = QLineEdit(song.artist)
         form.addRow("Artist:", self._artist_edit)
+        self._tags_edit = QLineEdit(", ".join(getattr(song, "tags", ())))
+        self._tags_edit.setPlaceholderText("Comma-separated tags (e.g. gig, learning)")
+        self._tags_edit.setAccessibleName("Tags")
+        form.addRow("Tags:", self._tags_edit)
+
+        self._status_combo = QComboBox()
+        self._status_combo.setAccessibleName("Practice status")
+        for status in PRACTICE_STATUSES:
+            self._status_combo.addItem(
+                _PRACTICE_STATUS_LABELS.get(status, status or "None"),
+                status,
+            )
+        status_idx = self._status_combo.findData(
+            getattr(song, "practice_status", "")
+        )
+        if status_idx >= 0:
+            self._status_combo.setCurrentIndex(status_idx)
+        form.addRow("Practice status:", self._status_combo)
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -402,6 +446,16 @@ class EditSongDialog(QDialog):
         """Return the edited artist, falling back to the original."""
         return self._artist_edit.text().strip() or self._song.artist
 
+    @property
+    def tags(self) -> list[str]:
+        """Return normalized comma-separated tags."""
+        return normalize_tags(self._tags_edit.text().split(","))
+
+    @property
+    def practice_status(self) -> str:
+        """Return the selected practice status key."""
+        return str(self._status_combo.currentData() or "")
+
 
 # ---------------------------------------------------------------------------
 # Repeat modes
@@ -411,6 +465,124 @@ REPEAT_OFF = "off"
 REPEAT_ALL = "all"
 REPEAT_ONE = "one"
 _REPEAT_CYCLE = (REPEAT_OFF, REPEAT_ALL, REPEAT_ONE)
+
+
+class _ElidingComboBox(QComboBox):
+    """Combo box that elides long text; a styled QComboBox clips it."""
+
+    def paintEvent(self, _event) -> None:
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        field = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        )
+        option.currentText = option.fontMetrics.elidedText(
+            option.currentText,
+            Qt.TextElideMode.ElideRight,
+            field.width() - scaled_px(4),
+        )
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+
+
+class _SongList(QListWidget):
+    """Song list that tells a click apart from the start of a drag.
+
+    Qt makes a row current on mouse press. Selecting a song loads it, so
+    while rows can be dragged the panel waits for the release: a press
+    that turns into a drag reorders without touching playback. Selection
+    changes from anywhere else (auto-advance) are never held back.
+    """
+
+    row_pressed = Signal(str)  # song id, before the press takes effect
+    press_released = Signal()
+    drag_started = Signal()
+    drag_finished = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._in_press = False
+        self._press_active = False
+        self._dragged_id: str | None = None
+
+    @property
+    def in_press(self) -> bool:
+        """True while a mouse press on a draggable row is being handled."""
+        return self._in_press
+
+    def item_for_song(self, song_id: str) -> QListWidgetItem | None:
+        """Return the row showing *song_id*, if any."""
+        for i in range(self.count()):
+            item = self.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == song_id:
+                return item
+        return None
+
+    def set_current_silently(self, item: QListWidgetItem | None) -> None:
+        """Make *item* (or nothing) current without announcing it."""
+        blocked = self.blockSignals(True)
+        try:
+            self.setCurrentItem(item)
+            if item is None:
+                self.clearSelection()
+        finally:
+            self.blockSignals(blocked)
+        self.viewport().update()
+
+    def mousePressEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        self._press_active = (
+            self.dragEnabled()
+            and event.button() == Qt.MouseButton.LeftButton
+            and item is not None
+        )
+        if not self._press_active:
+            super().mousePressEvent(event)
+            return
+        self.row_pressed.emit(item.data(Qt.ItemDataRole.UserRole))
+        self._in_press = True
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._in_press = False
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        if self._press_active:
+            self._press_active = False
+            self.press_released.emit()
+
+    def startDrag(self, supported_actions) -> None:
+        self._press_active = False
+        # The panel puts the pressed row back first, in case another song
+        # became current between the press and the drag.
+        self.drag_started.emit()
+        current = self.currentItem()
+        self._dragged_id = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None
+            else None
+        )
+        try:
+            super().startDrag(supported_actions)
+        finally:
+            self._dragged_id = None
+        self.drag_finished.emit()
+
+    def dropEvent(self, event) -> None:
+        # Qt moves the selected row; playback may have advanced to another
+        # song mid-drag, so select the dragged one again.
+        if self._dragged_id is not None:
+            item = self.item_for_song(self._dragged_id)
+            if item is None:
+                event.ignore()
+                return
+            self.set_current_silently(item)
+        super().dropEvent(event)
 
 
 class LibraryPanel(QWidget):
@@ -432,6 +604,8 @@ class LibraryPanel(QWidget):
     play_next_requested = Signal(str)
     add_to_queue_requested = Signal(str)
     queue_toggled = Signal(bool)
+    play_setlist_requested = Signal(str)
+    setlist_changed = Signal(str)
     repeat_mode_changed = Signal(str)
     shuffle_toggled = Signal(bool)
     previous_requested = Signal()
@@ -442,6 +616,12 @@ class LibraryPanel(QWidget):
         self._library = library
         self._repeat_mode: str = REPEAT_OFF
         self._shuffle_enabled: bool = False
+        self._filter_kind: str = "all"
+        self._filter_value: str | None = None
+        self._repopulating_list: bool = False
+        # (song id to select again after a drag, pressed song id) from a
+        # press on a draggable row until its click or drag ends.
+        self._pressed_songs: tuple[str | None, str] | None = None
         # song_id -> progress text for songs still separating in the
         # background. Rows in this state are unselectable (their stems
         # are half-written) and offer only "Cancel separation".
@@ -482,19 +662,65 @@ class LibraryPanel(QWidget):
         self._search_edit.textChanged.connect(self._apply_filter)
         library_layout.addWidget(self._search_edit)
 
-        self._list = QListWidget()
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(4)
+        self._collection_combo = _ElidingComboBox()
+        self._collection_combo.setAccessibleName("Filter by setlist or tag")
+        self._collection_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._collection_combo.setMinimumContentsLength(10)
+        self._collection_combo.currentIndexChanged.connect(
+            self._on_collection_changed
+        )
+        filter_row.addWidget(self._collection_combo, 1)
+
+        self._setlist_menu_btn = QPushButton("...")
+        self._setlist_menu_btn.setObjectName("icon-btn")
+        fix_button_size(
+            self._setlist_menu_btn, COMPACT_BUTTON, COMPACT_BUTTON,
+        )
+        self._setlist_menu_btn.setToolTip("Manage setlists")
+        self._setlist_menu_btn.setAccessibleName("Manage setlists")
+        self._setlist_menu_btn.clicked.connect(self._on_setlist_menu_clicked)
+        filter_row.addWidget(self._setlist_menu_btn)
+        library_layout.addLayout(filter_row)
+
+        self._setlist_bar = QWidget()
+        setlist_row = QHBoxLayout(self._setlist_bar)
+        setlist_row.setContentsMargins(0, 0, 0, 0)
+        setlist_row.setSpacing(6)
+        self._play_setlist_btn = QPushButton("Play Setlist")
+        self._play_setlist_btn.setAccessibleName("Play setlist")
+        self._play_setlist_btn.clicked.connect(self._on_play_setlist_clicked)
+        setlist_row.addWidget(self._play_setlist_btn)
+        self._setlist_hint_label = QLabel("Drag to reorder")
+        self._setlist_hint_label.setObjectName("subtle-label")
+        setlist_row.addWidget(self._setlist_hint_label)
+        setlist_row.addStretch()
+        self._setlist_bar.setVisible(False)
+        library_layout.addWidget(self._setlist_bar)
+
+        self._list = _SongList()
         self._song_delegate = _SongDelegate(self._list)
         self._list.setItemDelegate(self._song_delegate)
         self._list.setAccessibleName("Song library")
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
+        self._list.model().rowsMoved.connect(self._on_list_rows_moved)
+        self._list.row_pressed.connect(self._on_list_row_pressed)
+        self._list.drag_started.connect(self._on_list_drag_started)
+        self._list.press_released.connect(self._on_list_press_released)
+        self._list.drag_finished.connect(self._on_list_drag_finished)
         self._list.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
         )
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         library_layout.addWidget(self._list)
 
-        # A search with no match used to leave a blank list.
+        # A search with no match, or an empty setlist, would otherwise
+        # leave a blank list.
         self._no_match_label = QLabel("No songs match your search")
         self._no_match_label.setObjectName("subtle-label")
         self._no_match_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -752,27 +978,393 @@ class LibraryPanel(QWidget):
         self._queue_widget.apply_theme(theme, colors)
 
     # ------------------------------------------------------------------
+    # Setlist / tag filtering and management
+    # ------------------------------------------------------------------
+
+    @property
+    def filter_kind(self) -> str:
+        """Current sidebar collection filter ('all', 'setlist', or 'tag')."""
+        return self._filter_kind
+
+    @property
+    def filter_value(self) -> str | None:
+        """ID of the active setlist or name of the active tag filter."""
+        return self._filter_value
+
+    def set_collection_filter(
+        self, kind: str, value: str | None = None,
+    ) -> None:
+        """Programmatically select a collection, setlist, or tag filter."""
+        if kind not in ("all", "setlist", "tag"):
+            kind = "all"
+            value = None
+        self._filter_kind = kind
+        self._filter_value = None if kind == "all" else value
+        self.refresh()
+
+    def _library_setlists(self) -> list[Setlist]:
+        raw = getattr(self._library, "setlists", ())
+        if isinstance(raw, (list, tuple)):
+            return [sl for sl in raw if isinstance(sl, Setlist)]
+        return []
+
+    def _library_all_tags(self) -> list[str]:
+        fn = getattr(self._library, "all_tags", None)
+        if callable(fn):
+            res = fn()
+            if isinstance(res, (list, tuple)):
+                return [t for t in res if isinstance(t, str)]
+        return []
+
+    def _library_get_setlist(self, setlist_id: str | None) -> Setlist | None:
+        if not setlist_id:
+            return None
+        fn = getattr(self._library, "get_setlist", None)
+        if callable(fn):
+            sl = fn(setlist_id)
+            return sl if isinstance(sl, Setlist) else None
+        return None
+
+    def _rebuild_collection_combo(self) -> None:
+        setlists = self._library_setlists()
+        tags = self._library_all_tags()
+        self._collection_combo.blockSignals(True)
+        try:
+            self._collection_combo.clear()
+            self._collection_combo.addItem("All Songs", ("all", None))
+            if setlists:
+                self._collection_combo.insertSeparator(
+                    self._collection_combo.count()
+                )
+                for sl in setlists:
+                    self._collection_combo.addItem(
+                        f"Setlist: {sl.name} ({len(sl.song_ids)})",
+                        ("setlist", sl.id),
+                    )
+            if tags:
+                self._collection_combo.insertSeparator(
+                    self._collection_combo.count()
+                )
+                for tag in tags:
+                    self._collection_combo.addItem(f"Tag: {tag}", ("tag", tag))
+
+            target_idx = -1
+            for i in range(self._collection_combo.count()):
+                data = self._collection_combo.itemData(i)
+                if not isinstance(data, tuple) or len(data) != 2:
+                    continue
+                kind, val = data
+                if kind != self._filter_kind:
+                    continue
+                if kind == "all":
+                    target_idx = i
+                    break
+                if kind == "setlist" and val == self._filter_value:
+                    target_idx = i
+                    break
+                if (
+                    kind == "tag"
+                    and isinstance(val, str)
+                    and isinstance(self._filter_value, str)
+                    and val.casefold() == self._filter_value.casefold()
+                ):
+                    self._filter_value = val
+                    target_idx = i
+                    break
+            if target_idx < 0:
+                self._filter_kind = "all"
+                self._filter_value = None
+                target_idx = 0
+            self._collection_combo.setCurrentIndex(target_idx)
+            # The combo elides long names at the narrow sidebar width.
+            self._collection_combo.setToolTip(
+                self._collection_combo.currentText()
+            )
+        finally:
+            self._collection_combo.blockSignals(False)
+
+    def _on_collection_changed(self, index: int) -> None:
+        data = self._collection_combo.itemData(index)
+        if isinstance(data, tuple) and len(data) == 2:
+            self._filter_kind, self._filter_value = data
+        else:
+            self._filter_kind = "all"
+            self._filter_value = None
+        self.refresh()
+
+    def _filtered_songs(self) -> list[Song]:
+        if self._filter_kind == "setlist" and self._filter_value:
+            sl = self._library_get_setlist(self._filter_value)
+            if sl is None:
+                return []
+            songs: list[Song] = []
+            for sid in sl.song_ids:
+                song = self._library.get_song(sid)
+                if song is not None:
+                    songs.append(song)
+            return songs
+        if self._filter_kind == "tag" and self._filter_value:
+            target = self._filter_value.casefold()
+            matched: list[Song] = []
+            for song in self._library.songs:
+                tags = getattr(song, "tags", ())
+                if isinstance(tags, (list, tuple)) and any(
+                    isinstance(t, str) and t.casefold() == target for t in tags
+                ):
+                    matched.append(song)
+            return matched
+        return list(self._library.songs)
+
+    def _sync_drag_reorder_mode(self) -> None:
+        writable = bool(getattr(self._library, "writable", True))
+        can_drag = (
+            self._filter_kind == "setlist"
+            and bool(self._filter_value)
+            and not self._search_edit.text().strip()
+            and writable
+        )
+        if can_drag:
+            self._list.setDragDropMode(
+                QAbstractItemView.DragDropMode.InternalMove
+            )
+            self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
+            self._list.setDragEnabled(True)
+            self._list.setAcceptDrops(True)
+            self._list.setDropIndicatorShown(True)
+        else:
+            self._list.setDragDropMode(
+                QAbstractItemView.DragDropMode.NoDragDrop
+            )
+            self._list.setDragEnabled(False)
+            self._list.setAcceptDrops(False)
+            self._list.setDropIndicatorShown(False)
+        self._setlist_hint_label.setVisible(can_drag and self._list.count() > 1)
+
+    def _on_list_rows_moved(
+        self, _parent, start: int, _end: int, _dest_parent, dest_row: int,
+    ) -> None:
+        if (
+            self._repopulating_list
+            or self._filter_kind != "setlist"
+            or not self._filter_value
+        ):
+            return
+        # Qt reports dest_row in pre-move coordinates; moving downward inserts
+        # one slot past the final post-move index.
+        target = dest_row - 1 if dest_row > start else dest_row
+        if start != target:
+            self._reorder_active_setlist(start, target)
+
+    def _on_play_setlist_clicked(self) -> None:
+        if self._filter_kind == "setlist" and self._filter_value:
+            self.play_setlist_requested.emit(self._filter_value)
+
+    def _on_setlist_menu_clicked(self) -> None:
+        writable = bool(getattr(self._library, "writable", True))
+        menu = QMenu(self)
+        new_act = menu.addAction("New Setlist...")
+        new_act.setEnabled(writable)
+        new_act.triggered.connect(lambda _c=False: self._on_new_setlist())
+        if self._filter_kind == "setlist" and self._filter_value:
+            menu.addSeparator()
+            play_act = menu.addAction("Play Setlist")
+            play_act.setEnabled(bool(self._filtered_songs()))
+            play_act.triggered.connect(self._on_play_setlist_clicked)
+            rename_act = menu.addAction("Rename Setlist...")
+            rename_act.setEnabled(writable)
+            rename_act.triggered.connect(self._on_rename_setlist)
+            del_act = menu.addAction("Delete Setlist")
+            del_act.setEnabled(writable)
+            del_act.triggered.connect(self._on_delete_setlist)
+        menu.exec(
+            self._setlist_menu_btn.mapToGlobal(
+                self._setlist_menu_btn.rect().bottomLeft()
+            )
+        )
+
+    def _on_new_setlist(
+        self, initial_song_ids: list[str] | None = None,
+    ) -> None:
+        if not self._library_writable("New Setlist"):
+            return
+        name, ok = QInputDialog.getText(
+            self, "New Setlist", "Setlist name:",
+        )
+        if not ok or not name.strip():
+            return
+        try:
+            sl = self._library.create_setlist(name.strip(), initial_song_ids)
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "New Setlist",
+                describe_error(exc, "Could not create setlist"),
+            )
+            return
+        if initial_song_ids is None:
+            self._filter_kind = "setlist"
+            self._filter_value = sl.id
+        self.refresh()
+        self.setlist_changed.emit(sl.id)
+
+    def _on_rename_setlist(self) -> None:
+        if self._filter_kind != "setlist" or not self._filter_value:
+            return
+        if not self._library_writable("Rename Setlist"):
+            return
+        sl = self._library_get_setlist(self._filter_value)
+        if sl is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, "Rename Setlist", "Setlist name:", text=sl.name,
+        )
+        if not ok or not name.strip():
+            return
+        try:
+            self._library.rename_setlist(sl.id, name.strip())
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Rename Setlist",
+                describe_error(exc, "Could not rename setlist"),
+            )
+            return
+        self.refresh()
+        self.setlist_changed.emit(sl.id)
+
+    def _on_delete_setlist(self) -> None:
+        if self._filter_kind != "setlist" or not self._filter_value:
+            return
+        if not self._library_writable("Delete Setlist"):
+            return
+        sl = self._library_get_setlist(self._filter_value)
+        if sl is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete Setlist",
+            f"Delete setlist '{sl.name}'? Songs remain in your library.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        sid = sl.id
+        try:
+            self._library.delete_setlist(sid)
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Delete Setlist",
+                describe_error(exc, "Could not delete setlist"),
+            )
+            return
+        self._filter_kind = "all"
+        self._filter_value = None
+        self.refresh()
+        self.setlist_changed.emit(sid)
+
+    def _on_add_song_to_setlist(self, setlist_id: str, song_id: str) -> None:
+        if not self._library_writable("Add to Setlist"):
+            return
+        try:
+            self._library.add_songs_to_setlist(setlist_id, [song_id])
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Add to Setlist",
+                describe_error(exc, "Could not update setlist"),
+            )
+            return
+        self.refresh()
+        self.setlist_changed.emit(setlist_id)
+
+    def _on_remove_song_from_setlist(
+        self, setlist_id: str, song_id: str,
+    ) -> None:
+        if not self._library_writable("Remove from Setlist"):
+            return
+        try:
+            self._library.remove_song_from_setlist(setlist_id, song_id)
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Remove from Setlist",
+                describe_error(exc, "Could not update setlist"),
+            )
+            return
+        self.refresh()
+        self.setlist_changed.emit(setlist_id)
+
+    def _reorder_active_setlist(
+        self, from_index: int, to_index: int,
+    ) -> None:
+        if self._filter_kind != "setlist" or not self._filter_value:
+            return
+        if not self._library_writable("Reorder Setlist"):
+            self.refresh()
+            return
+        sl = self._library_get_setlist(self._filter_value)
+        if sl is None:
+            self.refresh()
+            return
+        ids = list(sl.song_ids)
+        if (
+            not (0 <= from_index < len(ids))
+            or not (0 <= to_index < len(ids))
+            or from_index == to_index
+        ):
+            self.refresh()
+            return
+        moved = ids.pop(from_index)
+        ids.insert(to_index, moved)
+        try:
+            self._library.reorder_setlist(sl.id, ids)
+        except (OSError, KeyError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Reorder Setlist",
+                describe_error(exc, "Could not reorder setlist"),
+            )
+            self.refresh()
+            return
+        self.refresh()
+        self.setlist_changed.emit(sl.id)
+
+    # ------------------------------------------------------------------
     # Song list management
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
         """Reload the song list from the library without re-triggering selection."""
+        self._rebuild_collection_combo()
+        songs = self._filtered_songs()
+
         current = self._list.currentItem()
         selected_id = (
             current.data(Qt.ItemDataRole.UserRole)
             if current is not None
             else None
         )
+        if selected_id is None:
+            # Coming back from a view without it, the open song is
+            # highlighted again.
+            selected_id = self._song_delegate.playing_song
         selected_item = None
+        self._repopulating_list = True
         self._list.blockSignals(True)
         try:
             self._list.clear()
-            for song in self._library.songs:
+            for song in songs:
                 # Display text used for search filtering; delegate paints the rows.
                 item = QListWidgetItem(f"{song.artist} - {song.title}")
                 item.setData(Qt.ItemDataRole.UserRole, song.id)
                 item.setData(_ARTIST_ROLE, song.artist)
                 item.setData(_TITLE_ROLE, song.title)
+                tags = getattr(song, "tags", ())
+                tags_text = (
+                    " ".join(t for t in tags if isinstance(t, str))
+                    if isinstance(tags, (list, tuple))
+                    else ""
+                )
+                item.setData(
+                    _SEARCH_TEXT_ROLE,
+                    f"{song.artist} {song.title} {tags_text}".lower(),
+                )
                 self._apply_separating_state(item, song.id)
                 self._list.addItem(item)
                 if selected_id and song.id == selected_id:
@@ -781,6 +1373,13 @@ class LibraryPanel(QWidget):
                 self._list.setCurrentItem(selected_item)
         finally:
             self._list.blockSignals(False)
+            self._repopulating_list = False
+
+        in_setlist = (
+            self._filter_kind == "setlist" and bool(self._filter_value)
+        )
+        self._setlist_bar.setVisible(in_setlist)
+        self._play_setlist_btn.setEnabled(in_setlist and bool(songs))
         self._apply_filter(self._search_edit.text())
         if selected_item is not None and not selected_item.isHidden():
             self._remove_btn.setEnabled(bool(self._library.writable))
@@ -808,11 +1407,7 @@ class LibraryPanel(QWidget):
         return song_id in self._separating
 
     def _item_for_song(self, song_id: str) -> QListWidgetItem | None:
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == song_id:
-                return item
-        return None
+        return self._list.item_for_song(song_id)
 
     def _apply_separating_state(self, item: QListWidgetItem, song_id: str) -> None:
         """Sync an item's progress role and selectability with the state.
@@ -834,7 +1429,11 @@ class LibraryPanel(QWidget):
         return len(self._library.songs)
 
     def song_ids_in_order(self) -> list[str]:
-        """Return song IDs in current library display order."""
+        """Return every song ID in library order, whatever the view shows.
+
+        Playback walks this list, so browsing a setlist or tag does not
+        change what plays next.
+        """
         return [s.id for s in self._library.songs]
 
     def _apply_filter(self, query: str) -> None:
@@ -842,38 +1441,112 @@ class LibraryPanel(QWidget):
         query = query.lower()
         for i in range(self._list.count()):
             item = self._list.item(i)
-            item.setHidden(query not in item.text().lower())
+            haystack = item.data(_SEARCH_TEXT_ROLE)
+            if not isinstance(haystack, str):
+                haystack = item.text().lower()
+            item.setHidden(query not in haystack)
         visible = any(
             not self._list.item(i).isHidden() for i in range(self._list.count())
         )
-        self._no_match_label.setVisible(bool(query) and not visible)
+        empty_setlist = (
+            self._filter_kind == "setlist" and self._list.count() == 0
+        )
+        self._no_match_label.setText(
+            "This setlist is empty"
+            if empty_setlist
+            else "No songs match your search"
+        )
+        self._no_match_label.setVisible(
+            empty_setlist or (bool(query) and not visible)
+        )
         # Disable Remove if the current selection is hidden or gone.
         current = self._list.currentItem()
         if current is None or current.isHidden():
             self._remove_btn.setEnabled(False)
+        self._sync_drag_reorder_mode()
 
     def select_song(self, song_id: str) -> bool:
         """Programmatically select a song by its ID.
 
         Returns True if the song was found and selected, False otherwise.
         """
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == song_id:
-                self._list.setCurrentItem(item)
-                return True
-        return False
+        item = self._item_for_song(song_id)
+        if item is None:
+            return False
+        if (
+            self._pressed_songs is not None
+            and self._pressed_songs[0] != song_id
+            and item is self._list.currentItem()
+        ):
+            # The press in progress made this row current without announcing
+            # it, so setCurrentItem would not announce it either.
+            self._on_item_changed(item, None)
+        else:
+            self._list.setCurrentItem(item)
+        return True
 
     def clear_selection(self) -> None:
         """Clear the current row so it can be selected again explicitly."""
         self._list.setCurrentItem(None)
         self._list.clearSelection()
 
-    def _on_item_changed(self, current: QListWidgetItem | None, _previous) -> None:
+    def _on_list_row_pressed(self, song_id: str) -> None:
+        """Remember what was current before a press on a draggable row."""
+        current = self._list.currentItem()
+        self._pressed_songs = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None
+            else None,
+            song_id,
+        )
+
+    def _on_list_press_released(self) -> None:
+        """Load the pressed song now that the press proved to be a click."""
+        pressed, self._pressed_songs = self._pressed_songs, None
+        current = self._list.currentItem()
+        if (
+            pressed is not None
+            and pressed[0] != pressed[1]
+            and current is not None
+            and current.data(Qt.ItemDataRole.UserRole) == pressed[1]
+        ):
+            self._on_item_changed(current, None)
+
+    def _on_list_drag_started(self) -> None:
+        """Make the pressed row the one Qt picks up."""
+        if self._pressed_songs is not None:
+            item = self._item_for_song(self._pressed_songs[1])
+            if item is not None:
+                self._list.set_current_silently(item)
+
+    def _on_list_drag_finished(self) -> None:
+        """Put the selection back where playback has it after a drag."""
+        pressed, self._pressed_songs = self._pressed_songs, None
+        if pressed is None:
+            return
+        previous = self._item_for_song(pressed[0]) if pressed[0] else None
+        self._list.set_current_silently(previous)
+        self._remove_btn.setEnabled(
+            previous is not None and bool(self._library.writable)
+        )
+
+    def _on_item_changed(
+        self,
+        current: QListWidgetItem | None,
+        _previous: QListWidgetItem | None,
+    ) -> None:
+        if self._list.in_press:
+            return  # A click or a drag: decided on release.
+        if self._pressed_songs is not None:
+            # Selected from elsewhere mid-press; a drag must not undo it.
+            self._pressed_songs = (
+                current.data(Qt.ItemDataRole.UserRole)
+                if current is not None
+                else None,
+                self._pressed_songs[1],
+            )
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
-            # Separating rows are unselectable at the flag level; this
-            # guard covers programmatic setCurrentItem paths as well.
             if song_id and not self.is_song_separating(song_id):
                 self.song_selected.emit(song_id)
                 self._remove_btn.setEnabled(bool(self._library.writable))
@@ -897,6 +1570,7 @@ class LibraryPanel(QWidget):
             return
         # Do not select the right-clicked item: right-clicking another song
         # to queue or edit it must not interrupt the currently loaded song.
+        writable = bool(getattr(self._library, "writable", True))
         menu = QMenu(self)
         if song_id:
             play_next = menu.addAction("Play Next")
@@ -911,9 +1585,63 @@ class LibraryPanel(QWidget):
                     self.add_to_queue_requested.emit(sid)
                 )
             )
+
+            add_setlist_menu = menu.addMenu("Add to Setlist")
+            add_setlist_menu.setEnabled(writable)
+            setlists = self._library_setlists()
+            for sl in setlists:
+                act = add_setlist_menu.addAction(
+                    # A lone "&" would become a mnemonic underline.
+                    sl.name.replace("&", "&&")
+                )
+                if song_id in sl.song_ids:
+                    act.setEnabled(False)
+                else:
+                    act.setEnabled(writable)
+                    act.triggered.connect(
+                        lambda _c=False, slid=sl.id, sid=song_id: (
+                            self._on_add_song_to_setlist(slid, sid)
+                        )
+                    )
+            if setlists:
+                add_setlist_menu.addSeparator()
+            new_sl_act = add_setlist_menu.addAction("New Setlist...")
+            new_sl_act.setEnabled(writable)
+            new_sl_act.triggered.connect(
+                lambda _c=False, sid=song_id: self._on_new_setlist([sid])
+            )
+
+            if self._filter_kind == "setlist" and self._filter_value:
+                active_sl = self._library_get_setlist(self._filter_value)
+                if active_sl is not None and song_id in active_sl.song_ids:
+                    idx = active_sl.song_ids.index(song_id)
+                    menu.addSeparator()
+                    up_act = menu.addAction("Move Up in Setlist")
+                    up_act.setEnabled(writable and idx > 0)
+                    up_act.triggered.connect(
+                        lambda _c=False, i=idx: (
+                            self._reorder_active_setlist(i, i - 1)
+                        )
+                    )
+                    down_act = menu.addAction("Move Down in Setlist")
+                    down_act.setEnabled(
+                        writable and idx < len(active_sl.song_ids) - 1
+                    )
+                    down_act.triggered.connect(
+                        lambda _c=False, i=idx: (
+                            self._reorder_active_setlist(i, i + 1)
+                        )
+                    )
+                    rem_sl_act = menu.addAction("Remove from Setlist")
+                    rem_sl_act.setEnabled(writable)
+                    rem_sl_act.triggered.connect(
+                        lambda _c=False, slid=active_sl.id, sid=song_id: (
+                            self._on_remove_song_from_setlist(slid, sid)
+                        )
+                    )
             menu.addSeparator()
         edit = menu.addAction("Edit...")
-        edit.setEnabled(bool(self._library.writable))
+        edit.setEnabled(writable)
         edit.triggered.connect(
             lambda _checked=False, sid=song_id: self._on_edit_song(sid)
         )
@@ -935,10 +1663,16 @@ class LibraryPanel(QWidget):
             return
         dlg = EditSongDialog(song, parent=self)
         if dlg.exec():
+            updates: dict[str, object] = {
+                "title": dlg.title,
+                "artist": dlg.artist,
+            }
+            if isinstance(getattr(dlg, "tags", None), list):
+                updates["tags"] = dlg.tags
+            if isinstance(getattr(dlg, "practice_status", None), str):
+                updates["practice_status"] = dlg.practice_status
             try:
-                self._library.update_song(
-                    song_id, title=dlg.title, artist=dlg.artist,
-                )
+                self._library.update_song(song_id, **updates)
             except OSError as exc:
                 QMessageBox.warning(
                     self, "Edit Song",
