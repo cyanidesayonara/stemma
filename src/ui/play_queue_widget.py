@@ -214,7 +214,7 @@ class PlayQueueWidget(QWidget):
         self._empty_label.setObjectName("subtle-label")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)
-        layout.addWidget(self._empty_label)
+        layout.addWidget(self._empty_label, 1)
 
         # Keyboard-friendly reorder and remove buttons.
         actions = QHBoxLayout()
@@ -318,11 +318,18 @@ class PlayQueueWidget(QWidget):
 
     def _move_selected(self, delta: int) -> None:
         row = self._up_next_list.currentRow()
-        target = row + delta
+        self._move_row_to(row, row + delta)
+
+    def _move_row_to(self, row: int, target: int) -> None:
         if 0 <= row < self._up_next_list.count() and (
             0 <= target < self._up_next_list.count()
         ):
+            # Follow the moved item before and after synchronous refresh()
+            # so repeated Up/Down clicks keep moving the same song.
+            self._up_next_list.setCurrentRow(target)
             self.move_item_requested.emit(row, target)
+            if target < self._up_next_list.count():
+                self._up_next_list.setCurrentRow(target)
 
     def _remove_selected(self) -> None:
         row = self._up_next_list.currentRow()
@@ -366,12 +373,10 @@ class PlayQueueWidget(QWidget):
         )
         move_up = menu.addAction("Move Up")
         move_up.setEnabled(row > 0)
-        move_up.triggered.connect(lambda: self.move_item_requested.emit(row, row - 1))
+        move_up.triggered.connect(lambda: self._move_row_to(row, row - 1))
         move_down = menu.addAction("Move Down")
         move_down.setEnabled(row < count - 1)
-        move_down.triggered.connect(
-            lambda: self.move_item_requested.emit(row, row + 1)
-        )
+        move_down.triggered.connect(lambda: self._move_row_to(row, row + 1))
         menu.addSeparator()
         menu.addAction("Remove from Queue").triggered.connect(
             lambda: self.remove_item_requested.emit(row)

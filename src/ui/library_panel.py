@@ -425,6 +425,7 @@ class LibraryPanel(QWidget):
     """
 
     song_selected = Signal(str)
+    song_edited = Signal(str)
     song_removal_requested = Signal(str)  # emitted before files are deleted
     song_removed = Signal(str)  # emitted with the removed song's id
     cancel_separation_requested = Signal(str)  # song_id still separating
@@ -945,6 +946,7 @@ class LibraryPanel(QWidget):
                 )
                 return
             self.refresh()
+            self.song_edited.emit(song_id)
 
     def _library_writable(self, title: str) -> bool:
         """Say why nothing can change if the library is read-only."""

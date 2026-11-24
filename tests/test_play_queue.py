@@ -474,8 +474,10 @@ class TestPlayQueueWidget:
             widget.play_context_song_requested.connect(play_ctx.append)
 
             widget._up_btn.click()
+            assert widget._up_next_list.currentRow() == 0
             widget._up_next_list.setCurrentRow(0)
             widget._down_btn.click()
+            assert widget._up_next_list.currentRow() == 1
             widget._remove_btn.click()
             widget._clear_btn.click()
             widget._stop_setlist_btn.click()
@@ -484,7 +486,7 @@ class TestPlayQueueWidget:
             widget._context_list.itemDoubleClicked.emit(widget._context_list.item(0))
 
             assert moves == [(1, 0), (0, 1)]
-            assert removes == [0]
+            assert removes == [1]
             assert clears == [True]
             assert stops == [True]
             assert play_idx == [0]
@@ -828,3 +830,40 @@ class TestMainWindowPlayQueueWiring:
         window._play_queue_action.trigger()
         assert window._library_panel.is_queue_visible is False
         assert window._play_queue_action.isChecked() is False
+
+    def test_move_buttons_follow_moved_song_and_edit_refreshes_queue(self, window):
+        s1, s2, s3 = [s.id for s in window._library.songs]
+        window.add_to_queue(s1)
+        window.add_to_queue(s2)
+        window.add_to_queue(s3)
+
+        qw = window._library_panel.queue_widget
+        qw._up_next_list.setCurrentRow(2)
+        qw._up_btn.click()
+        assert window.play_queue.up_next == [s1, s3, s2]
+        assert qw._up_next_list.currentRow() == 1
+        qw._up_btn.click()
+        assert window.play_queue.up_next == [s3, s1, s2]
+        assert qw._up_next_list.currentRow() == 0
+
+        # Editing a song notifies MainWindow so PlayQueueWidget updates labels.
+        window._library.update_song(s3, title="Renamed Song 3")
+        window._library_panel.song_edited.emit(s3)
+        assert "Renamed Song 3" in qw._up_next_list.item(0).text()
+
+    def test_one_song_setlist_keeps_banner_at_top_with_stretch_empty_label(self, qapp):
+        songs = _make_songs(1)
+        lib = _make_mock_library(songs)
+        q = PlayQueue()
+        q.start_setlist("set1", ["s1"], name="Solo Set")
+        widget = PlayQueueWidget()
+        try:
+            widget.resize(260, 500)
+            widget.show()
+            widget.refresh(q, lib)
+            qapp.processEvents()
+            assert widget._context_bar.isVisible()
+            assert widget._context_bar.geometry().top() < 30
+        finally:
+            widget.close()
+            widget.deleteLater()

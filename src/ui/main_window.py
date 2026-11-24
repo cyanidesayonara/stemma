@@ -1591,6 +1591,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Wire up signals between panels."""
         self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.song_edited.connect(
+            lambda _sid: self._refresh_queue_ui()
+        )
         self._library_panel.song_removal_requested.connect(
             self._on_song_removal_requested
         )
