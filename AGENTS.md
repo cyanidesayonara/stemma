@@ -84,7 +84,7 @@ rationale and subsystem boundaries.
 Set with the v3.1.0 release prep on 2026-11-22:
 
 - Latest stable: **v3.1.0** (the chord lane and experimental song sections, [#133](https://github.com/cyanidesayonara/stemma/issues/133))
-- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132)); the post-3.0 robustness and accessibility backlog continues in [#188](https://github.com/cyanidesayonara/stemma/issues/188)
+- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132)); the post-3.0 robustness and accessibility backlog ([#188](https://github.com/cyanidesayonara/stemma/issues/188)) is complete
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.
