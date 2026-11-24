@@ -651,6 +651,7 @@ def test_import_dialog_rollback_survives_a_locked_folder(
     from src.ui.import_dialog import ImportDialog
 
     stub = MagicMock()
+    stub._batch_pending = False
     stub._import_song_id = "abc"
     stub._model_path_for.return_value = str(tmp_path / "missing.onnx")
     stub._library.remove_song.side_effect = PermissionError(32, "in use")
