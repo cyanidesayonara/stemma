@@ -124,9 +124,6 @@ def _make_song_item(song_id: str, library: SongLibrary) -> QListWidgetItem:
     item.setData(Qt.ItemDataRole.UserRole, song_id)
     item.setData(_TITLE_ROLE, title)
     item.setData(_ARTIST_ROLE, artist)
-    # A drop onto a row would send the dragged song to the end of the list;
-    # only the gaps between rows accept drops.
-    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
     return item
 
 

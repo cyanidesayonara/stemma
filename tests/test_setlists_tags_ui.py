@@ -1,5 +1,6 @@
 """Tests for setlists and tags UI, drag-reorder, and EditSongDialog fields."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -31,6 +32,13 @@ def _build_real_library(tmp_path, count: int = 4) -> SongLibrary:
         _write_wav(f"{song.stems_path}/vocals.wav", value=i / 10.0)
         lib.update_song(song.id, model_used="htdemucs")
     return lib
+
+
+def _shown_ids(panel: LibraryPanel) -> list[str]:
+    return [
+        panel._list.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(panel._list.count())
+    ]
 
 
 def _run_context_menu(panel: LibraryPanel, song_id: str, label: str) -> None:
@@ -237,7 +245,9 @@ class TestCollectionFilterAndReorderMode:
             # Filter by tag (case-insensitive match on "gig" -> s1, s3).
             panel.set_collection_filter("tag", "gig")
             assert panel.filter_kind == "tag"
-            assert panel.song_ids_in_order() == [s1, s3]
+            assert _shown_ids(panel) == [s1, s3]
+            # Browsing does not change what plays next.
+            assert panel.song_ids_in_order() == [s1, s2, s3, s4]
             assert panel._setlist_bar.isHidden()
             assert (
                 panel._list.dragDropMode()
@@ -247,7 +257,7 @@ class TestCollectionFilterAndReorderMode:
             # Filter by setlist -> exact setlist order [s4, s2] + Play Setlist bar.
             panel.set_collection_filter("setlist", sl.id)
             assert panel.filter_kind == "setlist"
-            assert panel.song_ids_in_order() == [s4, s2]
+            assert _shown_ids(panel) == [s4, s2]
             assert not panel._setlist_bar.isHidden()
             assert panel._play_setlist_btn.isEnabled()
             assert (
@@ -400,13 +410,7 @@ class TestSetlistManagementAndContextMenu:
             model = panel._list.model()
             assert model.moveRow(QModelIndex(), 0, QModelIndex(), 3)
             assert lib.get_setlist(sl.id).song_ids == [s2, s3, s1]
-            assert [
-                panel._list.item(i).data(Qt.ItemDataRole.UserRole)
-                for i in range(panel._list.count())
-            ] == [s2, s3, s1]
-            for i in range(panel._list.count()):
-                flags = panel._list.item(i).flags()
-                assert not flags & Qt.ItemFlag.ItemIsDropEnabled
+            assert _shown_ids(panel) == [s2, s3, s1]
         finally:
             panel.close()
             panel.deleteLater()
@@ -448,6 +452,95 @@ class TestSetlistManagementAndContextMenu:
             center = rows.visualItemRect(panel._item_for_song(s2)).center()
             QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=center)
             assert selected == [s2]
+        finally:
+            panel.close()
+            panel.deleteLater()
+
+    def test_auto_advance_during_press_and_drag(self, qapp, tmp_path):
+        """A song that starts mid-press loads, and is not what gets moved."""
+        lib = _build_real_library(tmp_path, count=4)
+        s1, s2, s3, s4 = [s.id for s in lib.songs]
+        sl = lib.create_setlist("Set A", [s1, s2, s3, s4])
+        panel = LibraryPanel(lib)
+        panel.resize(260, 600)
+        panel.show()
+        qapp.processEvents()
+        try:
+            panel.set_collection_filter("setlist", sl.id)
+            panel.select_song(s1)
+            selected = []
+            panel.song_selected.connect(selected.append)
+            rows = panel._list
+            view = rows.viewport()
+
+            # Held, then released without a drag.
+            center = rows.visualItemRect(panel._item_for_song(s4)).center()
+            QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=center)
+            panel.select_song(s2)
+            assert selected == [s2]
+            QTest.mouseRelease(view, Qt.MouseButton.LeftButton, pos=center)
+            assert selected == [s2]
+
+            # Advancing both before the drag starts and during it.
+            center = rows.visualItemRect(panel._item_for_song(s3)).center()
+            QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=center)
+            panel.select_song(s4)
+            moved = []
+
+            def drag(_list, _actions):
+                moved.append(rows.currentItem().data(Qt.ItemDataRole.UserRole))
+                panel.select_song(s1)
+                rows.dropEvent(MagicMock())
+
+            def drop(_list, _event):
+                assert len(rows.selectedIndexes()) == 1
+                row = rows.selectedIndexes()[0].row()
+                rows.model().moveRow(QModelIndex(), row, QModelIndex(), 0)
+
+            base = "src.ui.library_panel.QListWidget."
+            with patch(base + "startDrag", drag), \
+                    patch(base + "dropEvent", drop):
+                rows.startDrag(Qt.DropAction.MoveAction)
+            QTest.mouseRelease(view, Qt.MouseButton.LeftButton, pos=center)
+            assert moved == [s3]
+            assert lib.get_setlist(sl.id).song_ids == [s3, s1, s2, s4]
+            assert selected == [s2, s4, s1]
+            assert rows.currentItem().data(Qt.ItemDataRole.UserRole) == s1
+        finally:
+            panel.close()
+            panel.deleteLater()
+
+    def test_setlist_name_with_ampersand_in_menu(self, qapp, tmp_path):
+        lib = _build_real_library(tmp_path, count=1)
+        sl = lib.create_setlist("Rock & Roll", [])
+        panel = LibraryPanel(lib)
+        try:
+            song_id = lib.songs[0].id
+            _run_context_menu(panel, song_id, "Rock && Roll")
+            assert lib.get_setlist(sl.id).song_ids == [song_id]
+        finally:
+            panel.close()
+            panel.deleteLater()
+
+    def test_playing_song_is_highlighted_after_filter_round_trip(
+        self, qapp, tmp_path,
+    ):
+        lib = _build_real_library(tmp_path, count=2)
+        s1 = lib.songs[0].id
+        sl = lib.create_setlist("Empty", [])
+        panel = LibraryPanel(lib)
+        try:
+            panel.select_song(s1)
+            panel.set_playing_song(s1)
+            selected = []
+            panel.song_selected.connect(selected.append)
+            panel.set_collection_filter("setlist", sl.id)
+            assert panel._list.currentItem() is None
+            panel.set_collection_filter("all")
+            current = panel._list.currentItem()
+            assert current.data(Qt.ItemDataRole.UserRole) == s1
+            assert panel._remove_btn.isEnabled()
+            assert selected == []
         finally:
             panel.close()
             panel.deleteLater()
@@ -548,3 +641,24 @@ class TestMainWindowSetlistsAndFilterPlayback:
             window._library_panel.refresh()
             window._library_panel.setlist_changed.emit(sl.id)
             assert window.play_queue.is_setlist_active is False
+
+    def test_finished_import_opens_while_another_view_is_shown(self, window):
+        song_id = window._library.songs[0].id
+        sl = window._library.create_setlist("Empty", [])
+        window._library_panel.set_collection_filter("setlist", sl.id)
+        window._watched_separation = song_id
+        with patch.object(
+            main_window_module, "StemLoadWorker",
+            side_effect=_FakeStemLoadWorker, create=True,
+        ):
+            window._on_separation_finished(song_id, "htdemucs")
+        assert window._loading_song_id == song_id
+        assert window._library_panel.filter_value == sl.id
+
+    def test_out_of_view_song_without_stems_does_not_start(self, window):
+        song = window._library.songs[0]
+        sl = window._library.create_setlist("Empty", [])
+        window._library_panel.set_collection_filter("setlist", sl.id)
+        os.remove(f"{song.stems_path}/vocals.wav")
+        assert window._load_and_autoplay_song(song.id) is False
+        assert window._pending_autoplay_song_id is None

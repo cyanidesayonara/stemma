@@ -2450,8 +2450,9 @@ class MainWindow(QMainWindow):
         )
         if dialog.exec():
             # The new row appears immediately; while its job runs it
-            # shows queue-driven progress and stays unselectable.
-            self._library_panel.refresh()
+            # shows queue-driven progress and stays unselectable. A setlist
+            # or tag view would not list it.
+            self._library_panel.set_collection_filter("all")
 
     # ------------------------------------------------------------------
     # Background separation queue
@@ -2554,7 +2555,9 @@ class MainWindow(QMainWindow):
             self._player_controls.hide_separation()
             if (self._current_song_id is None
                     and self._loading_song_id is None):
-                self._library_panel.select_song(song_id)
+                if not self._library_panel.select_song(song_id):
+                    # Outside the setlist or tag being browsed.
+                    self._on_song_selected(song_id)
 
     def _on_separation_failed(self, song_id: str, message: str) -> None:
         """Job failed or was cancelled: roll the library row back."""

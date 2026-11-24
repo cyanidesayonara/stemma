@@ -284,6 +284,11 @@ class _SongDelegate(QStyledItemDelegate):
     def set_subtext_color(self, color: str) -> None:
         self._subtext_color = QColor(color)
 
+    @property
+    def playing_song(self) -> str | None:
+        """The song with the 'now playing' indicator."""
+        return self._playing_song_id
+
     def set_playing_song(self, song_id: str | None) -> None:
         """Set the currently playing song ID for the 'now playing' indicator."""
         self._playing_song_id = song_id
@@ -489,27 +494,61 @@ class _SongList(QListWidget):
 
     Qt makes a row current on mouse press. Selecting a song loads it, so
     while rows can be dragged the panel waits for the release: a press
-    that turns into a drag reorders without touching playback.
+    that turns into a drag reorders without touching playback. Selection
+    changes from anywhere else (auto-advance) are never held back.
     """
 
+    row_pressed = Signal(str)  # song id, before the press takes effect
     press_released = Signal()
+    drag_started = Signal()
     drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._in_press = False
         self._press_active = False
+        self._dragged_id: str | None = None
 
     @property
-    def press_active(self) -> bool:
-        """True while a mouse press may still become a drag."""
-        return self._press_active
+    def in_press(self) -> bool:
+        """True while a mouse press on a draggable row is being handled."""
+        return self._in_press
+
+    def item_for_song(self, song_id: str) -> QListWidgetItem | None:
+        """Return the row showing *song_id*, if any."""
+        for i in range(self.count()):
+            item = self.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == song_id:
+                return item
+        return None
+
+    def set_current_silently(self, item: QListWidgetItem | None) -> None:
+        """Make *item* (or nothing) current without announcing it."""
+        blocked = self.blockSignals(True)
+        try:
+            self.setCurrentItem(item)
+            if item is None:
+                self.clearSelection()
+        finally:
+            self.blockSignals(blocked)
+        self.viewport().update()
 
     def mousePressEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
         self._press_active = (
             self.dragEnabled()
             and event.button() == Qt.MouseButton.LeftButton
+            and item is not None
         )
-        super().mousePressEvent(event)
+        if not self._press_active:
+            super().mousePressEvent(event)
+            return
+        self.row_pressed.emit(item.data(Qt.ItemDataRole.UserRole))
+        self._in_press = True
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._in_press = False
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
@@ -519,8 +558,31 @@ class _SongList(QListWidget):
 
     def startDrag(self, supported_actions) -> None:
         self._press_active = False
-        super().startDrag(supported_actions)
+        # The panel puts the pressed row back first, in case another song
+        # became current between the press and the drag.
+        self.drag_started.emit()
+        current = self.currentItem()
+        self._dragged_id = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None
+            else None
+        )
+        try:
+            super().startDrag(supported_actions)
+        finally:
+            self._dragged_id = None
         self.drag_finished.emit()
+
+    def dropEvent(self, event) -> None:
+        # Qt moves the selected row; playback may have advanced to another
+        # song mid-drag, so select the dragged one again.
+        if self._dragged_id is not None:
+            item = self.item_for_song(self._dragged_id)
+            if item is None:
+                event.ignore()
+                return
+            self.set_current_silently(item)
+        super().dropEvent(event)
 
 
 class LibraryPanel(QWidget):
@@ -557,8 +619,8 @@ class LibraryPanel(QWidget):
         self._filter_kind: str = "all"
         self._filter_value: str | None = None
         self._repopulating_list: bool = False
-        # (previous song id, pressed song id) while a press on a draggable
-        # row has not yet become a click or a drag.
+        # (song id to select again after a drag, pressed song id) from a
+        # press on a draggable row until its click or drag ends.
         self._pressed_songs: tuple[str | None, str] | None = None
         # song_id -> progress text for songs still separating in the
         # background. Rows in this state are unselectable (their stems
@@ -647,6 +709,8 @@ class LibraryPanel(QWidget):
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
         self._list.model().rowsMoved.connect(self._on_list_rows_moved)
+        self._list.row_pressed.connect(self._on_list_row_pressed)
+        self._list.drag_started.connect(self._on_list_drag_started)
         self._list.press_released.connect(self._on_list_press_released)
         self._list.drag_finished.connect(self._on_list_drag_finished)
         self._list.setContextMenuPolicy(
@@ -1074,7 +1138,7 @@ class LibraryPanel(QWidget):
             self._list.setDragEnabled(False)
             self._list.setAcceptDrops(False)
             self._list.setDropIndicatorShown(False)
-        self._setlist_hint_label.setVisible(can_drag)
+        self._setlist_hint_label.setVisible(can_drag and self._list.count() > 1)
 
     def _on_list_rows_moved(
         self, _parent, start: int, _end: int, _dest_parent, dest_row: int,
@@ -1276,6 +1340,10 @@ class LibraryPanel(QWidget):
             if current is not None
             else None
         )
+        if selected_id is None:
+            # Coming back from a view without it, the open song is
+            # highlighted again.
+            selected_id = self._song_delegate.playing_song
         selected_item = None
         self._repopulating_list = True
         self._list.blockSignals(True)
@@ -1297,9 +1365,6 @@ class LibraryPanel(QWidget):
                     _SEARCH_TEXT_ROLE,
                     f"{song.artist} {song.title} {tags_text}".lower(),
                 )
-                # Rows accept drops between them only: a drop onto a row
-                # would send the dragged song to the end of the list.
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
                 self._apply_separating_state(item, song.id)
                 self._list.addItem(item)
                 if selected_id and song.id == selected_id:
@@ -1342,11 +1407,7 @@ class LibraryPanel(QWidget):
         return song_id in self._separating
 
     def _item_for_song(self, song_id: str) -> QListWidgetItem | None:
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == song_id:
-                return item
-        return None
+        return self._list.item_for_song(song_id)
 
     def _apply_separating_state(self, item: QListWidgetItem, song_id: str) -> None:
         """Sync an item's progress role and selectability with the state.
@@ -1368,8 +1429,12 @@ class LibraryPanel(QWidget):
         return len(self._library.songs)
 
     def song_ids_in_order(self) -> list[str]:
-        """Return song IDs in current filtered display order."""
-        return [s.id for s in self._filtered_songs()]
+        """Return every song ID in library order, whatever the view shows.
+
+        Playback walks this list, so browsing a setlist or tag does not
+        change what plays next.
+        """
+        return [s.id for s in self._library.songs]
 
     def _apply_filter(self, query: str) -> None:
         """Show only items matching *query* (case-insensitive substring)."""
@@ -1417,31 +1482,42 @@ class LibraryPanel(QWidget):
         self._list.setCurrentItem(None)
         self._list.clearSelection()
 
+    def _on_list_row_pressed(self, song_id: str) -> None:
+        """Remember what was current before a press on a draggable row."""
+        current = self._list.currentItem()
+        self._pressed_songs = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None
+            else None,
+            song_id,
+        )
+
     def _on_list_press_released(self) -> None:
         """Load the pressed song now that the press proved to be a click."""
         pressed, self._pressed_songs = self._pressed_songs, None
         current = self._list.currentItem()
         if (
             pressed is not None
+            and pressed[0] != pressed[1]
             and current is not None
             and current.data(Qt.ItemDataRole.UserRole) == pressed[1]
         ):
             self._on_item_changed(current, None)
 
+    def _on_list_drag_started(self) -> None:
+        """Make the pressed row the one Qt picks up."""
+        if self._pressed_songs is not None:
+            item = self._item_for_song(self._pressed_songs[1])
+            if item is not None:
+                self._list.set_current_silently(item)
+
     def _on_list_drag_finished(self) -> None:
-        """Put the selection back where it was before the drag."""
+        """Put the selection back where playback has it after a drag."""
         pressed, self._pressed_songs = self._pressed_songs, None
         if pressed is None:
             return
         previous = self._item_for_song(pressed[0]) if pressed[0] else None
-        self._list.blockSignals(True)
-        try:
-            self._list.setCurrentItem(previous)
-            if previous is None:
-                self._list.clearSelection()
-        finally:
-            self._list.blockSignals(False)
-        self._list.viewport().update()
+        self._list.set_current_silently(previous)
         self._remove_btn.setEnabled(
             previous is not None and bool(self._library.writable)
         )
@@ -1449,20 +1525,20 @@ class LibraryPanel(QWidget):
     def _on_item_changed(
         self,
         current: QListWidgetItem | None,
-        previous: QListWidgetItem | None,
+        _previous: QListWidgetItem | None,
     ) -> None:
+        if self._list.in_press:
+            return  # A click or a drag: decided on release.
+        if self._pressed_songs is not None:
+            # Selected from elsewhere mid-press; a drag must not undo it.
+            self._pressed_songs = (
+                current.data(Qt.ItemDataRole.UserRole)
+                if current is not None
+                else None,
+                self._pressed_songs[1],
+            )
         if current is not None:
             song_id = current.data(Qt.ItemDataRole.UserRole)
-            if song_id and self._list.press_active:
-                self._pressed_songs = (
-                    previous.data(Qt.ItemDataRole.UserRole)
-                    if previous is not None
-                    else None,
-                    song_id,
-                )
-                return
-            # Separating rows are unselectable at the flag level; this
-            # guard covers programmatic setCurrentItem paths as well.
             if song_id and not self.is_song_separating(song_id):
                 self.song_selected.emit(song_id)
                 self._remove_btn.setEnabled(bool(self._library.writable))
@@ -1506,7 +1582,10 @@ class LibraryPanel(QWidget):
             add_setlist_menu.setEnabled(writable)
             setlists = self._library_setlists()
             for sl in setlists:
-                act = add_setlist_menu.addAction(sl.name)
+                act = add_setlist_menu.addAction(
+                    # A lone "&" would become a mnemonic underline.
+                    sl.name.replace("&", "&&")
+                )
                 if song_id in sl.song_ids:
                     act.setEnabled(False)
                 else:
