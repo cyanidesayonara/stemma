@@ -510,6 +510,47 @@ class TestSetlistManagementAndContextMenu:
             panel.close()
             panel.deleteLater()
 
+    def test_auto_advance_to_the_pressed_row(self, qapp, tmp_path):
+        """The song being pressed or dragged can itself start playing."""
+        lib = _build_real_library(tmp_path, count=3)
+        s1, s2, s3 = [s.id for s in lib.songs]
+        sl = lib.create_setlist("Set A", [s1, s2, s3])
+        panel = LibraryPanel(lib)
+        panel.resize(260, 600)
+        panel.show()
+        qapp.processEvents()
+        try:
+            panel.set_collection_filter("setlist", sl.id)
+            panel.select_song(s1)
+            selected = []
+            panel.song_selected.connect(selected.append)
+            rows = panel._list
+            view = rows.viewport()
+
+            center = rows.visualItemRect(panel._item_for_song(s2)).center()
+            QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=center)
+            assert panel.select_song(s2)
+            assert selected == [s2]
+            # The release must not load it a second time, nor does a click
+            # on the row that is already current.
+            QTest.mouseRelease(view, Qt.MouseButton.LeftButton, pos=center)
+            QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=center)
+            assert selected == [s2]
+
+            center = rows.visualItemRect(panel._item_for_song(s3)).center()
+            QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=center)
+
+            def drag(_list, _actions):
+                panel.select_song(s3)
+
+            with patch("src.ui.library_panel.QListWidget.startDrag", drag):
+                rows.startDrag(Qt.DropAction.MoveAction)
+            assert selected == [s2, s3]
+            assert rows.currentItem().data(Qt.ItemDataRole.UserRole) == s3
+        finally:
+            panel.close()
+            panel.deleteLater()
+
     def test_setlist_name_with_ampersand_in_menu(self, qapp, tmp_path):
         lib = _build_real_library(tmp_path, count=1)
         sl = lib.create_setlist("Rock & Roll", [])

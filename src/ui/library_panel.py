@@ -1470,12 +1470,20 @@ class LibraryPanel(QWidget):
 
         Returns True if the song was found and selected, False otherwise.
         """
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == song_id:
-                self._list.setCurrentItem(item)
-                return True
-        return False
+        item = self._item_for_song(song_id)
+        if item is None:
+            return False
+        if (
+            self._pressed_songs is not None
+            and self._pressed_songs[0] != song_id
+            and item is self._list.currentItem()
+        ):
+            # The press in progress made this row current without announcing
+            # it, so setCurrentItem would not announce it either.
+            self._on_item_changed(item, None)
+        else:
+            self._list.setCurrentItem(item)
+        return True
 
     def clear_selection(self) -> None:
         """Clear the current row so it can be selected again explicitly."""
