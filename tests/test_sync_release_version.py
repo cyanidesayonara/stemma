@@ -34,10 +34,8 @@ SHELLS = [
     shell for shell in ("powershell", "pwsh") if shutil.which(shell)
 ]
 
-pytestmark = [
-    pytest.mark.skipif(sys.platform != "win32", reason="Windows only"),
-    pytest.mark.skipif(not SHELLS, reason="no PowerShell"),
-]
+_WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+_NEEDS_SHELL = pytest.mark.skipif(not SHELLS, reason="no PowerShell")
 
 
 @pytest.fixture
@@ -64,6 +62,8 @@ def _run(shell: str, repo: Path, tag: str) -> subprocess.CompletedProcess:
     )
 
 
+@_WINDOWS_ONLY
+@_NEEDS_SHELL
 @pytest.mark.parametrize("shell", SHELLS)
 def test_sync_writes_both_files(shell: str, repo: Path) -> None:
     result = _run(shell, repo, "v3.0.0")
@@ -84,6 +84,8 @@ def test_sync_writes_both_files(shell: str, repo: Path) -> None:
     assert 'MinVersion="10.0.17763.0"' in text
 
 
+@_WINDOWS_ONLY
+@_NEEDS_SHELL
 @pytest.mark.parametrize("shell", SHELLS)
 def test_sync_rejects_a_bad_tag(shell: str, repo: Path) -> None:
     result = _run(shell, repo, "3.0")
@@ -93,6 +95,8 @@ def test_sync_rejects_a_bad_tag(shell: str, repo: Path) -> None:
     assert b'"2.6.0"' in (repo / "src" / "version.py").read_bytes()
 
 
+@_WINDOWS_ONLY
+@_NEEDS_SHELL
 @pytest.mark.parametrize("shell", SHELLS)
 def test_sync_fails_loudly_when_a_write_fails(shell: str, repo: Path) -> None:
     version = repo / "src" / "version.py"
@@ -106,6 +110,8 @@ def test_sync_fails_loudly_when_a_write_fails(shell: str, repo: Path) -> None:
     assert "Synced" not in result.stdout
 
 
+@_WINDOWS_ONLY
+@_NEEDS_SHELL
 @pytest.mark.parametrize("shell", SHELLS)
 def test_sync_maps_prerelease_tags_to_distinct_msix_revisions(
     shell: str, repo: Path,
@@ -135,6 +141,8 @@ def test_sync_maps_prerelease_tags_to_distinct_msix_revisions(
     assert len(set(prerelease_revisions)) == len(prerelease_revisions)
 
 
+@_WINDOWS_ONLY
+@_NEEDS_SHELL
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize(
     "bad_tag",
