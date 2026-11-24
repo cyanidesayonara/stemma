@@ -95,7 +95,7 @@ class TestSongLibraryInit:
         assert os.path.isfile(json_path)
         with open(json_path) as f:
             data = json.load(f)
-        assert data == []
+        assert data == {"schema_version": 2, "songs": [], "setlists": []}
 
     def test_loads_existing_library(self, library_dir):
         # Pre-populate library.json.
@@ -131,7 +131,7 @@ class TestSongLibraryInit:
         # The corrupted file should be overwritten with valid empty JSON.
         with open(json_path) as f:
             data = json.load(f)
-        assert data == []
+        assert data == {"schema_version": 2, "songs": [], "setlists": []}
 
     def test_recovers_from_malformed_entries(self, library_dir):
         """Entries with missing fields should not crash the library."""
@@ -451,8 +451,9 @@ class TestSongLibraryCRUD:
         json_path = os.path.join(library_dir, "library.json")
         with open(json_path) as f:
             data = json.load(f)
-        assert len(data) == 1
-        assert data[0]["title"] == "My Song"
+        assert data["schema_version"] == 2
+        assert len(data["songs"]) == 1
+        assert data["songs"][0]["title"] == "My Song"
 
     def test_get_song_by_id(self, library, fake_audio):
         song = library.add_song(
@@ -490,7 +491,7 @@ class TestSongLibraryCRUD:
         json_path = os.path.join(library_dir, "library.json")
         with open(json_path) as f:
             data = json.load(f)
-        assert len(data) == 0
+        assert len(data["songs"]) == 0
 
     def test_remove_nonexistent_song_raises(self, library):
         with pytest.raises(KeyError):
@@ -688,7 +689,7 @@ class TestSongLibraryCRUD:
         json_path = os.path.join(library_dir, "library.json")
         with open(json_path) as f:
             data = json.load(f)
-        assert data[0]["model_used"] == "htdemucs_6s"
+        assert data["songs"][0]["model_used"] == "htdemucs_6s"
 
     def test_update_nonexistent_song_raises(self, library):
         with pytest.raises(KeyError):

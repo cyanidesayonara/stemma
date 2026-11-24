@@ -179,7 +179,8 @@ class TestLibraryIntegration:
         # JSON should always be valid (atomic writes).
         with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
-        assert len(data) == 2
+        assert data["schema_version"] == 2
+        assert len(data["songs"]) == 2
 
         # No .tmp file should be left behind.
         assert not os.path.exists(json_path + ".tmp")

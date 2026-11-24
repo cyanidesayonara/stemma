@@ -1,10 +1,12 @@
-"""Song library backed by a JSON file on disk.
+"""Song library backed by a versioned JSON file on disk.
 
-Manages a collection of imported songs. Each song has metadata (title, artist,
-model used, etc.) and a directory under ``data/songs/{id}/`` where the original
-file and separated stems are stored.
+Manages a collection of imported songs and ordered setlists. Each song has
+metadata (title, artist, model used, tags, practice status, etc.) and a
+directory under ``data/songs/{id}/`` where the original file and separated
+stems are stored.
 """
 
+from collections.abc import Iterable
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ import re
 import shutil
 import time
 import uuid
-from dataclasses import dataclass, asdict, fields, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 
 from src.separation_state import (
@@ -21,7 +23,25 @@ from src.separation_state import (
 )
 
 
-_EDITABLE_METADATA_FIELDS = frozenset({"title", "artist", "model_used"})
+LIBRARY_SCHEMA_VERSION = 2
+PRACTICE_STATUSES = ("", "learning", "practicing", "ready")
+_VALID_PRACTICE_STATUSES = frozenset(PRACTICE_STATUSES)
+_SONG_TEXT_FIELDS = (
+    "id",
+    "title",
+    "artist",
+    "original_path",
+    "stems_path",
+    "model_used",
+    "date_added",
+)
+_EDITABLE_METADATA_FIELDS = frozenset({
+    "title",
+    "artist",
+    "model_used",
+    "tags",
+    "practice_status",
+})
 _GENERATED_SONG_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 # A song id that can name a folder directly below songs/ (no separators,
 # drive letters, or leading dot), so a stale path can be rebased onto it.
@@ -129,6 +149,78 @@ class LibraryRecovery:
         )
 
 
+def normalize_tags(tags: Iterable[str]) -> list[str]:
+    """Strip whitespace, drop blanks, and deduplicate tags case-insensitively."""
+    if isinstance(tags, (str, bytes)):
+        raise TypeError("tags must be an iterable of strings")
+    try:
+        iterator = iter(tags)
+    except TypeError as exc:
+        raise TypeError("tags must be an iterable of strings") from exc
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in iterator:
+        if not isinstance(raw, str):
+            raise TypeError(f"tag must be text, got {type(raw)}")
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key not in seen:
+            seen.add(key)
+            result.append(cleaned)
+    return result
+
+
+def normalize_practice_status(status: str | None) -> str:
+    """Validate and normalize a song's practice status."""
+    if status is None:
+        return ""
+    if not isinstance(status, str):
+        raise TypeError(f"practice_status must be text, got {type(status)}")
+    cleaned = status.strip().lower()
+    if cleaned not in _VALID_PRACTICE_STATUSES:
+        raise ValueError(
+            f"Unknown practice status {status!r}; expected one of "
+            f"{PRACTICE_STATUSES}"
+        )
+    return cleaned
+
+
+def _normalize_single_tag(tag: str) -> str:
+    if not isinstance(tag, str):
+        raise TypeError(f"tag must be text, got {type(tag)}")
+    cleaned = tag.strip()
+    if not cleaned:
+        raise ValueError("Tag cannot be empty")
+    return cleaned
+
+
+def _dedup_ids(
+    song_ids: Iterable[str],
+    *,
+    drop_empty: bool = False,
+) -> list[str]:
+    """Validate and deduplicate song IDs while preserving order."""
+    if isinstance(song_ids, (str, bytes)):
+        raise TypeError("song_ids must be an iterable of song ID strings")
+    try:
+        iterator = iter(song_ids)
+    except TypeError as exc:
+        raise TypeError("song_ids must be an iterable of song ID strings") from exc
+    result: list[str] = []
+    seen: set[str] = set()
+    for sid in iterator:
+        if not isinstance(sid, str):
+            raise TypeError(f"song id must be text, got {type(sid)}")
+        if drop_empty and not sid:
+            continue
+        if sid not in seen:
+            seen.add(sid)
+            result.append(sid)
+    return result
+
+
 @dataclass
 class Song:
     """Metadata for a single imported song."""
@@ -140,6 +232,8 @@ class Song:
     stems_path: str
     model_used: str
     date_added: str
+    tags: list[str] = field(default_factory=list)
+    practice_status: str = ""
 
     def to_dict(self) -> dict:
         """Serialize to a plain dictionary."""
@@ -150,30 +244,90 @@ class Song:
         """Deserialize from a plain dictionary.
 
         Unknown keys (an index written by a newer version, or edited by
-        hand) are ignored and missing text fields default to ``""``, so one
+        hand) are ignored, missing text fields default to ``""``, and
+        unknown ``practice_status`` values fall back to ``""``, so one
         odd entry cannot discard the whole library. ``id`` and
         ``stems_path`` are required: without them there is no song.
         """
         if not isinstance(data, dict):
             raise TypeError(f"song entry must be an object, got {type(data)}")
-        values = {}
-        for field in fields(cls):
-            value = data.get(field.name)
+        values: dict[str, object] = {}
+        for name in _SONG_TEXT_FIELDS:
+            value = data.get(name)
             if value is None:
                 value = ""
             if not isinstance(value, str):
-                raise TypeError(f"song field {field.name!r} must be text")
-            values[field.name] = value
+                raise TypeError(f"song field {name!r} must be text")
+            values[name] = value
         if not values["id"] or not values["stems_path"]:
             raise KeyError("song entry needs an id and a stems_path")
+
+        raw_tags = data.get("tags")
+        if raw_tags is None:
+            values["tags"] = []
+        elif not isinstance(raw_tags, list):
+            raise TypeError("song field 'tags' must be a list")
+        else:
+            values["tags"] = normalize_tags(raw_tags)
+
+        raw_status = data.get("practice_status")
+        if raw_status is None:
+            values["practice_status"] = ""
+        elif not isinstance(raw_status, str):
+            raise TypeError("song field 'practice_status' must be text")
+        else:
+            cleaned = raw_status.strip().lower()
+            values["practice_status"] = (
+                cleaned if cleaned in _VALID_PRACTICE_STATUSES else ""
+            )
         return cls(**values)
+
+
+@dataclass
+class Setlist:
+    """Ordered collection of song IDs for rehearsal or performance."""
+
+    id: str
+    name: str
+    song_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain dictionary."""
+        return asdict(self)
+
+    def copy(self) -> "Setlist":
+        """Return a defensive copy with an independent ``song_ids`` list."""
+        return Setlist(id=self.id, name=self.name, song_ids=list(self.song_ids))
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Setlist":
+        """Deserialize from a plain dictionary, ignoring unknown keys."""
+        if not isinstance(data, dict):
+            raise TypeError(f"setlist entry must be an object, got {type(data)}")
+        setlist_id = data.get("id")
+        name = data.get("name")
+        if not isinstance(setlist_id, str) or not isinstance(name, str):
+            raise TypeError("setlist 'id' and 'name' must be text")
+        clean_id = setlist_id.strip()
+        clean_name = name.strip()
+        if not clean_id or not clean_name:
+            raise ValueError("setlist entry needs non-empty id and name")
+        raw_ids = data.get("song_ids")
+        if raw_ids is None:
+            song_ids: list[str] = []
+        elif not isinstance(raw_ids, list):
+            raise TypeError("setlist field 'song_ids' must be a list")
+        else:
+            song_ids = _dedup_ids(raw_ids, drop_empty=True)
+        return cls(id=clean_id, name=clean_name, song_ids=song_ids)
 
 
 class SongLibrary:
     """JSON-backed song library with CRUD operations.
 
     On construction the data directory structure is created if it does not
-    already exist, and any previously persisted songs are loaded into memory.
+    already exist, and any previously persisted songs and setlists are loaded
+    into memory.
 
     Args:
         data_dir: Root data directory (contains ``library.json`` and ``songs/``).
@@ -184,6 +338,7 @@ class SongLibrary:
         self._songs_dir = os.path.join(data_dir, "songs")
         self._json_path = os.path.join(data_dir, "library.json")
         self._songs: list[Song] = []
+        self._setlists: list[Setlist] = []
         self._writable = True
         self._recovery: LibraryRecovery | None = None
         # Index rows kept on disk but not shown: songs whose interrupted
@@ -207,6 +362,7 @@ class SongLibrary:
             # writing []. Staged removal folders count too, since one may
             # be the only copy of a song.
             self._songs = self._rebuild_from_disk()
+            self._setlists = []
             try:
                 has_entries = bool(os.listdir(self._songs_dir))
             except OSError:
@@ -400,6 +556,7 @@ class SongLibrary:
         self._require_writable()
         self._require_safe_song_dir(song.stems_path)
         song_index = self._songs.index(song)
+        prev_setlist_songs = [(sl, list(sl.song_ids)) for sl in self._setlists]
         staged_dir = None
         if os.path.isdir(song.stems_path):
             staged_dir = os.path.join(
@@ -410,6 +567,8 @@ class SongLibrary:
             os.replace(song.stems_path, staged_dir)
 
         self._songs.pop(song_index)
+        for sl in self._setlists:
+            sl.song_ids = [sid for sid in sl.song_ids if sid != song_id]
         try:
             self._save()
         except Exception as save_error:
@@ -424,6 +583,8 @@ class SongLibrary:
                         f"for recovery at: {staged_dir}"
                     ) from save_error
             self._songs.insert(song_index, song)
+            for sl, prev_ids in prev_setlist_songs:
+                sl.song_ids = prev_ids
             raise
 
         if staged_dir is not None:
@@ -476,7 +637,31 @@ class SongLibrary:
                     "Could not delete removed song folder %s: %s", path, exc,
                 )
 
-    def update_song(self, song_id: str, **fields: str) -> Song:
+    def _save_with_rollback(self, restore) -> None:
+        """Persist the index, running *restore* before re-raising on failure."""
+        try:
+            self._save()
+        except Exception:
+            restore()
+            raise
+
+    def _require_songs(self, song_ids: Iterable[str]) -> list[Song]:
+        """Resolve *song_ids* in order, raising ``KeyError`` if any is missing."""
+        resolved: list[Song] = []
+        for sid in _dedup_ids(song_ids):
+            song = self.get_song(sid)
+            if song is None:
+                raise KeyError(f"Song '{sid}' not found")
+            resolved.append(song)
+        return resolved
+
+    def _require_setlist(self, setlist_id: str) -> Setlist:
+        for sl in self._setlists:
+            if sl.id == setlist_id:
+                return sl
+        raise KeyError(f"Setlist '{setlist_id}' not found")
+
+    def update_song(self, song_id: str, **fields) -> Song:
         """Update one or more fields on an existing song.
 
         Only the supplied keyword arguments are changed; other fields are
@@ -497,22 +682,221 @@ class SongLibrary:
             for key, value in fields.items()
             if key in _EDITABLE_METADATA_FIELDS
         }
+        if "tags" in updates:
+            updates["tags"] = normalize_tags(updates["tags"])
+        if "practice_status" in updates:
+            updates["practice_status"] = normalize_practice_status(
+                updates["practice_status"]
+            )
         self._require_writable()
-        previous = {key: getattr(song, key) for key in updates}
+        previous = {
+            key: (
+                list(getattr(song, key)) if key == "tags" else getattr(song, key)
+            )
+            for key in updates
+        }
         for key, value in updates.items():
             setattr(song, key, value)
 
-        try:
-            self._save()
-        except Exception:
+        def restore() -> None:
             for key, value in previous.items():
                 setattr(song, key, value)
-            raise
+
+        self._save_with_rollback(restore)
         return song
+
+    # ------------------------------------------------------------------
+    # Tags and practice status
+    # ------------------------------------------------------------------
+
+    def all_tags(self) -> list[str]:
+        """Return distinct tags across the library sorted case-insensitively."""
+        seen: dict[str, str] = {}
+        for song in self._songs:
+            for tag in song.tags:
+                seen.setdefault(tag.casefold(), tag)
+        return sorted(seen.values(), key=lambda t: (t.casefold(), t))
+
+    def set_song_tags(self, song_id: str, tags: Iterable[str]) -> Song:
+        """Replace the tag list on *song_id*."""
+        return self.update_song(song_id, tags=tags)
+
+    def add_tag_to_songs(
+        self, song_ids: Iterable[str], tag: str,
+    ) -> list[Song]:
+        """Add *tag* to every song in *song_ids* in a single save."""
+        clean = _normalize_single_tag(tag)
+        targets = self._require_songs(song_ids)
+        self._require_writable()
+        previous = [(song, list(song.tags)) for song in targets]
+        key = clean.casefold()
+        for song in targets:
+            if all(existing.casefold() != key for existing in song.tags):
+                song.tags.append(clean)
+
+        def restore() -> None:
+            for song, prev_tags in previous:
+                song.tags = prev_tags
+
+        self._save_with_rollback(restore)
+        return targets
+
+    def remove_tag_from_songs(
+        self, song_ids: Iterable[str], tag: str,
+    ) -> list[Song]:
+        """Remove *tag* (case-insensitively) from every song in *song_ids*."""
+        clean = _normalize_single_tag(tag)
+        targets = self._require_songs(song_ids)
+        self._require_writable()
+        previous = [(song, list(song.tags)) for song in targets]
+        key = clean.casefold()
+        for song in targets:
+            song.tags = [
+                existing for existing in song.tags if existing.casefold() != key
+            ]
+
+        def restore() -> None:
+            for song, prev_tags in previous:
+                song.tags = prev_tags
+
+        self._save_with_rollback(restore)
+        return targets
+
+    def set_practice_status(self, song_id: str, status: str | None) -> Song:
+        """Set the practice status badge value on *song_id*."""
+        return self.update_song(song_id, practice_status=status)
+
+    # ------------------------------------------------------------------
+    # Ordered setlists
+    # ------------------------------------------------------------------
+
+    @property
+    def setlists(self) -> list[Setlist]:
+        """Return defensive copies of all ordered setlists."""
+        return [sl.copy() for sl in self._setlists]
+
+    def get_setlist(self, setlist_id: str) -> Setlist | None:
+        """Return a defensive copy of *setlist_id*, or ``None``."""
+        for sl in self._setlists:
+            if sl.id == setlist_id:
+                return sl.copy()
+        return None
+
+    def create_setlist(
+        self, name: str, song_ids: Iterable[str] | None = None,
+    ) -> Setlist:
+        """Create and persist an ordered setlist."""
+        if not isinstance(name, str):
+            raise TypeError(f"setlist name must be text, got {type(name)}")
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Setlist name cannot be empty")
+        ids = _dedup_ids(song_ids) if song_ids is not None else []
+        self._require_songs(ids)
+        self._require_writable()
+        sl = Setlist(id=uuid.uuid4().hex[:12], name=clean_name, song_ids=ids)
+        self._setlists.append(sl)
+        self._save_with_rollback(self._setlists.pop)
+        return sl.copy()
+
+    def rename_setlist(self, setlist_id: str, name: str) -> Setlist:
+        """Rename an existing setlist."""
+        sl = self._require_setlist(setlist_id)
+        if not isinstance(name, str):
+            raise TypeError(f"setlist name must be text, got {type(name)}")
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Setlist name cannot be empty")
+        self._require_writable()
+        prev_name = sl.name
+        sl.name = clean_name
+        self._save_with_rollback(lambda: setattr(sl, "name", prev_name))
+        return sl.copy()
+
+    def delete_setlist(self, setlist_id: str) -> None:
+        """Delete an existing setlist."""
+        sl = self._require_setlist(setlist_id)
+        self._require_writable()
+        idx = self._setlists.index(sl)
+        self._setlists.pop(idx)
+        self._save_with_rollback(lambda: self._setlists.insert(idx, sl))
+
+    def add_songs_to_setlist(
+        self, setlist_id: str, song_ids: Iterable[str],
+    ) -> Setlist:
+        """Append *song_ids* (ignoring duplicates already present) to *setlist_id*."""
+        sl = self._require_setlist(setlist_id)
+        ids = _dedup_ids(song_ids)
+        self._require_songs(ids)
+        self._require_writable()
+        prev_ids = list(sl.song_ids)
+        existing = set(sl.song_ids)
+        for sid in ids:
+            if sid not in existing:
+                existing.add(sid)
+                sl.song_ids.append(sid)
+        self._save_with_rollback(lambda: setattr(sl, "song_ids", prev_ids))
+        return sl.copy()
+
+    def remove_song_from_setlist(
+        self, setlist_id: str, song_id: str,
+    ) -> Setlist:
+        """Remove *song_id* from *setlist_id* if present."""
+        sl = self._require_setlist(setlist_id)
+        self._require_writable()
+        prev_ids = list(sl.song_ids)
+        sl.song_ids = [sid for sid in sl.song_ids if sid != song_id]
+        self._save_with_rollback(lambda: setattr(sl, "song_ids", prev_ids))
+        return sl.copy()
+
+    def reorder_setlist(
+        self, setlist_id: str, song_ids: Iterable[str],
+    ) -> Setlist:
+        """Reorder a setlist using an exact permutation of its song IDs."""
+        sl = self._require_setlist(setlist_id)
+        if isinstance(song_ids, (str, bytes)):
+            raise TypeError("song_ids must be an iterable of song ID strings")
+        try:
+            new_ids = list(song_ids)
+        except TypeError as exc:
+            raise TypeError("song_ids must be an iterable of song ID strings") from exc
+        if any(not isinstance(sid, str) for sid in new_ids):
+            raise TypeError("every song id must be text")
+        if len(new_ids) != len(set(new_ids)) or set(new_ids) != set(sl.song_ids):
+            raise ValueError(
+                "song_ids must be an exact permutation of the setlist's songs"
+            )
+        self._require_writable()
+        prev_ids = list(sl.song_ids)
+        sl.song_ids = new_ids
+        self._save_with_rollback(lambda: setattr(sl, "song_ids", prev_ids))
+        return sl.copy()
 
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_index_envelope(data) -> tuple[list, list, bool]:
+        """Parse a v1 list or v2 dict index into ``(songs, setlists, migrated)``."""
+        if isinstance(data, list):
+            return data, [], True
+        if isinstance(data, dict):
+            version = data.get("schema_version")
+            if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+                raise ValueError(
+                    "library index schema_version must be a positive integer"
+                )
+            raw_songs = data.get("songs")
+            if not isinstance(raw_songs, list):
+                raise ValueError("library index 'songs' must be a list")
+            raw_setlists = data.get("setlists")
+            if raw_setlists is None:
+                raw_setlists = []
+            elif not isinstance(raw_setlists, list):
+                raise ValueError("library index 'setlists' must be a list")
+            return raw_songs, raw_setlists, False
+        raise ValueError("library index must be a list or versioned object")
 
     def _load(self) -> None:
         """Read the JSON index from disk, recovering what it can.
@@ -542,13 +926,13 @@ class SongLibrary:
                 "and not saving this session: %s", self._json_path, exc,
             )
             self._songs = self._rebuild_from_disk()
+            self._setlists = []
             self._enter_read_only()
             return
 
         try:
             data = json.loads(raw.decode("utf-8-sig"))
-            if not isinstance(data, list):
-                raise ValueError("library index must be a list")
+            raw_songs, raw_setlists, migrated = self._parse_index_envelope(data)
         except ValueError as exc:  # JSON and UTF-8 decode errors included
             logger.warning(
                 "Library index %s is damaged: %s", self._json_path, exc,
@@ -556,7 +940,7 @@ class SongLibrary:
             self._recover_corrupt_index()
             return
 
-        self._load_entries(data)
+        self._load_entries(raw_songs, raw_setlists, migrated=migrated)
 
     def _read_index_bytes(self) -> bytes:
         """Read library.json, retrying while another program holds it."""
@@ -570,12 +954,18 @@ class SongLibrary:
                 _sleep(_READ_RETRY_DELAY_S)
         raise AssertionError("unreachable")
 
-    def _load_entries(self, data: list) -> None:
-        """Turn parsed rows into songs, keeping a backup if any is lost."""
+    def _load_entries(
+        self,
+        raw_songs: list,
+        raw_setlists: list = (),
+        *,
+        migrated: bool = False,
+    ) -> None:
+        """Turn parsed rows into songs and setlists, backing up if any is lost."""
         loaded: list[Song] = []
         lost = False
         rebased = False
-        for entry in data:
+        for entry in raw_songs:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str):
                 self._index_ids.add(entry["id"])
             try:
@@ -603,6 +993,21 @@ class SongLibrary:
                     "removal; keeping it for the next launch", song.id,
                 )
                 self._held.append(song.to_dict())
+
+        parsed_setlists: list[Setlist] = []
+        seen_setlist_ids: set[str] = set()
+        for raw_sl in raw_setlists:
+            try:
+                sl = Setlist.from_dict(raw_sl)
+            except (TypeError, KeyError, ValueError):
+                lost = True
+                continue
+            if sl.id in seen_setlist_ids:
+                lost = True
+                continue
+            seen_setlist_ids.add(sl.id)
+            parsed_setlists.append(sl)
+
         self._songs = loaded
         self._index_read = True
         if self._held:
@@ -624,6 +1029,11 @@ class SongLibrary:
                 )
                 self._writable = False
                 self._recovery = LibraryRecovery("unsaved", self._json_path)
+                known = {song.id for song in self._songs}
+                known.update(entry["id"] for entry in self._held)
+                for sl in parsed_setlists:
+                    sl.song_ids = [sid for sid in sl.song_ids if sid in known]
+                self._setlists = parsed_setlists
                 return
             self._recovery = LibraryRecovery("partial", backup)
             known = {song.id for song in self._songs}
@@ -632,8 +1042,18 @@ class SongLibrary:
                 song for song in self._rebuild_from_disk()
                 if song.id not in known
             )
-            self._save_quietly()
-        elif rebased:
+
+        known = {song.id for song in self._songs}
+        known.update(entry["id"] for entry in self._held)
+        setlists_cleaned = False
+        for sl in parsed_setlists:
+            filtered = [sid for sid in sl.song_ids if sid in known]
+            if len(filtered) != len(sl.song_ids):
+                sl.song_ids = filtered
+                setlists_cleaned = True
+        self._setlists = parsed_setlists
+
+        if lost or rebased or migrated or setlists_cleaned:
             self._save_quietly()
 
     def _staged_folder_of(self, song_id: str) -> str:
@@ -679,6 +1099,7 @@ class SongLibrary:
 
     def _recover_corrupt_index(self) -> None:
         """Move an unparseable index aside, then rebuild from the folders."""
+        self._setlists = []
         backup = self._backup_path("corrupt")
         try:
             os.replace(self._json_path, backup)
@@ -771,14 +1192,16 @@ class SongLibrary:
         return recovered
 
     def _save(self) -> None:
-        """Write the current song list to the JSON index atomically."""
+        """Write the current library state to the versioned JSON index."""
         self._require_writable()
+        payload = {
+            "schema_version": LIBRARY_SCHEMA_VERSION,
+            "songs": [s.to_dict() for s in self._songs] + self._held,
+            "setlists": [sl.to_dict() for sl in self._setlists],
+        }
         tmp_path = self._json_path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(
-                [s.to_dict() for s in self._songs] + self._held,
-                f, indent=2,
-            )
+            json.dump(payload, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, self._json_path)
