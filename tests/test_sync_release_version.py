@@ -8,6 +8,7 @@ still print "Synced", and read the manifest as ANSI.
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -148,3 +149,36 @@ def test_sync_rejects_unstructured_prerelease_suffix(
     assert "Synced" not in result.stdout
     assert b'"2.6.0"' in (repo / "src" / "version.py").read_bytes()
 
+
+def test_manifest_declares_microphone_after_capabilities() -> None:
+    """Store builds need microphone device capability after Capability elements."""
+    ns_f = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+    ns_rescap = (
+        "http://schemas.microsoft.com/appx/manifest/foundation/"
+        "windows10/restrictedcapabilities"
+    )
+    manifest_path = Path(__file__).resolve().parent.parent / "msix" / "AppxManifest.xml"
+    root = ET.parse(manifest_path).getroot()
+    capabilities = root.find(f"{{{ns_f}}}Capabilities")
+    assert capabilities is not None
+
+    children = list(capabilities)
+    assert any(
+        el.tag == f"{{{ns_rescap}}}Capability" and el.attrib.get("Name") == "runFullTrust"
+        for el in children
+    )
+    assert any(
+        el.tag == f"{{{ns_f}}}DeviceCapability" and el.attrib.get("Name") == "microphone"
+        for el in children
+    )
+
+    device_tag = f"{{{ns_f}}}DeviceCapability"
+    seen_device = False
+    for el in children:
+        local = el.tag.rsplit("}", 1)[-1]
+        if el.tag == device_tag:
+            seen_device = True
+        elif local.endswith("Capability"):
+            assert not seen_device, (
+                f"{el.tag} must appear before DeviceCapability per CT_Capabilities"
+            )
