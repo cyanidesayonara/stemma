@@ -14,6 +14,7 @@ from src.song_sections import (
     parse_sections,
     pick_boundaries,
     section_index_at,
+    section_scale,
     self_similarity,
 )
 
@@ -152,6 +153,15 @@ class TestConfirmBoundaries:
         rows = np.random.default_rng(1).standard_normal((48, 6))
         assert confirm_boundaries(rows, [8, 16, 24, 32, 40]) == []
 
+    def test_small_step_on_steady_song_is_not_a_boundary(self):
+        """Low bar-to-bar noise must not turn a minor phrasing shift into a
+        section boundary when the step is a tiny fraction of song variance."""
+        rng = np.random.default_rng(2)
+        rows = 0.02 * rng.standard_normal((80, 2))
+        rows[20:40, 0] += 0.35
+        rows[40:, :] += 2.0
+        assert confirm_boundaries(rows, [20, 40]) == [40]
+
 
 class TestLabels:
     def test_alike_segments_share_a_letter(self):
@@ -163,6 +173,20 @@ class TestLabels:
         ends = [8, 16, 24, 32, 40]
         assert label_segments(features, starts, ends) == [
             "A", "B", "A", "B", "C",
+        ]
+
+    def test_drifted_repeated_sections_share_a_letter(self):
+        """Repeated sections with moderate arrangement drift keep one letter."""
+        a1 = np.tile([0.0, 0.0, 0.0], (8, 1))
+        b1 = np.tile([0.0, 2.0, 0.0], (8, 1))
+        a2 = np.tile([0.5, 0.0, 0.0], (8, 1))
+        b2 = np.tile([0.1, 2.0, 0.0], (8, 1))
+        a3 = np.tile([0.75, 0.0, 0.0], (8, 1))
+        features = np.vstack([a1, b1, a2, b2, a3])
+        starts = [0, 8, 16, 24, 32]
+        ends = [8, 16, 24, 32, 40]
+        assert label_segments(features, starts, ends) == [
+            "A", "B", "A", "B", "A",
         ]
 
 
@@ -241,6 +265,77 @@ class TestDetectSections:
             hop_length=int(SR * 32.0 / 400),
         )
         assert [round(s) for s, _, _ in sections] == [0, 16]
+
+    def test_full_length_song_with_fills_and_drift_does_not_over_segment(self):
+        """A 160-bar song with 4-bar call-and-response licks, a turnaround, and
+        gradual arrangement drift keeps 4 clean ABAB sections of >= 8 bars."""
+        rng = np.random.default_rng(7)
+        hop = 4096
+        n_bars = 160
+        bar_n = int(BAR_S * SR)
+        t_bar = np.arange(bar_n) / SR
+        downbeats = [i * BAR_S for i in range(n_bars)]
+
+        a_chords = [(261.63, 329.63, 392.0), (196.0, 246.94, 293.66)]
+        b_chords = [(174.61, 220.0, 261.63), (220.0, 261.63, 329.63)]
+        bars_audio = []
+        bar_pcs = []
+        for i in range(n_bars):
+            if i < 40:
+                freqs = a_chords[i % 2]
+                pcs = (0, 4, 7) if i % 2 == 0 else (7, 11, 2)
+                amp, harm, drum = 0.20, 2, 0.04
+            elif i < 80:
+                freqs = b_chords[i % 2]
+                pcs = (5, 9, 0) if i % 2 == 0 else (9, 0, 4)
+                call = ((i - 40) // 4) % 2 == 0
+                amp = 0.50 if call else 0.36
+                harm = 6 if call else 2
+                drum = 0.35 if call else 0.08
+            elif i < 120:
+                freqs = a_chords[i % 2]
+                pcs = (0, 4, 7) if i % 2 == 0 else (7, 11, 2)
+                fill = 96 <= i < 100
+                amp = 0.30 if fill else 0.24
+                harm = 3 if fill else 2
+                drum = 0.26 if fill else 0.14
+            else:
+                freqs = b_chords[i % 2]
+                pcs = (5, 9, 0) if i % 2 == 0 else (9, 0, 4)
+                call = ((i - 120) // 4) % 2 == 0
+                amp = 0.55 if call else 0.40
+                harm = 6 if call else 2
+                drum = 0.39 if call else 0.10
+            sig = _tone(freqs, t_bar, harmonics=harm) * amp
+            beat = np.mod(t_bar, BAR_S / 4)
+            sig += drum * np.exp(-40 * beat) * rng.standard_normal(bar_n)
+            bars_audio.append(sig.astype(np.float32))
+            bar_pcs.append(pcs)
+
+        audio = np.concatenate(bars_audio)
+        n_frames = int(np.ceil(len(audio) / hop)) + 1
+        chroma = np.full((12, n_frames), 0.05, dtype=np.float32)
+        for i, pcs in enumerate(bar_pcs):
+            f0 = int(i * BAR_S * SR // hop)
+            f1 = min(n_frames, int((i + 1) * BAR_S * SR // hop) + 1)
+            for pc in pcs:
+                chroma[pc, f0:f1] = 1.0
+
+        sections = detect_sections(
+            audio, SR, [], downbeats, chroma=chroma, hop_length=hop,
+        )
+        assert len(sections) == 4
+        assert [label for _, _, label in sections] == ["A", "B", "A", "B"]
+        for start, end, _ in sections:
+            assert end - start >= section_scale(n_bars) * BAR_S - 1e-6
+
+
+def test_section_scale_widens_for_full_length_songs():
+    assert section_scale(20) == 4
+    assert section_scale(32) == 4
+    assert section_scale(60) == 6
+    assert section_scale(80) == 8
+    assert section_scale(200) == 8
 
 
 class TestQueries:

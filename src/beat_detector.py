@@ -31,7 +31,8 @@ logger = logging.getLogger("stemma")
 #   4: major/minor-only chords (no false 7ths).
 #   5: beat_this input and peak picking match the model's own pipeline.
 #   6: experimental song sections (#133).
-DETECTION_VERSION = 6
+#   7: length-scaled song sections with less over-segmentation (#265).
+DETECTION_VERSION = 7
 
 # Chroma hop shared by chord and section detection (about 10.8 frames per
 # second at 44.1 kHz), so the song's chroma is computed once.
