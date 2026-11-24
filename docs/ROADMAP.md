@@ -39,9 +39,11 @@ scope or date. Each upcoming version has a GitHub milestone.
   and [#237: post-3.0 audit](https://github.com/cyanidesayonara/stemma/issues/237)
   — output-device loss, the bundled YouTube JavaScript runtime, silent-take
   warning, atomic exports, data folder on a disconnected drive, menu
-  accelerators, and an accessible waveform shipped in v3.1.0. The rest of
-  #188 continues, and #237 stays open for the Store-build microphone
-  check.
+  accelerators, and an accessible waveform shipped in v3.1.0. The remaining
+  items in #188 (Tab order, skippable splash and reduced motion, Windows
+  text scaling, and the yt-dlp update plan and automation) have since
+  landed and #188 is closed; #237 stays open for the Store-build
+  microphone check.
 
 ## v3.2 -- library and setlists
 
