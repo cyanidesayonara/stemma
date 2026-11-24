@@ -181,15 +181,16 @@ class TestMainWindowDrop:
             main_window.dropEvent(event)
         event.acceptProposedAction.assert_called_once()
 
-    def test_multiple_audio_files_open_multiple_dialogs(self, main_window):
-        """Dropping two audio files opens ImportDialog twice."""
+    def test_multiple_audio_files_open_one_batch_dialog(self, main_window):
+        """Dropping two audio files opens one ImportDialog for both."""
         event = _make_event(["a.mp3", "b.wav"])
         with patch("src.ui.import_dialog.ImportDialog") as mock_cls:
             mock_dlg = MagicMock()
             mock_dlg.exec.return_value = False
             mock_cls.return_value = mock_dlg
             main_window.dropEvent(event)
-        assert mock_cls.call_count == 2
+        mock_cls.assert_called_once()
+        assert mock_cls.call_args.kwargs["file_paths"] == ["a.mp3", "b.wav"]
 
     def test_non_audio_files_are_skipped(self, main_window):
         """Dropping non-audio files does not open ImportDialog."""

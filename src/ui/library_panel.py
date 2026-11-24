@@ -14,6 +14,7 @@ from PySide6.QtGui import (
     QFont,
     QFontMetrics,
     QIcon,
+    QKeySequence,
     QPainter,
     QPen,
     QPixmap,
@@ -75,6 +76,8 @@ _SEARCH_TEXT_ROLE = Qt.ItemDataRole.UserRole + 4
 _STATUS_ROLE = Qt.ItemDataRole.UserRole + 5
 # Compact practice state ("A-B 0.75x +2"); empty for none.
 _PRACTICE_ROLE = Qt.ItemDataRole.UserRole + 6
+# True for songs marked for a batch action (Ctrl or Shift click).
+_MARKED_ROLE = Qt.ItemDataRole.UserRole + 7
 
 _CTRL_ICON = 18  # Icon size for library control buttons.
 
@@ -318,6 +321,16 @@ class _SongDelegate(QStyledItemDelegate):
             text_color = option.palette.text().color()
             sub_color = QColor(self._subtext_color)
 
+        # Marked rows keep their colours under an accent outline, so a marked
+        # row and the open song's filled row stay tell-apart.
+        if index.data(_MARKED_ROLE):
+            outline = QColor(
+                self._selected_text_color if selected else self._accent_color
+            )
+            painter.setPen(QPen(outline, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(option.rect.adjusted(1, 1, -1, -2))
+
         # "Now playing" indicator — accent bar on the left edge.
         left_inset = 6
         if is_playing and not selected:
@@ -540,12 +553,17 @@ class _SongList(QListWidget):
     row_pressed = Signal(str)  # song id, before the press takes effect
     press_released = Signal()
     drag_started = Signal()
+    mark_toggled = Signal(str)  # Ctrl+click on a song
+    mark_range_requested = Signal(str)  # Shift+click on a song
+    mark_all_requested = Signal()
+    marks_cleared = Signal()
     drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._in_press = False
         self._press_active = False
+        self._mark_press = False
         self._dragged_id: str | None = None
 
     @property
@@ -574,6 +592,32 @@ class _SongList(QListWidget):
 
     def mousePressEvent(self, event) -> None:
         item = self.itemAt(event.position().toPoint())
+        # Ctrl and Shift clicks mark songs for a batch action. They never
+        # reach Qt, so they cannot load a song or start a drag.
+        modifiers = event.modifiers()
+        marking = modifiers & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.ShiftModifier
+        )
+        if event.button() == Qt.MouseButton.RightButton:
+            # Qt would make the row current, loading the song; the context
+            # menu arrives as its own event.
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            if marking:
+                self._press_active = False
+                self._mark_press = True
+                event.accept()
+                if item is not None:
+                    song_id = item.data(Qt.ItemDataRole.UserRole)
+                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                        self.mark_range_requested.emit(song_id)
+                    else:
+                        self.mark_toggled.emit(song_id)
+                return
+            self._mark_press = False
+            self.marks_cleared.emit()
         self._press_active = (
             self.dragEnabled()
             and event.button() == Qt.MouseButton.LeftButton
@@ -589,7 +633,44 @@ class _SongList(QListWidget):
         finally:
             self._in_press = False
 
+    def mouseMoveEvent(self, event) -> None:
+        if self._mark_press and event.buttons():
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # A quick second Ctrl or Shift click is another mark, not an edit.
+        if event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.ShiftModifier
+        ):
+            self.mousePressEvent(event)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        modifiers = event.modifiers()
+        current = self.currentItem()
+        if event.matches(QKeySequence.StandardKey.SelectAll):
+            self.mark_all_requested.emit()
+        elif event.key() == Qt.Key.Key_Escape:
+            self.marks_cleared.emit()
+        elif (
+            event.key() == Qt.Key.Key_Space
+            and modifiers == Qt.KeyboardModifier.ControlModifier
+            and current is not None
+        ):
+            self.mark_toggled.emit(current.data(Qt.ItemDataRole.UserRole))
+        else:
+            super().keyPressEvent(event)
+            return
+        event.accept()
+
     def mouseReleaseEvent(self, event) -> None:
+        if self._mark_press and event.button() == Qt.MouseButton.LeftButton:
+            self._mark_press = False
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
         if self._press_active:
             self._press_active = False
@@ -642,6 +723,9 @@ class LibraryPanel(QWidget):
     cancel_separation_requested = Signal(str)  # song_id still separating
     play_next_requested = Signal(str)
     add_to_queue_requested = Signal(str)
+    play_next_many_requested = Signal(list)
+    add_many_to_queue_requested = Signal(list)
+    export_songs_requested = Signal(list)
     queue_toggled = Signal(bool)
     play_setlist_requested = Signal(str)
     setlist_changed = Signal(str)
@@ -661,6 +745,9 @@ class LibraryPanel(QWidget):
         # (song id to select again after a drag, pressed song id) from a
         # press on a draggable row until its click or drag ends.
         self._pressed_songs: tuple[str | None, str] | None = None
+        # Songs marked for a batch action, and where Shift+click ranges start.
+        self._marked: set[str] = set()
+        self._mark_anchor: str | None = None
         # Looks up a song's stored loop/speed/pitch (set by the main window).
         self._practice_provider: Callable[[str], PracticeState] | None = None
         # song_id -> progress text for songs still separating in the
@@ -750,6 +837,10 @@ class LibraryPanel(QWidget):
         self._list.currentItemChanged.connect(self._on_item_changed)
         self._list.itemDoubleClicked.connect(lambda _: self._on_edit_song())
         self._list.model().rowsMoved.connect(self._on_list_rows_moved)
+        self._list.mark_toggled.connect(self.toggle_song_mark)
+        self._list.mark_range_requested.connect(self._on_mark_range)
+        self._list.mark_all_requested.connect(self._on_mark_all)
+        self._list.marks_cleared.connect(self.clear_marks)
         self._list.row_pressed.connect(self._on_list_row_pressed)
         self._list.drag_started.connect(self._on_list_drag_started)
         self._list.press_released.connect(self._on_list_press_released)
@@ -767,6 +858,22 @@ class LibraryPanel(QWidget):
         self._no_match_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._no_match_label.setVisible(False)
         library_layout.addWidget(self._no_match_label)
+
+        self._batch_bar = QWidget()
+        batch_row = QHBoxLayout(self._batch_bar)
+        batch_row.setContentsMargins(0, 0, 0, 0)
+        batch_row.setSpacing(4)
+        self._batch_label = QLabel("")
+        batch_row.addWidget(self._batch_label, 1)
+        self._batch_actions_btn = QPushButton("Actions")
+        self._batch_actions_btn.clicked.connect(self._on_batch_menu_clicked)
+        batch_row.addWidget(self._batch_actions_btn)
+        self._batch_clear_btn = QPushButton("Clear")
+        self._batch_clear_btn.setAccessibleName("Clear selection")
+        self._batch_clear_btn.clicked.connect(self.clear_marks)
+        batch_row.addWidget(self._batch_clear_btn)
+        self._batch_bar.setVisible(False)
+        library_layout.addWidget(self._batch_bar)
 
         self._remove_btn = QPushButton("Remove Selected")
         self._remove_btn.setEnabled(False)
@@ -1303,10 +1410,13 @@ class LibraryPanel(QWidget):
         self.setlist_changed.emit(sid)
 
     def _on_add_song_to_setlist(self, setlist_id: str, song_id: str) -> None:
+        self._add_to_setlist(setlist_id, [song_id])
+
+    def _add_to_setlist(self, setlist_id: str, song_ids: list[str]) -> None:
         if not self._library_writable("Add to Setlist"):
             return
         try:
-            self._library.add_songs_to_setlist(setlist_id, [song_id])
+            self._library.add_songs_to_setlist(setlist_id, song_ids)
         except (OSError, KeyError, ValueError) as exc:
             QMessageBox.warning(
                 self, "Add to Setlist",
@@ -1408,6 +1518,8 @@ class LibraryPanel(QWidget):
                 )
                 self._apply_separating_state(item, song.id)
                 self._apply_practice_state(item, song)
+                if song.id in self._marked:
+                    item.setData(_MARKED_ROLE, True)
                 self._list.addItem(item)
                 if selected_id and song.id == selected_id:
                     selected_item = item
@@ -1425,6 +1537,185 @@ class LibraryPanel(QWidget):
         self._apply_filter(self._search_edit.text())
         if selected_item is not None and not selected_item.isHidden():
             self._remove_btn.setEnabled(bool(self._library.writable))
+        self._sync_marks()
+
+    # ------------------------------------------------------------------
+    # Batch marks
+    # ------------------------------------------------------------------
+
+    def marked_song_ids(self) -> list[str]:
+        """Return the marked songs in the order shown."""
+        return [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self._markable_items()
+            if item.data(Qt.ItemDataRole.UserRole) in self._marked
+        ]
+
+    def toggle_song_mark(self, song_id: str) -> None:
+        """Mark or unmark *song_id* for a batch action.
+
+        The first mark takes the selected song along, as Ctrl+click does in
+        any file list.
+        """
+        shown = [
+            i.data(Qt.ItemDataRole.UserRole) for i in self._markable_items()
+        ]
+        if song_id not in shown:
+            return
+        if not self._marked:
+            current = self._list.currentItem()
+            if current is not None:
+                current_id = current.data(Qt.ItemDataRole.UserRole)
+                if current_id in shown:
+                    self._marked.add(current_id)
+            self._marked.add(song_id)
+        else:
+            self._marked ^= {song_id}
+        self._mark_anchor = song_id
+        self._sync_marks()
+
+    def clear_marks(self) -> None:
+        """Forget every mark."""
+        self._mark_anchor = None
+        if self._marked:
+            self._marked.clear()
+            self._sync_marks()
+
+    def _markable_items(self) -> list[QListWidgetItem]:
+        """Rows that are shown and not still separating."""
+        rows = (self._list.item(i) for i in range(self._list.count()))
+        return [
+            item for item in rows
+            if not item.isHidden()
+            and not self.is_song_separating(
+                item.data(Qt.ItemDataRole.UserRole)
+            )
+        ]
+
+    def _on_mark_range(self, song_id: str) -> None:
+        shown = [
+            i.data(Qt.ItemDataRole.UserRole) for i in self._markable_items()
+        ]
+        if song_id not in shown:
+            return
+        anchor = self._mark_anchor
+        if anchor not in shown:
+            current = self._list.currentItem()
+            anchor = (
+                current.data(Qt.ItemDataRole.UserRole)
+                if current is not None
+                else None
+            )
+        if anchor not in shown:
+            anchor = song_id
+        first, last = sorted((shown.index(anchor), shown.index(song_id)))
+        self._marked = set(shown[first:last + 1])
+        self._mark_anchor = anchor
+        self._sync_marks()
+
+    def _on_mark_all(self) -> None:
+        self._marked = {
+            i.data(Qt.ItemDataRole.UserRole) for i in self._markable_items()
+        }
+        self._sync_marks()
+
+    def _sync_marks(self) -> None:
+        """Drop marks on songs no longer shown and redraw the rest.
+
+        A batch action must never reach a song the user cannot see.
+        """
+        self._marked &= {
+            i.data(Qt.ItemDataRole.UserRole) for i in self._markable_items()
+        }
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            song_id = item.data(Qt.ItemDataRole.UserRole)
+            marked = song_id in self._marked
+            if bool(item.data(_MARKED_ROLE)) != marked:
+                item.setData(_MARKED_ROLE, marked)
+                song = self._library.get_song(song_id)
+                if song is not None:
+                    self._apply_practice_state(item, song)
+        count = len(self._marked)
+        self._batch_label.setText(f"{count} selected")
+        self._batch_bar.setVisible(count > 0)
+        noun = "song" if count == 1 else "songs"
+        self._remove_btn.setAccessibleName(
+            f"Remove {count} selected {noun}"
+            if count
+            else "Remove selected song"
+        )
+        current = self._list.currentItem()
+        self._remove_btn.setEnabled(
+            bool(self._library.writable)
+            and (
+                count > 0
+                or (current is not None and not current.isHidden())
+            )
+        )
+
+    def _on_batch_menu_clicked(self) -> None:
+        menu = QMenu(self)
+        self._fill_batch_menu(menu)
+        menu.exec(
+            self._batch_actions_btn.mapToGlobal(
+                self._batch_actions_btn.rect().bottomLeft()
+            )
+        )
+
+    def _fill_batch_menu(self, menu: QMenu) -> None:
+        """Add the actions for every marked song to *menu*."""
+        ids = self.marked_song_ids()
+        writable = bool(getattr(self._library, "writable", True))
+        menu.addAction("Play Next").triggered.connect(
+            lambda _c=False: self.play_next_many_requested.emit(ids)
+        )
+        menu.addAction("Add to Queue").triggered.connect(
+            lambda _c=False: self.add_many_to_queue_requested.emit(ids)
+        )
+        setlist_menu = menu.addMenu("Add to Setlist")
+        setlist_menu.setEnabled(writable)
+        setlists = self._library_setlists()
+        for sl in setlists:
+            setlist_menu.addAction(
+                sl.name.replace("&", "&&")
+            ).triggered.connect(
+                lambda _c=False, slid=sl.id: self._add_to_setlist(slid, ids)
+            )
+        if setlists:
+            setlist_menu.addSeparator()
+        setlist_menu.addAction("New Setlist...").triggered.connect(
+            lambda _c=False: self._on_new_setlist(ids)
+        )
+        tag_act = menu.addAction("Add Tag...")
+        tag_act.setEnabled(writable)
+        tag_act.triggered.connect(lambda _c=False: self._on_add_tag(ids))
+        menu.addSeparator()
+        menu.addAction("Export...").triggered.connect(
+            lambda _c=False: self.export_songs_requested.emit(ids)
+        )
+        remove_act = menu.addAction("Remove...")
+        remove_act.setEnabled(writable)
+        remove_act.triggered.connect(lambda _c=False: self._remove_songs(ids))
+
+    def _on_add_tag(self, song_ids: list[str]) -> None:
+        if not self._library_writable("Add Tag"):
+            return
+        tag, ok = QInputDialog.getItem(
+            self, "Add Tag", "Tag:", ["", *self._library_all_tags()], 0, True,
+        )
+        # Commas separate tags in the Edit Song dialog.
+        tags = normalize_tags(tag.split(",")) if ok else []
+        for name in tags:
+            try:
+                self._library.add_tag_to_songs(song_ids, name)
+            except (OSError, KeyError, ValueError) as exc:
+                QMessageBox.warning(
+                    self, "Add Tag", describe_error(exc, "Could not add tag"),
+                )
+                break
+        if tags:
+            self.refresh()
 
     # ------------------------------------------------------------------
     # Background-separation state
@@ -1433,6 +1724,8 @@ class LibraryPanel(QWidget):
     def set_song_separating(self, song_id: str, text: str) -> None:
         """Mark *song_id* as separating and show *text* on its row."""
         self._separating[song_id] = text
+        if song_id in self._marked:
+            self._sync_marks()
         item = self._item_for_song(song_id)
         if item is not None:
             self._apply_separating_state(item, song_id)
@@ -1487,7 +1780,9 @@ class LibraryPanel(QWidget):
         )
         item.setData(_STATUS_ROLE, status)
         item.setData(_PRACTICE_ROLE, state.badge_text())
-        details = [f"Status: {status}"] if status else []
+        details = ["Selected"] if song.id in self._marked else []
+        if status:
+            details.append(f"Status: {status}")
         if tags:
             details.append(f"Tags: {', '.join(tags)}")
         details.extend(state.description_lines())
@@ -1555,6 +1850,8 @@ class LibraryPanel(QWidget):
         current = self._list.currentItem()
         if current is None or current.isHidden():
             self._remove_btn.setEnabled(False)
+        if self._marked:
+            self._sync_marks()
         self._sync_drag_reorder_mode()
 
     def select_song(self, song_id: str) -> bool:
@@ -1660,6 +1957,11 @@ class LibraryPanel(QWidget):
             )
             menu.exec(self._list.mapToGlobal(pos))
             return
+        if song_id in self._marked:
+            menu = QMenu(self)
+            self._fill_batch_menu(menu)
+            menu.exec(self._list.mapToGlobal(pos))
+            return
         # Do not select the right-clicked item: right-clicking another song
         # to queue or edit it must not interrupt the currently loaded song.
         writable = bool(getattr(self._library, "writable", True))
@@ -1732,6 +2034,10 @@ class LibraryPanel(QWidget):
                         )
                     )
             menu.addSeparator()
+        if song_id:
+            menu.addAction("Select").triggered.connect(
+                lambda _checked=False, sid=song_id: self.toggle_song_mark(sid)
+            )
         edit = menu.addAction("Edit...")
         edit.setEnabled(writable)
         edit.triggered.connect(
@@ -1782,38 +2088,83 @@ class LibraryPanel(QWidget):
         return False
 
     def _on_remove_clicked(self) -> None:
-        current = self._list.currentItem()
-        if current is not None:
-            song_id = current.data(Qt.ItemDataRole.UserRole)
-            if song_id:
-                # Checked first: the removal request below closes the
-                # song in the player.
-                if not self._library_writable("Remove Song"):
-                    return
-                reply = QMessageBox.question(
-                    self,
-                    "Remove Song",
-                    f"Are you sure you want to remove '{current.text()}' and delete its separated audio files?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    # MainWindow must stop/drain readers before remove_song
-                    # deletes the directory they may still be reading.
-                    self.song_removal_requested.emit(song_id)
-                    try:
-                        self._library.remove_song(song_id)
-                    except (OSError, ValueError) as exc:
-                        QMessageBox.warning(
-                            self, "Remove Song",
-                            describe_error(exc, "Song removal failed"),
-                        )
-                        self.refresh()
-                        return
-                    self.refresh()
-                    # Let the main window unload the player if the
-                    # removed song is the one currently loaded --
-                    # otherwise it keeps playing from RAM and stopping
-                    # would try to save recordings into the deleted
-                    # directory.
-                    self.song_removed.emit(song_id)
+        song_ids = self.marked_song_ids()
+        if not song_ids:
+            current = self._list.currentItem()
+            song_id = (
+                current.data(Qt.ItemDataRole.UserRole)
+                if current is not None
+                else None
+            )
+            if not song_id:
+                return
+            song_ids = [song_id]
+        self._remove_songs(song_ids)
+
+    def _remove_songs(self, song_ids: list[str]) -> None:
+        """Ask once, then delete every song in *song_ids*."""
+        # Checked first: the removal requests below close the song in the
+        # player.
+        if not self._library_writable("Remove Song"):
+            return
+        names = [
+            item.text()
+            for item in map(self._item_for_song, song_ids)
+            if item is not None
+        ]
+        if len(song_ids) == 1:
+            title = "Remove Song"
+            question = (
+                f"Are you sure you want to remove '{names[0]}' and delete "
+                "its separated audio files?"
+                if names
+                else "Are you sure you want to remove this song?"
+            )
+        else:
+            title = "Remove Songs"
+            listed = "\n".join(names[:8])
+            if len(names) > 8:
+                listed += f"\nand {len(names) - 8} more"
+            question = (
+                f"Are you sure you want to remove these {len(song_ids)} "
+                "songs and delete their separated audio files?\n\n"
+                f"{listed}"
+            )
+        reply = QMessageBox.question(
+            self,
+            title,
+            question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        removed: list[str] = []
+        failures: list[str] = []
+        for song_id in song_ids:
+            # A song removed, or sent to be separated, while the question
+            # was open is left alone.
+            if self.is_song_separating(song_id):
+                continue
+            # MainWindow must stop/drain readers before remove_song
+            # deletes the directory they may still be reading.
+            self.song_removal_requested.emit(song_id)
+            try:
+                self._library.remove_song(song_id)
+            except KeyError:
+                continue
+            except (OSError, ValueError) as exc:
+                failures.append(describe_error(exc, "Song removal failed"))
+                continue
+            removed.append(song_id)
+        self.refresh()
+        # Let the main window unload the player if the removed song is the
+        # one currently loaded -- otherwise it keeps playing from RAM and
+        # stopping would try to save recordings into the deleted directory.
+        for song_id in removed:
+            self.song_removed.emit(song_id)
+        if failures:
+            # The same cause usually repeats; say each one once.
+            QMessageBox.warning(
+                self, title, "\n\n".join(dict.fromkeys(failures)),
+            )

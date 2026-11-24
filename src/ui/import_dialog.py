@@ -174,6 +174,14 @@ def _or_divider() -> QWidget:
     return row
 
 
+def _file_size(path: str) -> int:
+    """Return *path*'s size, or 0 if it cannot be read."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
 class ImportDialog(QDialog):
     """Dialog for importing and separating a song.
 
@@ -189,6 +197,7 @@ class ImportDialog(QDialog):
         parent=None,
         file_path: str = "",
         separation_queue=None,
+        file_paths: list[str] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Import Song")
@@ -210,6 +219,10 @@ class ImportDialog(QDialog):
         self._import_song_id: str | None = None
         self._pending_model_key: str = "htdemucs"
         self._selected_path: str = ""
+        # More than one local file to import; empty for a single import.
+        self._batch_paths: list[str] = []
+        # Set while a batch waits for its model download.
+        self._batch_pending = False
         self._tmp_dir: str | None = None  # Cleaned up after import or on close.
         # Model keys the user already agreed to download in this dialog,
         # so a YouTube import asks once, before the audio download.
@@ -221,12 +234,36 @@ class ImportDialog(QDialog):
             read_default_import_model(open_settings()),
         )))
 
-        if file_path:
-            self._selected_path = file_path
-            self._path_edit.setText(file_path)
-            basename = os.path.splitext(os.path.basename(file_path))[0]
-            if not self._title_edit.text():
-                self._title_edit.setText(basename)
+        if file_path or file_paths:
+            self._select_files(file_paths or [file_path])
+
+    def _select_files(self, paths: list[str]) -> None:
+        """Use *paths* as the source: one song, or a batch of them.
+
+        A batch takes each title from its file name and shares the artist
+        and model.
+        """
+        batch = len(paths) > 1
+        self._batch_paths = list(paths) if batch else []
+        self._selected_path = "" if batch else paths[0]
+        # A URL would win over the files.
+        self._url_edit.clear()
+        self._title_edit.setEnabled(not batch)
+        if batch:
+            self._path_edit.setText(f"{len(paths)} files")
+            self._path_edit.setToolTip(
+                "\n".join(os.path.basename(p) for p in paths)
+            )
+            self._title_edit.clear()
+            self._title_edit.setPlaceholderText("From each file name")
+            return
+        self._path_edit.setText(paths[0])
+        self._path_edit.setToolTip("")
+        self._title_edit.setPlaceholderText("")
+        if not self._title_edit.text():
+            self._title_edit.setText(
+                os.path.splitext(os.path.basename(paths[0]))[0]
+            )
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -419,22 +456,19 @@ class ImportDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Audio File",
-            "",
-            "Audio Files (*.mp3 *.wav *.flac);;All Files (*)",
-        )
-        if path:
-            self._selected_path = path
-            self._path_edit.setText(path)
-            # Clear URL field when a local file is selected.
-            self._url_edit.clear()
-
-            # Auto-fill title from filename.
-            basename = os.path.splitext(os.path.basename(path))[0]
-            if not self._title_edit.text():
-                self._title_edit.setText(basename)
+        filters = "Audio Files (*.mp3 *.wav *.flac);;All Files (*)"
+        if self._separation_queue is not None:
+            paths, _ = QFileDialog.getOpenFileNames(
+                self, "Select Audio Files", "", filters,
+            )
+        else:
+            # Without the background queue only one song can be separated.
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select Audio File", "", filters,
+            )
+            paths = [path] if path else []
+        if paths:
+            self._select_files(paths)
 
     # ------------------------------------------------------------------
     # Import
@@ -453,6 +487,8 @@ class ImportDialog(QDialog):
         elif url:
             # Something that is not a YouTube link used to do nothing.
             self._show_problem(MSG_YT_ONLY)
+        elif self._batch_paths:
+            self._start_batch_import()
         elif self._selected_path:
             if not self._warn_large_source_ok(self._selected_path):
                 self._set_busy(False)
@@ -544,10 +580,113 @@ class ImportDialog(QDialog):
         model_path = self._model_path_for(model_key)
 
         if not self._model_downloaded_for(model_key):
-            self._begin_model_download(song, model_key)
+            self._begin_model_download(model_key)
             return
 
         self._start_separation_worker(song, model_path, model_key)
+
+    # ------------------------------------------------------------------
+    # Several files at once
+    # ------------------------------------------------------------------
+
+    def _start_batch_import(self) -> None:
+        """Check every file, then get the model and queue the songs.
+
+        Each question is asked once for the whole batch, and nothing is
+        added to the library before all of them are answered.
+        """
+        model_key = self._model_combo.currentData()
+        unreadable = [
+            os.path.basename(p)
+            for p in self._batch_paths
+            if not _is_readable_audio(p)
+        ]
+        if unreadable:
+            listed = ", ".join(unreadable[:5])
+            if len(unreadable) > 5:
+                listed += f" and {len(unreadable) - 5} more"
+            self._show_problem(
+                f"These files could not be read as audio: {listed}. Choose "
+                "the files again without them."
+            )
+            return
+        largest = max(self._batch_paths, key=_file_size)
+        if not self._warn_large_source_ok(largest):
+            self._set_busy(False)
+            return
+        if not model_key.startswith("mdx_"):
+            longest = self._longest_batch_file()
+            if not self._check_memory_ok(longest, model_key == "htdemucs_6s"):
+                self._set_busy(False)
+                return
+        if not self._confirm_model_download(model_key):
+            self._set_busy(False)
+            return
+        if not self._model_downloaded_for(model_key):
+            self._batch_pending = True
+            self._begin_model_download(model_key)
+            return
+        self._enqueue_batch(model_key)
+
+    def _longest_batch_file(self) -> str:
+        """Return the file that will need the most memory to separate."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            durations: dict[str, float] = {}
+            for path in self._batch_paths:
+                try:
+                    durations[path] = audio_duration(path)
+                except Exception:
+                    durations[path] = 0.0
+        finally:
+            QApplication.restoreOverrideCursor()
+        return max(durations, key=lambda path: durations[path])
+
+    def _enqueue_batch(self, model_key: str) -> None:
+        """Add every file to the library and queue its separation."""
+        # Same deferral as the single import.
+        from src.separation_queue import SeparationJob
+
+        artist = self._artist_edit.text() or "Unknown Artist"
+        model_path = self._model_path_for(model_key)
+        failures: list[str] = []
+        remaining: list[str] = []
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for path in self._batch_paths:
+                name = os.path.basename(path)
+                try:
+                    song = self._library.add_song(
+                        title=os.path.splitext(name)[0] or "Untitled",
+                        artist=artist,
+                        original_path=path,
+                    )
+                except Exception as exc:
+                    failures.append(
+                        f"{name}: {describe_error(exc, 'Import failed')}"
+                    )
+                    remaining.append(path)
+                    continue
+                self._separation_queue.enqueue(SeparationJob(
+                    song_id=song.id,
+                    input_path=song.original_path,
+                    output_dir=song.stems_path,
+                    model_path=model_path,
+                    model_key=model_key,
+                ))
+        finally:
+            QApplication.restoreOverrideCursor()
+        if failures:
+            listed = "\n".join(failures[:8])
+            if len(failures) > 8:
+                listed += f"\nand {len(failures) - 8} more"
+            QMessageBox.warning(
+                self, "Import", f"These files were not imported:\n{listed}",
+            )
+        if len(remaining) < len(self._batch_paths):
+            self.accept()
+        else:
+            self._show_problem("None of the files could be imported.")
 
     def _model_path_for(self, model_key: str) -> str:
         """Resolve the on-disk ONNX path for a separation model key."""
@@ -595,7 +734,7 @@ class ImportDialog(QDialog):
         self._download_consent.add(model_key)
         return True
 
-    def _begin_model_download(self, song: Song, model_key: str) -> None:
+    def _begin_model_download(self, model_key: str) -> None:
         """Download the ONNX model in the background, then run separation."""
         self._pending_model_key = model_key
         self._progress_bar.setVisible(True)
@@ -622,6 +761,14 @@ class ImportDialog(QDialog):
         """Model file is on disk; continue with stem separation."""
         model_key = self._pending_model_key
         self._model_downloader = None
+
+        if self._batch_pending:
+            self._batch_pending = False
+            if os.path.isfile(self._model_path_for(model_key)):
+                self._enqueue_batch(model_key)
+            else:
+                self._on_error("Model file missing after download.")
+            return
 
         song_id = self._import_song_id
         if song_id is None:
@@ -650,6 +797,7 @@ class ImportDialog(QDialog):
     def _on_model_download_error(self, message: str) -> None:
         """Show a readable download error and roll back the library entry."""
         self._model_downloader = None
+        self._batch_pending = False
         self._on_error(message)
 
     def _discard_failed_import_song(self) -> None:
