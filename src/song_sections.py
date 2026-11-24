@@ -12,17 +12,19 @@ Method, kept to numpy and librosa:
    few bars around it, so a section cycling through its progression
    reads as one steady thing; scale them by how much single bars vary.
 2. Build a bar-by-bar self-similarity matrix and slide a checkerboard
-   kernel along its diagonal (Foote novelty): the score peaks where the
-   bars before and after a point are alike among themselves but unlike
-   each other.
-3. Keep novelty peaks at least ``MIN_SECTION_BARS`` apart, and only
-   those where the bars on the two sides differ far more than chance
-   allows, judged by how closely bars match the bars they repeat
-   (``confirm_boundaries``), so random bar-to-bar variation is no
-   section.
-4. Give sections that sound alike the same letter (A, B, A, B, C, ...).
-   Naming them verse or chorus would need far more than this knows, so
-   the letters only say which sections repeat.
+   kernel along its diagonal (Foote novelty) at a length-scaled width
+   (``section_scale``): the score peaks where the bars before and after
+   a point are alike among themselves but unlike each other.
+3. Keep novelty peaks spaced by ``section_scale`` (4 bars on short
+   excerpts, widening up to 8 bars on full-length songs), and only those
+   where the bars on the two sides differ both far more than chance allows
+   and by a meaningful share of the song's total variance
+   (``confirm_boundaries``), so random variation or small fills on steady
+   songs do not split them.
+4. Give sections that sound alike the same letter (A, B, A, B, C, ...),
+   comparing each segment against each letter's running mean. Naming them
+   verse or chorus would need far more than this knows, so the letters
+   only say which sections repeat.
 
 Sections are ``(start_s, end_s, label)`` and tile the song from its
 first bar line to the end of its last bar.
@@ -38,6 +40,8 @@ import numpy as np
 
 # A section is at least this many bars; shorter changes are fills.
 MIN_SECTION_BARS = 4
+# Cap for length-scaled minimum section spacing and kernel half-width.
+_MAX_SECTION_BARS = 8
 # Bars on each side of the checkerboard kernel's centre.
 _KERNEL_BARS = 4
 # Bars each bar's features are averaged over (a typical progression).
@@ -53,9 +57,8 @@ _MIN_SONG_BARS = 2 * MIN_SECTION_BARS
 _PEAK_STD = 0.25
 _MIN_NOVELTY = 0.3
 # Two sections share a letter when their mean features are at least this
-# similar (``self_similarity``). A repeated verse or chorus scores 0.8 to
-# 1.0; different sections of the demo songs at most about 0.6.
-_SAME_LABEL_SIMILARITY = 0.7
+# similar (``self_similarity``) against the letter's running centroid.
+_SAME_LABEL_SIMILARITY = 0.55
 # Without detected downbeats (the librosa fallback), a bar is this many
 # beats.
 _FALLBACK_BEATS_PER_BAR = 4
@@ -65,11 +68,11 @@ _TIMBRE_WEIGHT = 1.0
 _LOUDNESS_WEIGHT = 0.5
 _N_MFCC = 13
 # A novelty peak must also move the music this many times further than
-# chance (``boundary_contrast``), comparing up to 8 bars on each side, so
-# bars that vary at random do not split the song. On white noise the
-# strongest novelty peaks score about 1 to 3 (24 seeds of 2 minutes gave
-# no sections); the fixtures' real changes score 3.3 and up.
+# chance (``boundary_contrast``), comparing up to 8 bars on each side, and
+# span at least ``_MIN_STEP_RATIO`` of the song's total per-bar variance,
+# so random bars or minor phrasing shifts on steady songs do not split.
 _MIN_CONTRAST = 3.0
+_MIN_STEP_RATIO = 0.35
 _CONTRAST_BARS = 8
 _REPEAT_LAGS = (1, 2, 4, 8)
 # Least reference distance, in squared single-bar-spread units, so a song
@@ -237,6 +240,18 @@ def repeat_distance(rows: np.ndarray) -> float:
     )
 
 
+def _boundary_step(
+    rows: np.ndarray, boundary: int, previous: int, following: int,
+) -> tuple[int, float]:
+    """Comparison span and squared distance between means around *boundary*."""
+    span = min(_CONTRAST_BARS, boundary - previous, following - boundary)
+    if span < 1:
+        return 0, 0.0
+    before = rows[boundary - span:boundary].mean(axis=0)
+    after = rows[boundary:boundary + span].mean(axis=0)
+    return span, float(np.sum((after - before) ** 2))
+
+
 def boundary_contrast(
     rows: np.ndarray, boundary: int, previous: int, following: int,
     reference: float,
@@ -251,13 +266,11 @@ def boundary_contrast(
     vary at random score about 1; a real section change scores well
     above.
     """
-    span = min(_CONTRAST_BARS, boundary - previous, following - boundary)
+    span, step = _boundary_step(rows, boundary, previous, following)
     if span < 1:
         return 0.0
-    before = rows[boundary - span:boundary].mean(axis=0)
-    after = rows[boundary:boundary + span].mean(axis=0)
     chance = max(reference, _CONTRAST_REFERENCE_FLOOR) / span
-    return float(np.sum((after - before) ** 2)) / chance
+    return step / chance
 
 
 def self_similarity(features: np.ndarray) -> np.ndarray:
@@ -297,6 +310,16 @@ def novelty(ssm: np.ndarray, half: int = _KERNEL_BARS) -> np.ndarray:
         window = padded[i:i + 2 * half, i:i + 2 * half]
         scores[i] = float(np.sum(window * kernel))
     return 2.0 * scores / float(np.abs(kernel).sum())
+
+
+def section_scale(n_bars: int) -> int:
+    """Minimum section length and kernel half-width in bars for *n_bars*.
+
+    Short excerpts (< 50 bars) keep ``MIN_SECTION_BARS`` (4 bars) so short
+    clips still split; full-length songs widen up to ``_MAX_SECTION_BARS``
+    (8 bars) so 4-bar fills and phrasing changes do not become slivers.
+    """
+    return max(MIN_SECTION_BARS, min(_MAX_SECTION_BARS, n_bars // 10))
 
 
 def pick_boundaries(
@@ -339,12 +362,13 @@ def label_segments(
 ) -> list[str]:
     """A letter per segment; segments that sound alike share one.
 
-    Each segment is compared with the first segment of every letter so
-    far, in song order, and takes the most similar letter at or above
+    Each segment is compared with each letter's running mean (centroid)
+    so far, in song order, and takes the most similar letter at or above
     ``_SAME_LABEL_SIMILARITY``, or the next new letter.
     """
     means = [features[s:e].mean(axis=0) for s, e in zip(starts, ends)]
     representatives: list[np.ndarray] = []
+    counts: list[int] = []
     labels: list[str] = []
     for mean in means:
         best, best_sim = None, _SAME_LABEL_SIMILARITY
@@ -353,8 +377,15 @@ def label_segments(
             if sim >= best_sim:
                 best, best_sim = k, sim
         if best is None:
-            representatives.append(mean)
+            representatives.append(mean.copy())
+            counts.append(1)
             best = len(representatives) - 1
+        else:
+            counts[best] += 1
+            representatives[best] = (
+                representatives[best]
+                + (mean - representatives[best]) / counts[best]
+            )
         labels.append(_label_name(best))
     return labels
 
@@ -380,8 +411,13 @@ def detect_sections(
         return []
     rows, _ = single_bar_features(mono, sr, bars, chroma, hop_length)
     features = _smooth_bars(rows)
+    scale = section_scale(n_bars)
     boundaries = confirm_boundaries(
-        rows, pick_boundaries(novelty(self_similarity(features))),
+        rows,
+        pick_boundaries(
+            novelty(self_similarity(features), half=scale),
+            min_bars=scale,
+        ),
     )
     if not boundaries:
         return []
@@ -396,23 +432,34 @@ def detect_sections(
 
 
 def confirm_boundaries(rows: np.ndarray, candidates: list[int]) -> list[int]:
-    """Keep the candidates whose change clears ``_MIN_CONTRAST``.
+    """Keep candidates clearing both ``_MIN_CONTRAST`` and ``_MIN_STEP_RATIO``.
 
     Each is judged against its neighbours among the candidates still
     kept, weakest dropped first, so dropping one widens the windows of
     the boundaries beside it.
     """
+    if rows.shape[0] < 2:
+        return []
+    total_var = float(np.sum(rows.var(axis=0)))
+    if total_var <= 0.0:
+        return []
+    min_step = _MIN_STEP_RATIO * total_var
     reference = repeat_distance(rows)
     kept = sorted(candidates)
     n_bars = rows.shape[0]
     while kept:
         edges = [0] + kept + [n_bars]
-        scores = [
-            boundary_contrast(rows, b, edges[i], edges[i + 2], reference)
-            for i, b in enumerate(kept)
-        ]
-        weakest = int(np.argmin(scores))
-        if scores[weakest] >= _MIN_CONTRAST:
+        margins = []
+        for i, b in enumerate(kept):
+            span, step = _boundary_step(rows, b, edges[i], edges[i + 2])
+            if span < 1:
+                margins.append(0.0)
+                continue
+            chance = max(reference, _CONTRAST_REFERENCE_FLOOR) / span
+            contrast = step / chance
+            margins.append(min(contrast / _MIN_CONTRAST, step / min_step))
+        weakest = int(np.argmin(margins))
+        if margins[weakest] >= 1.0:
             break
         del kept[weakest]
     return kept
