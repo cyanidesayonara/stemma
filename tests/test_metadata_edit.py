@@ -172,22 +172,45 @@ class TestLibraryPanelEdit:
                 panel._on_context_menu(MagicMock())
             mock_menu.assert_not_called()
 
-    def test_context_menu_selects_right_clicked_item(self, app):
-        """Right-clicking an unselected item edits that item, not the selection."""
+    def test_context_menu_edits_right_clicked_item_without_selecting(self, app):
+        """Right-clicking an unselected item edits that item without interrupting playback."""
         songs = _make_songs()
         library = _make_library(songs)
         panel = LibraryPanel(library)
-        # Select song 1 (index 0).
         panel._list.setCurrentRow(0)
+        selected = []
+        panel.song_selected.connect(selected.append)
 
         song2_item = panel._list.item(1)
+        menu = MagicMock()
+        actions = []
 
-        with patch("src.ui.library_panel.QMenu") as mock_menu_cls:
-            mock_menu = MagicMock()
-            mock_menu_cls.return_value = mock_menu
-            with patch.object(panel._list, "itemAt", return_value=song2_item):
-                with patch.object(panel._list, "mapToGlobal", return_value=MagicMock()):
-                    panel._on_context_menu(MagicMock())
+        def fake_add_action(label):
+            act = MagicMock()
+            act.text = label
+            actions.append(act)
+            return act
 
-        # After the context menu, song 2 should be the current item.
-        assert panel._list.currentItem() is song2_item
+        menu.addAction.side_effect = fake_add_action
+
+        with patch("src.ui.library_panel.QMenu", return_value=menu), \
+                patch.object(panel._list, "itemAt", return_value=song2_item), \
+                patch.object(panel._list, "mapToGlobal", return_value=MagicMock()), \
+                patch("src.ui.library_panel.EditSongDialog") as mock_dlg_cls:
+            mock_dlg = MagicMock()
+            mock_dlg.exec.return_value = True
+            mock_dlg.title = "Edited Song 2"
+            mock_dlg.artist = "Led Zeppelin"
+            mock_dlg_cls.return_value = mock_dlg
+
+            panel._on_context_menu(MagicMock())
+            edit_action = [a for a in actions if a.text == "Edit..."][0]
+            callback = edit_action.triggered.connect.call_args[0][0]
+            callback()
+
+        assert selected == []
+        assert panel._list.currentRow() == 0
+        mock_dlg_cls.assert_called_once_with(songs[1], parent=panel)
+        library.update_song.assert_called_once_with(
+            "2", title="Edited Song 2", artist="Led Zeppelin",
+        )
