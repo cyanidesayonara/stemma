@@ -623,3 +623,21 @@ class TestSetlists:
             lib.remove_song_from_setlist(sl.id, s1.id)
         with pytest.raises(LibraryReadOnlyError):
             lib.reorder_setlist(sl.id, [s1.id])
+
+    def test_empty_string_song_id_raises_key_error_in_mutators(
+        self, populated_library,
+    ):
+        lib, (s1, _s2, _s3) = populated_library
+        sl = lib.create_setlist("Gig", [s1.id])
+
+        with pytest.raises(KeyError):
+            lib.create_setlist("Bad", [""])
+        with pytest.raises(KeyError):
+            lib.add_songs_to_setlist(sl.id, [""])
+        with pytest.raises(KeyError):
+            lib.add_tag_to_songs([""], "rock")
+        with pytest.raises(KeyError):
+            lib.remove_tag_from_songs([""], "rock")
+        assert Setlist.from_dict(
+            {"id": "sl2", "name": "Tolerant", "song_ids": ["", s1.id, ""]},
+        ).song_ids == [s1.id]

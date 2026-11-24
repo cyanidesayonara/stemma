@@ -196,7 +196,11 @@ def _normalize_single_tag(tag: str) -> str:
     return cleaned
 
 
-def _dedup_ids(song_ids: Iterable[str]) -> list[str]:
+def _dedup_ids(
+    song_ids: Iterable[str],
+    *,
+    drop_empty: bool = False,
+) -> list[str]:
     """Validate and deduplicate song IDs while preserving order."""
     if isinstance(song_ids, (str, bytes)):
         raise TypeError("song_ids must be an iterable of song ID strings")
@@ -209,7 +213,9 @@ def _dedup_ids(song_ids: Iterable[str]) -> list[str]:
     for sid in iterator:
         if not isinstance(sid, str):
             raise TypeError(f"song id must be text, got {type(sid)}")
-        if sid and sid not in seen:
+        if drop_empty and not sid:
+            continue
+        if sid not in seen:
             seen.add(sid)
             result.append(sid)
     return result
@@ -312,7 +318,7 @@ class Setlist:
         elif not isinstance(raw_ids, list):
             raise TypeError("setlist field 'song_ids' must be a list")
         else:
-            song_ids = _dedup_ids(raw_ids)
+            song_ids = _dedup_ids(raw_ids, drop_empty=True)
         return cls(id=clean_id, name=clean_name, song_ids=song_ids)
 
 
