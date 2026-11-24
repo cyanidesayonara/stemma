@@ -1166,6 +1166,13 @@ class PlayerControls(QWidget):
         self._pending_speed = None
         self._player.set_speed(speed)
 
+    def flush_pending_changes(self) -> None:
+        """Apply a speed or pitch change still waiting on its debounce."""
+        self._speed_debounce.stop()
+        self._flush_pending_speed()
+        self._pitch_debounce.stop()
+        self._flush_pending_pitch()
+
     def _on_speed_applied(self, speed: float) -> None:
         """Player finished stretching; update UI."""
         self._speed_combo.blockSignals(True)

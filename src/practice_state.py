@@ -18,7 +18,10 @@ def _loop_point(value) -> float | None:
     """Return *value* as a loop point in seconds, or None if unusable."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    seconds = float(value)
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return None
     return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 

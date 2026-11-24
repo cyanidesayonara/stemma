@@ -88,6 +88,13 @@ def _open(window, song_id, *, autoplay=False):
     assert window._current_song_id == song_id
 
 
+def _relaunch(window, song_id):
+    """Load *song_id* the way a restored session does, saving nothing first."""
+    window._current_song_id = None
+    window._session_restore_song_id = song_id
+    _open(window, song_id)
+
+
 def _row(window, song_id):
     return window._library_panel._item_for_song(song_id)
 
@@ -101,7 +108,7 @@ class TestPracticeState:
         None, "", "not json", "[]", "3", json.dumps({
             "loop_a": -1, "loop_b": "x", "looping": "yes",
             "speed": 9, "pitch": 1.5,
-        }), '{"loop_a": NaN, "loop_b": true, "speed": true, "pitch": true}',
+        }), '{"loop_a": 1' + "0" * 400 + '}', '{"loop_a": NaN, "loop_b": true, "speed": true, "pitch": true}',
     ])
     def test_malformed_falls_back_to_defaults(self, raw):
         assert PracticeState.from_json(raw).is_default
@@ -164,6 +171,63 @@ class TestWindow:
         _open(window, second)
         assert window._practice_state(first) == stored
 
+    def test_adjusting_an_autoplayed_song_keeps_its_loop_armed(self, window):
+        song_id = window._library.songs[0].id
+        window._settings.setValue(
+            f"practice/{song_id}", PracticeState(2.0, 5.0, True).to_json(),
+        )
+        _open(window, song_id, autoplay=True)
+        window._player.set_pitch(1)
+        stored = window._practice_state(song_id)
+        assert (stored.looping, stored.pitch) == (True, 1)
+        # Until the user decides otherwise.
+        window._player_controls.toggle_looping()
+        window._player_controls.toggle_looping()
+        assert window._practice_state(song_id).looping is False
+
+    def test_restart_keeps_a_loop_autoplay_held_off(self, window):
+        song_id = window._library.songs[0].id
+        stored = PracticeState(2.0, 5.0, True)
+        window._settings.setValue(f"practice/{song_id}", stored.to_json())
+        _open(window, song_id, autoplay=True)
+        window._save_session()
+        _relaunch(window, song_id)
+        assert window._practice_state(song_id) == stored
+        assert window._player.looping is True
+
+    def test_newer_practice_state_beats_a_stale_session(self, window):
+        song_id = window._library.songs[0].id
+        _open(window, song_id)
+        window._save_session()
+        window._player.set_speed(0.5)
+        # No clean close: the session still says 1.0x.
+        _relaunch(window, song_id)
+        assert window._player.speed == 0.5
+        assert window._practice_state(song_id).speed == 0.5
+
+    def test_session_from_before_practice_state_is_taken_over(self, window):
+        song_id = window._library.songs[0].id
+        _open(window, song_id)
+        window._player.set_speed(0.5)
+        window._save_session()
+        window._settings.remove(f"practice/{song_id}")
+        _relaunch(window, song_id)
+        assert window._player.speed == 0.5
+        assert window._practice_state(song_id).speed == 0.5
+
+    def test_pending_speed_change_survives_leaving_the_song(self, window):
+        song_id = window._library.songs[0].id
+        _open(window, song_id)
+        window._player_controls.cycle_speed(-1)
+        window._on_close_song()
+        assert window._practice_state(song_id).speed == 0.85
+
+        _open(window, song_id)
+        window._player_controls.cycle_speed(-1)
+        with patch.object(main_window_module, "StemLoadWorker"):
+            window._on_song_selected(window._library.songs[1].id)
+        assert window._practice_state(song_id).speed == 0.75
+
     def test_loop_switch_matches_player_for_equal_consecutive_songs(
         self, window,
     ):
@@ -176,13 +240,13 @@ class TestWindow:
             _open(window, song.id)
             assert window._player.looping is True
 
-    def test_resetting_to_defaults_clears_the_stored_state(self, window):
+    def test_resetting_to_defaults_is_remembered(self, window):
         song_id = window._library.songs[0].id
         _open(window, song_id)
         window._player.set_speed(0.5)
-        assert window._settings.contains(f"practice/{song_id}")
         window._player.set_speed(1.0)
-        assert not window._settings.contains(f"practice/{song_id}")
+        stored = window._stored_practice_state(song_id)
+        assert stored is not None and stored.is_default
         assert _row(window, song_id).data(_PRACTICE_ROLE) == ""
 
     def test_closing_a_song_keeps_its_state(self, window):
