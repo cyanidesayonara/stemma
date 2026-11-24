@@ -1127,6 +1127,13 @@ class TestSavedDetection:
         assert window._player.beat_times == []
         assert window._player.sections is None
 
+    def test_grid_saved_before_section_tuning_is_redetected(self, window):
+        """Version 6 analysis used unscaled section rules: re-detect once (#265)."""
+        self._save_grid(window, 6)
+        window._restore_song_detection("a")
+        assert window._player.beat_times == []
+        assert window._player.sections is None
+
     def test_unanalysed_song_is_not_saved_as_current(self, window):
         """Sections never analysed (a superseded whole-song run) must not
         be saved as "analysed, none found" (#246 review)."""
