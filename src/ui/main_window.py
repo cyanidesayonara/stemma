@@ -80,6 +80,7 @@ from src.player import (
     MultiTrackPlayer,
     StemLoadWorker,
 )
+from src.practice_state import PracticeState
 from src.qt_signal_utils import safe_disconnect
 from src.separation_state import is_interrupted_import
 from src.song_sections import parse_sections
@@ -242,6 +243,12 @@ class MainWindow(QMainWindow):
         self._session_restore_song_id: str | None = None
         self._pending_restore_callbacks: list[tuple[object, object]] = []
         self._suppress_recording_reload = False
+        # True while a loading song's controls are being filled in, so the
+        # half-restored values are not stored as its practice state.
+        self._restoring_practice = False
+        # True while an autoplayed song's saved loop is held off; the stored
+        # state keeps it armed until the user changes the loop.
+        self._loop_held_off = False
         # Set once the user confirms quitting: no modal box may open then.
         self._quitting = False
         # Queued jobs all fail once the damaged model is deleted; offer the
@@ -1283,6 +1290,14 @@ class MainWindow(QMainWindow):
         looping = self._settings.value("session/looping", False)
         if isinstance(looping, str):
             looping = looping.lower() == "true"
+        # The song's own practice state is written at once, the session only
+        # when the song is left, so it wins. Without one (a session saved
+        # before practice state existed) the session's values stand.
+        practice = self._stored_practice_state(song_id)
+        if practice is not None:
+            loop_a = -1 if practice.loop_a is None else practice.loop_a
+            loop_b = -1 if practice.loop_b is None else practice.loop_b
+            looping = practice.looping
 
         self._player_controls.restore_loop_state(
             loop_a if loop_a >= 0 else None,
@@ -1311,6 +1326,10 @@ class MainWindow(QMainWindow):
             position = float(self._settings.value("session/position", 0.0))
         except (TypeError, ValueError):
             position = 0.0
+
+        if practice is not None:
+            speed = practice.speed
+            pitch_semi = practice.pitch
 
         # Sync the spinbox display without re-triggering set_pitch.
         self._player_controls._pitch_spin.blockSignals(True)
@@ -1547,6 +1566,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         try:
+            self._player_controls.flush_pending_changes()
             self._save_session()
         except Exception:
             # Never prevent the window from closing, but leave a trace.
@@ -1598,6 +1618,14 @@ class MainWindow(QMainWindow):
             self._on_song_removal_requested
         )
         self._library_panel.song_removed.connect(self._on_song_removed)
+        self._library_panel.set_practice_provider(self._practice_state)
+        self._player_controls.loop_changed.connect(self._on_loop_changed)
+        self._player.speed_changed.connect(
+            lambda _speed: self._store_practice_state()
+        )
+        self._player.pitch_changed.connect(
+            lambda _pitch: self._store_practice_state()
+        )
         self._library_panel.cancel_separation_requested.connect(
             self._separation_queue.cancel_song
         )
@@ -1673,6 +1701,7 @@ class MainWindow(QMainWindow):
             stem_paths[stem_name] = take_path
 
         if self._current_song_id is not None:
+            self._player_controls.flush_pending_changes()
             self._save_session()
 
         autoplay = self._pending_autoplay_song_id == song_id
@@ -1759,6 +1788,7 @@ class MainWindow(QMainWindow):
         self._player.apply_loaded_stems(stems, sample_rate)
         self._current_song_id = song_id
         self._loading_song_id = None
+        self._loop_held_off = False
         self._library_panel.set_playing_song(song_id)
         self._restore_song_detection(song_id)
         self._player_controls.set_stem_names(
@@ -1770,11 +1800,80 @@ class MainWindow(QMainWindow):
 
         if self._session_restore_song_id == song_id:
             self._session_restore_song_id = None
-            self._apply_session_restore(song_id, generation)
+            self._restoring_practice = True
+            try:
+                self._apply_session_restore(song_id, generation)
+            finally:
+                self._restoring_practice = False
+            self._store_practice_state()
+        else:
+            self._restore_practice_state(
+                song_id,
+                autoplay=self._active_load_autoplay == (generation, song_id),
+            )
 
         if self._active_load_autoplay == (generation, song_id):
             self._active_load_autoplay = None
             self._player.play()
+
+    def _stored_practice_state(self, song_id: str) -> PracticeState | None:
+        """Return *song_id*'s stored practice state, or None if never set."""
+        raw = self._settings.value(f"practice/{song_id}", "")
+        if not isinstance(raw, str) or not raw:
+            return None
+        return PracticeState.from_json(raw)
+
+    def _practice_state(self, song_id: str) -> PracticeState:
+        """Return the practice state to use for *song_id*."""
+        return self._stored_practice_state(song_id) or PracticeState()
+
+    def _on_loop_changed(self) -> None:
+        """Store a loop change; a held-off loop is the user's to set now."""
+        if not self._restoring_practice:
+            self._loop_held_off = False
+        self._store_practice_state()
+
+    def _store_practice_state(self) -> None:
+        """Remember the open song's loop, speed, and pitch."""
+        song_id = self._current_song_id
+        if song_id is None or self._restoring_practice:
+            return
+        state = PracticeState(
+            loop_a=self._player.loop_a,
+            loop_b=self._player.loop_b,
+            looping=self._player.looping or self._loop_held_off,
+            speed=self._player.speed,
+            pitch=self._player.pitch_semitones,
+        )
+        # Defaults are stored too: a reset song must not look like one whose
+        # values are still in an old session.
+        self._settings.setValue(f"practice/{song_id}", state.to_json())
+        self._library_panel.update_song_practice(song_id)
+
+    def _restore_practice_state(
+        self, song_id: str, *, autoplay: bool,
+    ) -> None:
+        """Bring back a song's loop, speed, and pitch after it loads.
+
+        An autoplayed song gets its loop points back but not the loop
+        itself: looping forever, it would stop a queue or setlist from
+        moving on.
+        """
+        state = self._practice_state(song_id)
+        looping = state.looping and not autoplay
+        self._restoring_practice = True
+        try:
+            self._player_controls.restore_loop_state(
+                state.loop_a, state.loop_b, looping,
+            )
+            self._loop_held_off = state.looping and not looping
+            # The player's change signals update the controls.
+            self._player.set_pitch(state.pitch)
+            self._player.set_speed(state.speed)
+            if looping and state.has_region:
+                self._player.seek(self._player.loop_a)
+        finally:
+            self._restoring_practice = False
 
     def _restore_song_detection(self, song_id: str) -> None:
         """Restore cached beat, key, tempo, and chord data for a song."""
@@ -2400,6 +2499,7 @@ class MainWindow(QMainWindow):
 
     def _on_close_song(self) -> None:
         """Unload the song and return to the empty logo state."""
+        self._player_controls.flush_pending_changes()
         self._invalidate_stem_load()
         self._pending_autoplay_song_id = None
         self._session_restore_song_id = None
@@ -2428,6 +2528,7 @@ class MainWindow(QMainWindow):
             self._on_close_song()
         self._play_queue.remove_song(song_id)
         self._refresh_queue_ui()
+        self._settings.remove(f"practice/{song_id}")
 
     def _on_import(self) -> None:
         """Open the import dialog."""

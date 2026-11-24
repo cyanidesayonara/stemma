@@ -5,6 +5,7 @@ selected. Includes repeat/shuffle/prev/next playback controls and a
 "now playing" indicator. Full implementation in ticket #10.
 """
 
+from collections.abc import Callable
 import math
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
@@ -52,6 +53,7 @@ from src.library import (
     normalize_tags,
 )
 from src.play_queue import PlayQueue
+from src.practice_state import PracticeState
 from src.ui.control_primitives import (
     COMPACT_BUTTON,
     add_disabled_pixmaps,
@@ -69,6 +71,10 @@ _TITLE_ROLE = Qt.ItemDataRole.UserRole + 2
 _PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 3
 # Precomputed lowercase search text covering artist, title, and tags.
 _SEARCH_TEXT_ROLE = Qt.ItemDataRole.UserRole + 4
+# Practice status label ("Learning") drawn as a badge; empty for none.
+_STATUS_ROLE = Qt.ItemDataRole.UserRole + 5
+# Compact practice state ("A-B 0.75x +2"); empty for none.
+_PRACTICE_ROLE = Qt.ItemDataRole.UserRole + 6
 
 _CTRL_ICON = 18  # Icon size for library control buttons.
 
@@ -335,6 +341,32 @@ class _SongDelegate(QStyledItemDelegate):
         bold_font.setBold(True)
         top_rect = rect.adjusted(0, 0, 0, -rect.height() // 2)
         bottom_rect = rect.adjusted(0, rect.height() // 2, 0, 0)
+        normal_font = QFont(option.font)
+        normal_font.setPointSizeF(option.font.pointSizeF() * 0.9)
+        status = index.data(_STATUS_ROLE)
+        if status:
+            painter.setFont(normal_font)
+            badge_width = (
+                painter.fontMetrics().horizontalAdvance(status)
+                + 2 * scaled_px(5)
+            )
+            badge_rect = QRectF(
+                top_rect.right() + 1 - badge_width,
+                top_rect.top() + 1,
+                badge_width,
+                top_rect.height() - 2,
+            )
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(sub_color, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(
+                badge_rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4,
+            )
+            painter.drawText(
+                badge_rect, Qt.AlignmentFlag.AlignCenter, status,
+            )
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            top_rect.setRight(top_rect.right() - int(badge_width) - 6)
         painter.setFont(bold_font)
         painter.setPen(text_color)
         painter.drawText(
@@ -345,12 +377,19 @@ class _SongDelegate(QStyledItemDelegate):
             ),
         )
 
-        normal_font = QFont(option.font)
-        normal_font.setPointSizeF(option.font.pointSizeF() * 0.9)
         painter.setFont(normal_font)
         metrics = painter.fontMetrics()
         progress = index.data(_PROGRESS_ROLE)
+        practice = index.data(_PRACTICE_ROLE)
         artist_width = bottom_rect.width()
+        if practice and not progress:
+            painter.setPen(sub_color)
+            painter.drawText(
+                bottom_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                practice,
+            )
+            artist_width -= metrics.horizontalAdvance(practice) + 8
         if progress:
             # On a selected row the fill is the accent itself.
             painter.setPen(
@@ -622,6 +661,8 @@ class LibraryPanel(QWidget):
         # (song id to select again after a drag, pressed song id) from a
         # press on a draggable row until its click or drag ends.
         self._pressed_songs: tuple[str | None, str] | None = None
+        # Looks up a song's stored loop/speed/pitch (set by the main window).
+        self._practice_provider: Callable[[str], PracticeState] | None = None
         # song_id -> progress text for songs still separating in the
         # background. Rows in this state are unselectable (their stems
         # are half-written) and offer only "Cancel separation".
@@ -1366,6 +1407,7 @@ class LibraryPanel(QWidget):
                     f"{song.artist} {song.title} {tags_text}".lower(),
                 )
                 self._apply_separating_state(item, song.id)
+                self._apply_practice_state(item, song)
                 self._list.addItem(item)
                 if selected_id and song.id == selected_id:
                     selected_item = item
@@ -1405,6 +1447,56 @@ class LibraryPanel(QWidget):
     def is_song_separating(self, song_id: str) -> bool:
         """True while *song_id* is separating in the background."""
         return song_id in self._separating
+
+    # ------------------------------------------------------------------
+    # Practice state
+    # ------------------------------------------------------------------
+
+    def set_practice_provider(
+        self, provider: Callable[[str], PracticeState],
+    ) -> None:
+        """Set where rows look up a song's loop, speed, and pitch."""
+        self._practice_provider = provider
+        self.refresh()
+
+    def update_song_practice(self, song_id: str) -> None:
+        """Redraw *song_id*'s practice badges after a change."""
+        item = self._item_for_song(song_id)
+        song = self._library.get_song(song_id)
+        if item is not None and song is not None:
+            self._apply_practice_state(item, song)
+
+    def _apply_practice_state(self, item: QListWidgetItem, song: Song) -> None:
+        """Set a row's status badge, practice text, and spoken details."""
+        state = (
+            self._practice_provider(song.id)
+            if self._practice_provider is not None
+            else PracticeState()
+        )
+        raw_status = getattr(song, "practice_status", "")
+        status = (
+            _PRACTICE_STATUS_LABELS.get(raw_status, "")
+            if isinstance(raw_status, str) and raw_status
+            else ""
+        )
+        tags = getattr(song, "tags", ())
+        tags = (
+            [t for t in tags if isinstance(t, str)]
+            if isinstance(tags, (list, tuple))
+            else []
+        )
+        item.setData(_STATUS_ROLE, status)
+        item.setData(_PRACTICE_ROLE, state.badge_text())
+        details = [f"Status: {status}"] if status else []
+        if tags:
+            details.append(f"Tags: {', '.join(tags)}")
+        details.extend(state.description_lines())
+        item.setToolTip(
+            "\n".join([item.text(), *details]) if details else ""
+        )
+        item.setData(
+            Qt.ItemDataRole.AccessibleDescriptionRole, ", ".join(details),
+        )
 
     def _item_for_song(self, song_id: str) -> QListWidgetItem | None:
         return self._list.item_for_song(song_id)

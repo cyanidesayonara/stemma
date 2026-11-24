@@ -14,7 +14,7 @@ import time
 
 import numpy as np
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -118,6 +118,9 @@ def shutdown_peak_pool() -> None:
 
 class PlayerControls(QWidget):
     """Transport controls and stem mixer panel."""
+
+    # The A-B points or the loop switch changed.
+    loop_changed = Signal()
 
     def __init__(self, player: MultiTrackPlayer,
                  parent: QWidget | None = None) -> None:
@@ -673,6 +676,9 @@ class PlayerControls(QWidget):
         if loop_b is not None:
             self._player.set_loop_b(loop_b)
         self._loop_toggle_btn.setChecked(looping)
+        # The button may already match while the player does not: loading a
+        # song resets the player's loop but leaves the button alone.
+        self._player.set_looping(looping)
         self._update_loop_label()
         self._update_waveform_loop_markers()
 
@@ -953,6 +959,7 @@ class PlayerControls(QWidget):
     def _on_loop_toggled(self, checked: bool) -> None:
         """Enable or disable A-B looping."""
         self._player.set_looping(checked)
+        self.loop_changed.emit()
 
     def _on_clear_loop(self) -> None:
         """Clear loop points and disable looping."""
@@ -1135,6 +1142,7 @@ class PlayerControls(QWidget):
         base_tip = "Toggle A-B loop (L)"
         self._loop_toggle_btn.setToolTip(f"{base_tip}\n{text}" if text else base_tip)
         self._loop_toggle_btn.setAccessibleDescription(text)
+        self.loop_changed.emit()
 
     # -- Speed control slots --
 
@@ -1157,6 +1165,13 @@ class PlayerControls(QWidget):
         speed = self._pending_speed
         self._pending_speed = None
         self._player.set_speed(speed)
+
+    def flush_pending_changes(self) -> None:
+        """Apply a speed or pitch change still waiting on its debounce."""
+        self._speed_debounce.stop()
+        self._flush_pending_speed()
+        self._pitch_debounce.stop()
+        self._flush_pending_pitch()
 
     def _on_speed_applied(self, speed: float) -> None:
         """Player finished stretching; update UI."""
