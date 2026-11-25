@@ -87,10 +87,11 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - A play queue apart from the library: Play Next and Add to Queue from a
   song's menu, reorderable, with Q to show it.
 - Each song keeps its own loop, speed, and pitch, shown on its row with
-  its status. A setlist or queue moves on past a song with a saved loop.
-- Select several songs with Ctrl+click, Shift+click, or Ctrl+A (Esc
-  clears) to queue, tag, add to a setlist, export, or remove them
-  together. Export writes one mix per song or separate stem files.
+  its status. Autoplay (library, setlist, or queue) moves on past a song
+  with a saved loop.
+- Select several songs with Ctrl+click or Shift+click (in the song list,
+  also Ctrl+A for all, Ctrl+Space for the current song, and Esc to clear)
+  to queue, tag, add to a setlist, export, or remove them together. Export writes one mix per song or separate stem files.
 
 ### Everything else
 
