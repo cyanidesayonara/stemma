@@ -51,6 +51,18 @@ def test_accelerators_do_not_clash_with_window_shortcuts(window):
         assert QKeySequence(keys).toString() not in taken
 
 
+def test_song_list_selection_keys_are_listed(window):
+    listed = {
+        key
+        for column in window._SHORTCUT_COLUMNS
+        for _, rows in column
+        for key, _ in rows
+    }
+    assert {
+        "Ctrl+Click, Shift+Click", "Ctrl+A / Esc", "Ctrl+Space",
+    } <= listed
+
+
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_shortcuts_dialog_fits_a_1366x768_screen(app, window, theme):
     """About 728 px is left after the taskbar, title bar included (#186)."""
