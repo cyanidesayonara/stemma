@@ -55,9 +55,10 @@ Canonical documents:
 - `src/library.py` and `src/data_paths.py`: persistent song metadata and
   per-user storage
 - `src/play_queue.py`: play queue and setlist playback order
-- `src/practice_state.py`: loop, speed, and pitch remembered per song
-- `src/exporter.py` and `src/batch_export.py`: exporting one mix or
-  several songs
+- `src/practice_state.py`: loop, speed, and pitch remembered per song, in
+  settings
+- `src/exporter.py` and `src/batch_export.py`: stem and mix export, for
+  one song or several
 - `src/beat_detector.py`: tempo, beat/downbeat, key, and chord analysis
 - `src/ui/`: Qt windows, dialogs, controls, themes, and visualizations
 - `tests/`: fast tests plus explicitly marked slow-model and hardware tests

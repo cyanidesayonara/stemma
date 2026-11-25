@@ -170,7 +170,10 @@ stemma/
 - PortAudioError on open/start and mid-playback stream loss (`finished_callback` or inactive stream): stream cleanup, pause, and **`playback_failed`** signal (user-facing message for UI dialogs)
 
 ### `library.py` — Song Library
-- JSON song index: `{id, title, artist, stems_path, model_used, date_added}`
+- Versioned JSON index (schema 2): songs `{id, title, artist,
+  original_path, stems_path, model_used, date_added, tags,
+  practice_status}` and ordered setlists `{id, name, song_ids}`. A v1 list
+  is migrated on load
 - Restricts destructive operations to this library's `songs/` root and
   rejects unsafe persisted paths
 - Rolls back memory and disk state when persistence fails
@@ -180,11 +183,24 @@ stemma/
   set as authoritative for new separation jobs; legacy complete songs remain
   compatible
 
+### `play_queue.py` — Play Queue
+- Up Next queue, active setlist, shuffle, and history, kept apart from the
+  library view: browsing a setlist or tag does not change what plays next
+
+### `practice_state.py` — Per-Song Practice State
+- Loop region, speed, and pitch per song, stored in settings
+  (`practice/<id>`) rather than the library index, because they change on
+  every adjustment
+- A song loaded by autoplay gets its loop points back without looping, so
+  a setlist can move on
+
 ### `exporter.py` — Stem Export
 - Export individual stems or custom mix (the mix you hear: current mute/solo, stem volumes, and take nudge, at the original speed and pitch; the master volume is the listening level and is not applied) as WAV or MP3
 - MP3 encoding via `lameenc` (320kbps CBR, no ffmpeg needed)
 - Peak normalization instead of hard clipping
 - Background export via `ExportWorker` QThread
+- `batch_export.py` exports several songs to a folder, one mix per song or
+  separate stem files, without overwriting existing files
 
 ### `post_processing.py` — Audio Post-Processing
 - Wiener filtering: magnitude-based soft masks reduce inter-stem bleed
