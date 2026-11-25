@@ -1,18 +1,31 @@
 name: CI
 
+# Kept light on GitHub: a pull request runs the fast tests once per push, a newer
+# push stops the older run, and docs alone run nothing. A merge to main runs
+# nothing again; a version tag, the Monday run and a run by hand do.
 on:
   push:
-    branches: [main]
     tags:
       - "v*"
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      # Not site/ or store/: tests read those. tests/test_store_listing.py
+      # also reads some of these files, so run it locally (AGENTS.md).
+      - "*.md"
+      - "docs/**"
   schedule:
     - cron: "23 3 * * 1"
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-latest
     timeout-minutes: 15
 

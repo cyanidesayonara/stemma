@@ -256,7 +256,10 @@ Do not convert slow-model or hardware tests into unmarked PR tests.
 Each kind of check happens where it is cheapest, so that human testing is
 spent only on what nothing else can judge.
 
-1. **Automated tests, every PR.** Ruff and the fast suite run in PR CI.
+1. **Automated tests, every PR.** Ruff and the fast suite run in PR CI,
+   except for drafts and for PRs that change only root `*.md` files or
+   `docs/` (see "Going easy on GitHub" in `../AGENTS.md`). A merge to
+   `main` does not run them again; a version tag does.
    Slow-model tests run weekly and on demand; hardware tests run locally.
 2. **Rendered UI review, every PR that changes `src/ui/`.** Layout
    regressions only show in a styled, rendered window, which the fast suite
@@ -347,6 +350,10 @@ artifact, checksum, and Store submission details. A successful release also
 redeploys the website from the new tag's Store listing and screenshots; see
 `website.md`.
 
+Before tagging, run the fast suite locally on `main`: merges are not tested
+again on GitHub, and a failure would otherwise show only after the tag is
+pushed.
+
 Before tagging, refresh the YouTube pieces of the release lock (step 1 of
 "Keeping YouTube import working").
 
@@ -363,7 +370,8 @@ Before tagging, refresh the YouTube pieces of the release lock (step 1 of
    in `.claude/agents/pr-reviewer.md` runs in a fresh context and its own
    worktree, and its report is posted on the PR unedited. Address the
    findings in follow-up commits. Squash-merge once the findings are
-   addressed and CI passes. Hand to the maintainer only what needs a human:
+   addressed and CI passes; "Going easy on GitHub" in `../AGENTS.md` covers
+   drafts, docs-only PRs, and how often to push. Hand to the maintainer only what needs a human:
    a listening or hands-on check, or a product decision.
 8. Close issues and move Project items to Done only after the change is
    merged or the issue's acceptance criteria are otherwise satisfied.
