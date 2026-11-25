@@ -1,6 +1,6 @@
 # Roadmap
 
-Latest stable release: **v3.1.0**.
+Latest stable release: **v3.2.0**.
 
 This document is intentionally short. GitHub issues hold acceptance criteria,
 discussion, and live status; `../CHANGELOG.md` records only shipped releases.
@@ -41,17 +41,17 @@ scope or date. Each upcoming version has a GitHub milestone.
   warning, atomic exports, data folder on a disconnected drive, menu
   accelerators, and an accessible waveform shipped in v3.1.0. The remaining
   items in #188 (Tab order, skippable splash and reduced motion, Windows
-  text scaling, and the yt-dlp update plan and automation) have since
-  landed and #188 is closed; #237 stays open for the Store-build
+  text scaling, and the yt-dlp update plan and automation) shipped in
+  v3.2.0 and #188 is closed; #237 stays open for the Store-build
   microphone check.
 
-## v3.2 -- library and setlists (merged, not yet released)
+## v3.2 -- library and setlists (shipped)
 
 - [#132: library, setlists, and play queue](https://github.com/cyanidesayonara/stemma/issues/132)
-  — closed: tags and setlists, a play queue, practice state per song,
+  — released in v3.2.0: tags and setlists, a play queue, practice state per song,
   batch actions, multi-file import, and the library schema migration.
 - [#272: acceptance pass and release checklist](https://github.com/cyanidesayonara/stemma/issues/272)
-  — one hands-on pass on the merged build, then the release.
+  — the hands-on pass on the merged build, and the release steps.
 
 ## Research and cross-release tracks
 

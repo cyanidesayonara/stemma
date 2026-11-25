@@ -4,7 +4,7 @@ The pages in ``site/`` are templates: every ``<!-- gen:NAME -->`` ...
 ``<!-- /gen:NAME -->`` block is filled here, from the same sources the Store
 listing uses, so the site always says what the released app does:
 
-    version      the released version ("3.1.0")
+    version      the released version ("3.2.0")
     released     the release date ("November 19, 2026")
     pitch        the Store short description
     features     cards for the Store product features (site/features.json)
@@ -22,7 +22,7 @@ unreleased copy.
 
     python scripts/build_site.py --out build/site
         local preview from this checkout, version from store/listing.yaml
-    python scripts/build_site.py --from rel --version 3.1.0 \\
+    python scripts/build_site.py --from rel --version 3.2.0 \\
         --released 2026-11-19 --out _site
         what .github/workflows/pages.yml runs after a release
 

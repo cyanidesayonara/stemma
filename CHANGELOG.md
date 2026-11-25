@@ -9,6 +9,34 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v3.2.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.2.0) - 2026-11-25
+
+- Setlists: put songs in order for a lesson or a gig, drag to reorder, and
+  play them through. Browsing another setlist or tag does not change what
+  plays next.
+- Tags and a practice status (learning, practicing, ready) for each song;
+  search finds tags, and the library filters by setlist or tag.
+- A play queue, apart from the library: Play Next and Add to Queue from a
+  song's menu, reorderable, shown with Q. It survives a restart.
+- Each song keeps its own loop, speed, and pitch, shown on its row. A song
+  that starts by autoplay gets its loop points back but does not loop, so a
+  setlist or queue moves on.
+- Select several songs with Ctrl+click, Shift+click, or Ctrl+A to queue,
+  tag, add to a setlist, export, or remove them together. Batch export
+  writes one mix per song or separate stem files, with a choice of stems.
+- Import several files at once: choose or drop them, and they share an
+  artist and a model.
+- Windows "Make text bigger" now applies throughout the app.
+- The startup splash can be skipped with a click or a key, and the logo
+  animations follow the Windows animation setting. Tab order follows the
+  layout of the window.
+- The Store package declares the microphone, which packaged apps need for
+  recording.
+- Experimental song sections no longer cut full-length songs into too many
+  short pieces. Saved songs are analysed again once, when first opened.
+- The library file has a new format. stemma upgrades it on first launch;
+  older versions are not made to read it.
+
 ## [v3.1.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.1.0) - 2026-11-22
 
 - A chord lane under the stem waveforms: the whole song's chords on the

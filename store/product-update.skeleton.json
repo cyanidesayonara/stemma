@@ -1,7 +1,7 @@
 {
   "packages": [
     {
-      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.1.0/stemma.msix",
+      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.2.0/stemma.msix",
       "languages": [
         "en-us"
       ],
@@ -14,7 +14,7 @@
   ],
   "listing": {
     "shortDescription": "Practice any song with the band. stemma splits a track into vocals, drums, bass, guitar, piano, and other, so you can mute your part and play along. Slow it down without changing pitch, loop the hard bars, transpose to your key, and record your take. A stem splitter and vocal remover that runs entirely on your PC: no account, no subscription, no uploads.",
-    "description": "stemma turns any song into a practice tool.\n\nImport a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, fast, and GPU-accelerated when your PC supports it), four stems, or all six.\n\nEverything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.\n\nstemma reads the song as you work: tempo, musical key, and a chord lane under the waveform with the chords coming up in the next bars, so you can read ahead as you play. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers exactly where you left off -- song, position, mix, loop, speed, and pitch -- so practice picks up where it stopped. Browse with previous and next, loop a single song, shuffle the collection, or autoplay through it.\n\nSeparation runs on your own machine. Nothing is uploaded, there is no account, no subscription, and no internet connection needed once the models are downloaded. Import an MP3, WAV, or FLAC file or paste a YouTube link, and export your own mix, a single stem, or just the loop as WAV or MP3 when you want to take it elsewhere.\n\nBuilt for Windows, with keyboard shortcuts for the whole practice loop that work on any keyboard layout. Dark and light themes.",
+    "description": "stemma turns any song into a practice tool.\n\nImport a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, fast, and GPU-accelerated when your PC supports it), four stems, or all six.\n\nEverything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.\n\nstemma reads the song as you work: tempo, musical key, and a chord lane under the waveform with the chords coming up in the next bars, so you can read ahead as you play. Every stem gets its own colored lane in the waveform, so you can see where each part plays and click anywhere to jump there. There are per-stem volume faders, and a library that remembers where you left off, and each song's own loop, speed, and pitch, so practice picks up where it stopped. Tag songs and mark how well you know them, order them into setlists for a lesson or a gig, and line up what plays next in a queue.\n\nSeparation runs on your own machine. Nothing is uploaded, there is no account, no subscription, and no internet connection needed once the models are downloaded. Import MP3, WAV, or FLAC files, several at once, or paste a YouTube link, and export your own mix, a single stem, or just the loop as WAV or MP3 when you want to take it elsewhere.\n\nBuilt for Windows, with keyboard shortcuts for the whole practice loop that work on any keyboard layout. Dark and light themes.",
     "features": [
       "Split any song into vocals, drums, bass, guitar, piano, and other",
       "Mute your part and play along with the rest of the band",
@@ -30,10 +30,10 @@
       "Record your own take over the backing track",
       "Line up recorded takes with a latency offset and per-take nudge",
       "Stacked waveform with a colored lane per stem, click-to-seek, and loop shading",
-      "Import an MP3, WAV, or FLAC file, or a YouTube link",
-      "Export your mix, a single stem, or just the loop as WAV or MP3",
-      "Picks up where you left off: song, position, mix, loop, speed, and pitch",
-      "Library with search, repeat, shuffle, and autoplay",
+      "Import MP3, WAV, or FLAC files, several at once, or a YouTube link",
+      "Export your mix, a single stem, or just the loop as WAV or MP3, or several songs at once",
+      "Picks up where you left off, with each song's own loop, speed, and pitch",
+      "Library with tags, setlists, a play queue, search, and shuffle",
       "Keyboard shortcuts for the whole practice loop",
       "Runs entirely on your PC: no account, no subscription, no uploads"
     ],
@@ -46,7 +46,7 @@
       "play along",
       "stem separation"
     ],
-    "whatsNew": "What's new in version 3.1.0\n\nA chord lane under the waveform: the whole song's chords, plus the next bars large enough to read ahead while you play. Click a chord to jump to it.\n\nSong sections (experimental): stemma splits the song into sections on its bar lines, with the same letter for parts that sound alike. Double-click a section, or press Shift+L, to loop it.\n\nYouTube import now uses its own JavaScript runtime for YouTube's checks.\n\nIf your headphones or speakers disconnect during playback, stemma pauses and tells you.\n\nA silent recording, usually Windows blocking the microphone, now comes with a warning that points to the setting.\n\nKeyboard and screen readers: the waveform is a Tab stop that announces the playback position and loop points, and Ctrl+O, Ctrl+, and Ctrl+Q import, open Preferences, and quit.\n\nSafer files: a failed export leaves no partial file, and a data folder on a disconnected drive is kept for next time."
+    "whatsNew": "What's new in version 3.2.0\n\nSetlists: put songs in order for a lesson or a gig, drag to reorder, and play them through.\n\nA play queue: choose what plays next without leaving your library.\n\nTags and a practice status for each song, with search and filters that use them.\n\nEach song keeps its own loop, speed, and pitch, shown in the library.\n\nSelect several songs at once to tag, queue, add to a setlist, export, or remove them.\n\nImport several files in one go.\n\nWindows \"Make text bigger\" now applies throughout the app, and the startup screen can be skipped.\n\nSong sections (experimental) no longer cut full-length songs into too many short pieces.\n\nFixes: the Store version now declares the microphone, which packaged apps need for recording."
   },
   "productId": "9P2W12L8F381",
   "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",

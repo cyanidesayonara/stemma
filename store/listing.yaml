@@ -1,5 +1,5 @@
 # Informational only. Release authority is the git tag / synced version.py.
-listing_version: "3.1.0"
+listing_version: "3.2.0"
 
 # Live Microsoft Store product identity (apps.microsoft.com).
 # Snapshot of published copy before the 2.6.0 submission:
@@ -44,15 +44,15 @@ description: |
   you can read ahead as you play. Every stem gets its own colored
   lane in the waveform, so you can see where each part plays and click
   anywhere to jump there. There are per-stem volume faders, and a library
-  that remembers exactly where you left off -- song, position, mix, loop,
-  speed, and pitch -- so practice picks up where it stopped. Browse with previous
-  and next, loop a single song, shuffle the collection, or autoplay
-  through it.
+  that remembers where you left off, and each song's own loop, speed, and
+  pitch, so practice picks up where it stopped. Tag songs and mark how well
+  you know them, order them into setlists for a lesson or a gig, and line
+  up what plays next in a queue.
 
   Separation runs on your own machine. Nothing is uploaded, there is no
   account, no subscription, and no internet connection needed once the
-  models are downloaded. Import an MP3, WAV, or FLAC file or paste a
-  YouTube link, and export your own mix, a single stem, or just the loop
+  models are downloaded. Import MP3, WAV, or FLAC files, several at once,
+  or paste a YouTube link, and export your own mix, a single stem, or just the loop
   as WAV or MP3 when you want to take it elsewhere.
 
   Built for Windows, with keyboard shortcuts for the whole practice loop
@@ -73,10 +73,10 @@ features:
   - "Record your own take over the backing track"
   - "Line up recorded takes with a latency offset and per-take nudge"
   - "Stacked waveform with a colored lane per stem, click-to-seek, and loop shading"
-  - "Import an MP3, WAV, or FLAC file, or a YouTube link"
-  - "Export your mix, a single stem, or just the loop as WAV or MP3"
-  - "Picks up where you left off: song, position, mix, loop, speed, and pitch"
-  - "Library with search, repeat, shuffle, and autoplay"
+  - "Import MP3, WAV, or FLAC files, several at once, or a YouTube link"
+  - "Export your mix, a single stem, or just the loop as WAV or MP3, or several songs at once"
+  - "Picks up where you left off, with each song's own loop, speed, and pitch"
+  - "Library with tags, setlists, a play queue, search, and shuffle"
   - "Keyboard shortcuts for the whole practice loop"
   - "Runs entirely on your PC: no account, no subscription, no uploads"
 
@@ -187,3 +187,29 @@ whats_new:
 
     Safer files: a failed export leaves no partial file, and a data folder
     on a disconnected drive is kept for next time.
+  "3.2.0": |
+    What's new in version 3.2.0
+
+    Setlists: put songs in order for a lesson or a gig, drag to reorder,
+    and play them through.
+
+    A play queue: choose what plays next without leaving your library.
+
+    Tags and a practice status for each song, with search and filters that
+    use them.
+
+    Each song keeps its own loop, speed, and pitch, shown in the library.
+
+    Select several songs at once to tag, queue, add to a setlist, export,
+    or remove them.
+
+    Import several files in one go.
+
+    Windows "Make text bigger" now applies throughout the app, and the
+    startup screen can be skipped.
+
+    Song sections (experimental) no longer cut full-length songs into too
+    many short pieces.
+
+    Fixes: the Store version now declares the microphone, which packaged
+    apps need for recording.
