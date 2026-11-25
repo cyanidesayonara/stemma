@@ -55,7 +55,7 @@ Setlists: put songs in order for a lesson or a gig, drag to reorder, and play th
 
 A play queue: choose what plays next without leaving your library.
 
-Tags and a practice status for each song, with search and filters that use them.
+Tags you can search and filter by, and a practice status for each song.
 
 Each song keeps its own loop, speed, and pitch, shown in the library.
 
@@ -67,7 +67,7 @@ Windows "Make text bigger" now applies throughout the app, and the startup scree
 
 Song sections (experimental) no longer cut full-length songs into too many short pieces.
 
-Fixes: the Store version now declares the microphone, which packaged apps need for recording.
+Fixes: right-clicking a song no longer opens it, and the Store version now declares the microphone, which packaged apps need for recording.
 
 ---
 
