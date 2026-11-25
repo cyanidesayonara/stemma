@@ -80,7 +80,7 @@ rationale and subsystem boundaries.
 9. No placeholder or mock code in `main` branch. Use `NotImplementedError` with clear TODOs.
 10. Work deliberately. Plan each feature, implement carefully, test thoroughly.
 11. **Always keep the GitHub Kanban board up to date.** Move issues to In Progress, update subtasks, and close them when PRs merge.
-12. **Builder/reviewer workflow:** The builder implements the change and opens a PR, then runs the independent reviewer defined in `.claude/agents/pr-reviewer.md` in a fresh context and its own worktree. The builder posts the reviewer's report on the PR unedited, addresses the findings in follow-up commits, and replies with what changed. Merge (squash) once the review's findings are addressed and CI passes; stop and ask the maintainer only when a change needs a human check a render or test cannot give (how something sounds or feels in use), or a product decision.
+12. **Builder/reviewer workflow:** The builder implements the change and opens a PR, then runs the independent reviewer defined in `.claude/agents/pr-reviewer.md` in a fresh context and its own worktree. The builder posts the reviewer's report on the PR unedited, addresses the findings in follow-up commits, and replies with what changed. Merge (squash) once the review's findings are addressed and CI passes (a docs-only PR runs no CI; see "Going easy on GitHub"); stop and ask the maintainer only when a change needs a human check a render or test cannot give (how something sounds or feels in use), or a product decision.
 13. **Imports at module scope by default.** Prefer top-of-file imports. Deferred imports inside a function or method are acceptable when there is a concrete reason (for example: faster cold start, avoiding a heavy or rarely used dependency until needed, or optional/platform-specific modules). Add a short comment at the import site when the reason is not obvious.
 14. **Look at UI changes before handing them off.** Any change under `src/ui/` is rendered with `python scripts/render_ui_review.py` and the images inspected at every size and theme before the PR opens. Leave the human acceptance pass for what a render cannot show (see "Verification tiers" in `docs/DEVELOPMENT.md`).
 
@@ -109,6 +109,13 @@ packaging, and release commands.
 ## Going easy on GitHub
 
 Test on this machine before pushing; push a branch once it is believed done,
-not after every commit, and open it as a draft until then. Batch related work:
-at most 4 pull requests a day, 2 open at once. No pictures in branches, no polling
-of checks, and nothing that runs on every push to main without Santtu's word.
+not after every commit, and open it as a draft until then. Mark it
+ready before merging: a draft's skipped run is not a pass. Batch related work:
+at most 4 pull requests a day, 2 open at once. No pictures in branches (except
+the images the app, site, or Store listing ship, regenerated at most once a
+release), no polling of checks, and nothing that runs on every push to main
+without Santtu's word.
+
+A pull request that changes only root `*.md` files or `docs/` runs no CI. Run
+`python -m pytest tests/test_store_listing.py` before pushing it: it checks
+the versions and generated text in those files.
