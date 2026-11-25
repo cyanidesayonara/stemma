@@ -149,6 +149,8 @@ python -m pytest -m "not slow and not hardware"
 | N / P | Next / previous song |
 | Q | Toggle play queue |
 | Ctrl+Click, Shift+Click | Select several songs |
+| Ctrl+A / Esc | Select all / none (song list) |
+| Ctrl+Space | Select / deselect song (song list) |
 | F1 | Keyboard shortcuts dialog |
 
 Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bindings as above).

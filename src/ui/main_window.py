@@ -866,6 +866,11 @@ class MainWindow(QMainWindow):
                 ("Ctrl+1-6", "Mute/unmute vocals, drums, bass,\n"
                              "other, guitar, piano"),
             )),
+            ("Metronome & Recording", (
+                ("M", "Toggle metronome"),
+                ("C", "Toggle count-in"),
+                ("R", "Arm/disarm recording"),
+            )),
         ),
         (
             ("Loop", (
@@ -875,16 +880,13 @@ class MainWindow(QMainWindow):
                 ("Shift+L", "Loop the song section playing\n"
                             "(experimental)"),
             )),
-            ("Metronome & Recording", (
-                ("M", "Toggle metronome"),
-                ("C", "Toggle count-in"),
-                ("R", "Arm/disarm recording"),
-            )),
             ("Library", (
                 ("N", "Next song"),
                 ("P", "Previous song"),
                 ("Q", "Toggle play queue"),
                 ("Ctrl+Click, Shift+Click", "Select several songs"),
+                ("Ctrl+A / Esc", "Select all / none (song list)"),
+                ("Ctrl+Space", "Select / deselect song (song list)"),
             )),
             ("App", (
                 ("Ctrl+O", "Import a song"),
