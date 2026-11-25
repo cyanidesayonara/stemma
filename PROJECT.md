@@ -78,6 +78,10 @@ stemma/
 │   ├── player.py           # multi-track audio engine
 │   ├── stretch.py          # real-time speed and pitch (phase vocoder)
 │   ├── library.py          # persistent song index and recovery
+│   ├── play_queue.py       # play queue and setlist playback order
+│   ├── practice_state.py   # loop, speed, and pitch per song
+│   ├── exporter.py         # stem and mix export
+│   ├── batch_export.py     # export of several songs
 │   ├── beat_detector.py    # beat, tempo, key, and chord analysis
 │   ├── song_sections.py    # experimental song-section detection
 │   └── ui/                 # Qt presentation and interaction
@@ -254,9 +258,21 @@ stemma/
   - **`stem_mixer.py`** — Stem and recording-take rows (mute, solo, volume,
     take nudge and delete).
   - **`transport_bar.py`** — Play, stop, record, time, and master volume.
-- **`library_panel.py`** — Song list with search/filter, selection, remove (with confirmation), metadata edit (double-click / context menu)
+- **`library_panel.py`** — Song list with search (titles, artists, and
+  tags), a setlist and tag filter, setlist management and drag-reorder,
+  practice badges, and metadata edit (double-click / context menu).
+  Selecting a row loads the song, so presses that may become a drag, right
+  clicks, and Ctrl/Shift clicks never change the current row: marks for
+  batch actions are a separate set, dropped when a song leaves the view.
+  Removal (single or batch) asks once.
+- **`play_queue_widget.py`** — The Play Queue view in the sidebar: Up Next
+  and the active setlist's remaining songs.
+- **`batch_export_dialog.py`** — Stems, mix or separate files, and format
+  for exporting several songs.
 - **`import_dialog.py`** — File browser or YouTube URL, metadata fields, and
-  2/4/6-stem model selection. Missing models download with progress; failures
+  2/4/6-stem model selection. Several files share an artist and model,
+  with checks and questions asked once and the model downloaded before
+  the library changes. Missing models download with progress; failures
   roll back the library row. Demucs imports perform preflight memory
   confirmation before persistence. Workers cancel and drain on rejection.
 - **`preferences_dialog.py`** — Data directory, output/input devices,

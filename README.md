@@ -40,7 +40,8 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
 - MDX-Net two-stem separation (vocals + other) on the GPU via
   DirectML, with automatic CPU fallback and a clear report of which ran.
 - Imports run in the background, one after another, with progress in the
-  library. Import from a file, by drag and drop, or from a YouTube URL.
+  library. Import from a file, by drag and drop, or from a YouTube URL;
+  choose or drop several files to import them all at once.
 - Post-processing (Wiener filtering and soft gating) to reduce bleed
   between stems.
 - ONNX Runtime inference, no PyTorch. Models download on first use and are
@@ -75,9 +76,25 @@ Website, with a playable mixer demo: https://cyanidesayonara.github.io/stemma/
   or just the loop region, as WAV or MP3, optionally with the count-in
   prepended.
 
-### Everything else
+### Library, setlists, and queue
 
 - Library with search, metadata editing, repeat, shuffle, and autoplay.
+- Tags (search finds them too) and a practice status per song: learning,
+  practicing, or ready.
+- Ordered setlists for a lesson or a gig: drag to reorder, and Play
+  Setlist plays them through. Browsing another setlist or tag does not
+  change what plays next.
+- A play queue apart from the library: Play Next and Add to Queue from a
+  song's menu, reorderable, with Q to show it.
+- Each song keeps its own loop, speed, and pitch, shown on its row with
+  its status. Autoplay (library, setlist, or queue) moves on past a song
+  with a saved loop.
+- Select several songs with Ctrl+click or Shift+click (in the song list,
+  also Ctrl+A for all, Ctrl+Space for the current song, and Esc to clear)
+  to queue, tag, add to a setlist, export, or remove them together. Export writes one mix per song or separate stem files.
+
+### Everything else
+
 - Session restore: last song, position, mixer, loop, speed, metronome,
   count-in, and takes.
 - Keyboard shortcuts for nearly everything (below).
@@ -130,6 +147,8 @@ python -m pytest -m "not slow and not hardware"
 | C | Toggle count-in |
 | R | Arm / disarm recording |
 | N / P | Next / previous song |
+| Q | Toggle play queue |
+| Ctrl+Click, Shift+Click | Select several songs |
 | F1 | Keyboard shortcuts dialog |
 
 Use **Help > Keyboard Shortcuts** in the app for the authoritative list (same bindings as above).
