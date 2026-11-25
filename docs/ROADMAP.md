@@ -45,11 +45,13 @@ scope or date. Each upcoming version has a GitHub milestone.
   landed and #188 is closed; #237 stays open for the Store-build
   microphone check.
 
-## v3.2 -- library and setlists
+## v3.2 -- library and setlists (merged, not yet released)
 
 - [#132: library, setlists, and play queue](https://github.com/cyanidesayonara/stemma/issues/132)
-  adds collection structure, practice state, queueing, and the required
-  storage migration.
+  — closed: tags and setlists, a play queue, practice state per song,
+  batch actions, multi-file import, and the library schema migration.
+- [#272: acceptance pass and release checklist](https://github.com/cyanidesayonara/stemma/issues/272)
+  — one hands-on pass on the merged build, then the release.
 
 ## Research and cross-release tracks
 

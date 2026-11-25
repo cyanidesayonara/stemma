@@ -54,6 +54,10 @@ Canonical documents:
   applied to the mix as it plays
 - `src/library.py` and `src/data_paths.py`: persistent song metadata and
   per-user storage
+- `src/play_queue.py`: play queue and setlist playback order
+- `src/practice_state.py`: loop, speed, and pitch remembered per song
+- `src/exporter.py` and `src/batch_export.py`: exporting one mix or
+  several songs
 - `src/beat_detector.py`: tempo, beat/downbeat, key, and chord analysis
 - `src/ui/`: Qt windows, dialogs, controls, themes, and visualizations
 - `tests/`: fast tests plus explicitly marked slow-model and hardware tests
@@ -81,11 +85,12 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Updated on 2026-11-24 after #188 closed (v3.1.0 released 2026-11-22):
+Updated on 2026-11-25 after #132 closed (v3.1.0 released 2026-11-22):
 
 - Latest stable: **v3.1.0** (the chord lane and experimental song sections, [#133](https://github.com/cyanidesayonara/stemma/issues/133))
 - Completed post-3.0 backlog: [#188](https://github.com/cyanidesayonara/stemma/issues/188) is closed (Tab order, skippable splash and reduced motion, Windows text scaling, and yt-dlp lock automation landed after v3.1.0)
-- Next: v3.2, library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132))
+- v3.2 development is merged but not released: library, setlists, and play queue ([#132](https://github.com/cyanidesayonara/stemma/issues/132)) is closed
+- Next: the v3.2 acceptance pass and release ([#272](https://github.com/cyanidesayonara/stemma/issues/272))
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.
