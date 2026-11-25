@@ -6,9 +6,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox, QPushButton
 
 from src import player as player_module
 from src.app_settings import open_settings
@@ -116,7 +117,48 @@ class TestMarking:
         _click(panel, ids[3])
         assert selected == [ids[3]]
         assert panel.marked_song_ids() == []
+        # The bar keeps its place until a double-click could have landed.
+        assert not panel._batch_bar.isHidden()
+        assert not panel._batch_actions_btn.isEnabled()
+        panel._batch_hide_timer.timeout.emit()
         assert panel._batch_bar.isHidden()
+
+    def test_double_click_that_clears_marks_hits_one_row(
+        self, panel, lib, ids, tmp_path, qapp,
+    ):
+        for i in range(30):
+            lib.add_song(f"More {i}", "X", _wav(tmp_path / f"m{i}.wav"))
+        panel.refresh()
+        last = lib.songs[-1].id
+        panel.resize(260, 500)
+        panel._on_mark_all()
+        qapp.processEvents()
+        panel._list.scrollToBottom()
+        qapp.processEvents()
+        point = panel._list.visualItemRect(
+            panel._item_for_song(last)
+        ).center()
+        _click(panel, last)
+        qapp.processEvents()
+        assert panel._list.itemAt(point) is panel._item_for_song(last)
+
+    def test_menu_select_marks_only_that_song(self, panel, ids):
+        _click(panel, ids[0])
+        menu = QMenu()
+        with patch("src.ui.library_panel.QMenu", return_value=menu), \
+                patch.object(menu, "exec"), patch.object(
+                    panel._list, "itemAt",
+                    return_value=panel._item_for_song(ids[1]),
+                ):
+            panel._on_context_menu(panel._list.rect().center())
+            _action(menu, "Select").trigger()
+        assert panel.marked_song_ids() == [ids[1]]
+
+    def test_remove_stays_enabled_for_marks_when_song_closes(self, panel, ids):
+        _click(panel, ids[0])
+        _click(panel, ids[1], CTRL)
+        panel.clear_selection()
+        assert panel._remove_btn.isEnabled()
 
     def test_right_click_does_not_load_or_unmark(self, panel, ids):
         _click(panel, ids[0])
@@ -138,12 +180,23 @@ class TestMarking:
         assert panel.marked_song_ids() == []
 
     def test_modifier_double_click_does_not_edit(self, panel, ids):
-        with patch.object(panel, "_on_edit_song") as edit:
-            center = panel._list.visualItemRect(
-                panel._item_for_song(ids[0])
-            ).center()
-            QTest.mouseDClick(panel._list.viewport(), LEFT, CTRL, center)
-        edit.assert_not_called()
+        edits = []
+        panel._list.itemDoubleClicked.connect(edits.append)
+        center = panel._list.visualItemRect(
+            panel._item_for_song(ids[0])
+        ).center()
+        with patch.object(panel, "_on_edit_song"):
+            # QTest's own double-click does not reach the handler, and only
+            # a press that Qt itself saw would make it open the editor.
+            QTest.mouseClick(panel._list.viewport(), LEFT, NONE, center)
+            panel._list.mouseDoubleClickEvent(QMouseEvent(
+                QEvent.Type.MouseButtonDblClick,
+                QPointF(center),
+                QPointF(panel._list.viewport().mapToGlobal(center)),
+                LEFT, LEFT, CTRL,
+            ))
+        assert edits == []
+        assert panel.marked_song_ids() == [ids[0]]
 
     def test_songs_out_of_sight_lose_their_mark(self, panel, ids):
         QTest.keyClick(panel._list, Qt.Key.Key_A, CTRL)
@@ -292,6 +345,25 @@ class TestBatchExport:
         assert exported == 1
         assert sorted(os.listdir(out / "Song")) == ["drums.wav", "vocals.wav"]
 
+    def test_cancel_stops_and_leaves_no_partial_song(self, qapp, tmp_path):
+        item = BatchExportItem("Song", {
+            "vocals": _wav(tmp_path / "v.wav"),
+            "drums": _wav(tmp_path / "d.wav"),
+        })
+        out = tmp_path / "out"
+        out.mkdir()
+        worker = BatchExportWorker(
+            [item, item], str(out), ["vocals", "drums"], separate_files=True,
+        )
+        # Not interrupted before song one or its first stem, then cancelled.
+        answers = iter([False, False, True, True])
+        worker.isInterruptionRequested = lambda: next(answers)
+        result = []
+        worker.completed.connect(lambda n, f: result.append((n, f)))
+        worker.run()
+        assert result == [(0, [])]
+        assert os.listdir(out) == []
+
     def test_dialog_needs_a_stem(self, qapp):
         dialog = BatchExportDialog(2, ["vocals", "drums"], "mp3")
         assert dialog.stems == ["vocals", "drums"]
@@ -352,6 +424,54 @@ class TestMainWindow:
         assert info.call_args.args[2] == "Exported 2 songs."
         assert window._export_progress is None
         assert len(os.listdir(out)) == 2
+
+
+    def _start_export(self, window, ids, tmp_path):
+        """Start a batch export whose worker never runs."""
+        mod = "src.ui.main_window."
+        with patch(
+            mod + "BatchExportDialog.exec",
+            return_value=QDialog.DialogCode.Accepted,
+        ), patch(
+            mod + "QFileDialog.getExistingDirectory",
+            return_value=str(tmp_path),
+        ), patch(mod + "BatchExportWorker") as worker_class:
+            window._on_export_songs(ids)
+        return worker_class.return_value
+
+    def test_cancel_reaches_the_worker_and_is_reported(
+        self, window, ids, tmp_path,
+    ):
+        worker = self._start_export(window, ids, tmp_path)
+        window._export_progress.findChild(QPushButton).click()
+        worker.requestInterruption.assert_called_once()
+        with patch("src.ui.main_window.QMessageBox.information") as info:
+            window._on_batch_export_completed(1, [])
+        assert info.call_args.args[2] == (
+            "Export cancelled. Exported 1 song."
+        )
+
+    def test_cancel_after_the_last_song_is_not_a_cancel(
+        self, window, ids, tmp_path,
+    ):
+        self._start_export(window, ids[:2], tmp_path)
+        window._export_progress.cancel()
+        with patch("src.ui.main_window.QMessageBox.information") as info:
+            window._on_batch_export_completed(2, [])
+        assert info.call_args.args[2] == "Exported 2 songs."
+
+    def test_quit_stops_the_export_and_hides_its_window(
+        self, window, ids, tmp_path,
+    ):
+        worker = self._start_export(window, ids, tmp_path)
+        worker.isRunning.return_value = True
+        progress = window._export_progress
+        progress.show()
+        with patch.object(window, "_confirm_quit", return_value=True):
+            window.close()
+        worker.requestInterruption.assert_called_once()
+        worker.wait.assert_called_once()
+        assert progress.isHidden()
 
 
 class TestBatchImport:
@@ -417,6 +537,45 @@ class TestBatchImport:
         dialog._on_model_download_finished("")
         assert len(lib.songs) == before + 2
         assert queue.enqueue.call_count == 2
+        dialog.deleteLater()
+
+    def test_cancel_beats_a_queued_download_result(self, qapp, lib, files):
+        queue = MagicMock()
+        before = len(lib.songs)
+        dialog = self._dialog(lib, files, downloaded=False, queue=queue)
+        with patch(
+            "src.ui.import_dialog.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            dialog._on_import()
+        dialog.reject()
+        dialog._on_model_download_finished("")
+        assert len(lib.songs) == before
+        queue.enqueue.assert_not_called()
+        assert dialog.result() == QDialog.DialogCode.Rejected
+        dialog.deleteLater()
+
+    def test_failed_download_can_be_retried(self, qapp, lib, files):
+        queue = MagicMock()
+        dialog = self._dialog(lib, files, downloaded=False, queue=queue)
+        with patch(
+            "src.ui.import_dialog.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            dialog._on_import()
+            dialog._on_model_download_error("offline")
+            assert not dialog._batch_pending
+            dialog._on_retry_import()
+        dialog._on_model_download_finished("")
+        assert queue.enqueue.call_count == 2
+        dialog.deleteLater()
+
+    def test_typing_a_url_leaves_batch_mode(self, qapp, lib, files):
+        dialog = self._dialog(lib, files)
+        dialog._url_edit.setText("https://youtu.be/dQw4w9WgXcQ")
+        assert dialog._batch_paths == []
+        assert dialog._path_edit.text() == ""
+        assert dialog._title_edit.isEnabled()
         dialog.deleteLater()
 
     def test_one_failed_copy_does_not_stop_the_rest(self, qapp, lib, files):

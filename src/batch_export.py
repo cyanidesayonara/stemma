@@ -115,13 +115,26 @@ class BatchExportWorker(QThread):
             )
             return True
         folder = free_path(self._folder, name)
+        written: list[str] = []
         for stem in stems:
             if self.isInterruptionRequested():
+                self._discard_partial(folder, written)
                 return False
+            path = os.path.join(folder, stem + self._ext)
             # One stem at unity gain; export_mix takes the bitrate.
             exporter.export_mix(
-                os.path.join(folder, stem + self._ext),
-                stem_names=[stem],
-                mp3_bitrate=self._mp3_bitrate,
+                path, stem_names=[stem], mp3_bitrate=self._mp3_bitrate,
             )
+            written.append(path)
         return True
+
+    @staticmethod
+    def _discard_partial(folder: str, written: list[str]) -> None:
+        """Remove the files this run wrote for a song it did not finish."""
+        try:
+            for path in written:
+                os.remove(path)
+            if os.path.isdir(folder):
+                os.rmdir(folder)
+        except OSError:
+            pass  # Held by another program; the files are just left behind.

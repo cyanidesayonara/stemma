@@ -1590,6 +1590,9 @@ class MainWindow(QMainWindow):
         if self._export_worker is not None and self._export_worker.isRunning():
             # Stops a batch after the file it is writing; a single mix
             # ignores it and finishes.
+            if self._export_progress is not None:
+                # It would outlive the hidden window, unresponsive.
+                self._export_progress.hide()
             self._export_worker.requestInterruption()
             self._export_worker.wait(30000)
 
@@ -2983,7 +2986,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         cancelled = False
         if self._export_progress is not None:
-            cancelled = self._export_progress.wasCanceled()
+            # Cancelling during the last song comes too late to matter.
+            cancelled = (
+                self._export_progress.wasCanceled()
+                and exported + len(failures) < self._export_progress.maximum()
+            )
             self._export_progress.close()
             self._export_progress.deleteLater()
             self._export_progress = None

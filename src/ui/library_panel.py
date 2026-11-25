@@ -8,7 +8,7 @@ selected. Includes repeat/shuffle/prev/next playback controls and a
 from collections.abc import Callable
 import math
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -873,6 +874,9 @@ class LibraryPanel(QWidget):
         self._batch_clear_btn.clicked.connect(self.clear_marks)
         batch_row.addWidget(self._batch_clear_btn)
         self._batch_bar.setVisible(False)
+        self._batch_hide_timer = QTimer(self)
+        self._batch_hide_timer.setSingleShot(True)
+        self._batch_hide_timer.timeout.connect(self._batch_bar.hide)
         library_layout.addWidget(self._batch_bar)
 
         self._remove_btn = QPushButton("Remove Selected")
@@ -1551,11 +1555,13 @@ class LibraryPanel(QWidget):
             if item.data(Qt.ItemDataRole.UserRole) in self._marked
         ]
 
-    def toggle_song_mark(self, song_id: str) -> None:
+    def toggle_song_mark(
+        self, song_id: str, *, with_current: bool = True,
+    ) -> None:
         """Mark or unmark *song_id* for a batch action.
 
         The first mark takes the selected song along, as Ctrl+click does in
-        any file list.
+        any file list, unless *with_current* is False.
         """
         shown = [
             i.data(Qt.ItemDataRole.UserRole) for i in self._markable_items()
@@ -1564,7 +1570,7 @@ class LibraryPanel(QWidget):
             return
         if not self._marked:
             current = self._list.currentItem()
-            if current is not None:
+            if current is not None and with_current:
                 current_id = current.data(Qt.ItemDataRole.UserRole)
                 if current_id in shown:
                     self._marked.add(current_id)
@@ -1637,8 +1643,18 @@ class LibraryPanel(QWidget):
                 if song is not None:
                     self._apply_practice_state(item, song)
         count = len(self._marked)
-        self._batch_label.setText(f"{count} selected")
-        self._batch_bar.setVisible(count > 0)
+        self._batch_label.setText(f"{count} selected" if count else "")
+        self._batch_actions_btn.setEnabled(count > 0)
+        self._batch_clear_btn.setEnabled(count > 0)
+        if count:
+            self._batch_hide_timer.stop()
+            self._batch_bar.setVisible(True)
+        elif not self._batch_bar.isHidden():
+            # Hiding it grows the list; wait until a double-click that began
+            # by clearing the marks has landed on the same row.
+            self._batch_hide_timer.start(
+                QApplication.doubleClickInterval() + 50
+            )
         noun = "song" if count == 1 else "songs"
         self._remove_btn.setAccessibleName(
             f"Remove {count} selected {noun}"
@@ -1940,7 +1956,9 @@ class LibraryPanel(QWidget):
                 self.song_selected.emit(song_id)
                 self._remove_btn.setEnabled(bool(self._library.writable))
         else:
-            self._remove_btn.setEnabled(False)
+            self._remove_btn.setEnabled(
+                bool(self._marked) and bool(self._library.writable)
+            )
 
     def _on_context_menu(self, pos) -> None:
         """Show a right-click context menu on the song list."""
@@ -2036,7 +2054,9 @@ class LibraryPanel(QWidget):
             menu.addSeparator()
         if song_id:
             menu.addAction("Select").triggered.connect(
-                lambda _checked=False, sid=song_id: self.toggle_song_mark(sid)
+                lambda _checked=False, sid=song_id: (
+                    self.toggle_song_mark(sid, with_current=False)
+                )
             )
         edit = menu.addAction("Edit...")
         edit.setEnabled(writable)

@@ -30,7 +30,10 @@ class BatchExportDialog(QDialog):
         self.setWindowTitle("Export Songs")
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Export {song_count} songs. Stems to include:"))
+        noun = "song" if song_count == 1 else "songs"
+        layout.addWidget(
+            QLabel(f"Export {song_count} {noun}. Stems to include:")
+        )
         self._stem_checks: dict[str, QCheckBox] = {}
         for name in stem_names:
             check = QCheckBox(name.capitalize())

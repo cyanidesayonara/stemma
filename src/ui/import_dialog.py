@@ -412,6 +412,13 @@ class ImportDialog(QDialog):
 
     def _on_url_changed(self, text: str) -> None:
         """Enable/disable fetch button based on URL validity."""
+        if text.strip() and self._batch_paths:
+            # A URL is one song and wins over the files; show that.
+            self._batch_paths = []
+            self._path_edit.clear()
+            self._path_edit.setToolTip("")
+            self._title_edit.setEnabled(True)
+            self._title_edit.setPlaceholderText("")
         self._fetch_btn.setEnabled(is_supported_url(text))
 
     def _on_fetch_metadata(self) -> None:
@@ -984,6 +991,8 @@ class ImportDialog(QDialog):
         # Disconnect all signals first so no callbacks fire into a
         # partially destroyed dialog.
         self._disconnect_and_detach_workers()
+        # A download result already queued still arrives after disconnecting.
+        self._batch_pending = False
 
         # Wait for workers to finish (best-effort; yt-dlp has no cancel).
         if self._metadata_worker is not None and self._metadata_worker.isRunning():
