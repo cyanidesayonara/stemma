@@ -885,8 +885,8 @@ class MainWindow(QMainWindow):
                 ("P", "Previous song"),
                 ("Q", "Toggle play queue"),
                 ("Ctrl+Click, Shift+Click", "Select several songs"),
-                ("Ctrl+A / Esc", "Select all / none (in the song list)"),
-                ("Ctrl+Space", "Select the current song (in the song list)"),
+                ("Ctrl+A / Esc", "Select all / none (song list)"),
+                ("Ctrl+Space", "Select / deselect song (song list)"),
             )),
             ("App", (
                 ("Ctrl+O", "Import a song"),
