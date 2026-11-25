@@ -105,3 +105,10 @@ python main.py --diagnostics
 
 See `docs/DEVELOPMENT.md` for focused, slow-model, hardware, lock-generation,
 packaging, and release commands.
+
+## Going easy on GitHub
+
+Test on this machine before pushing; push a branch once it is believed done,
+not after every commit, and open it as a draft until then. Batch related work:
+at most 4 pull requests a day, 2 open at once. No pictures in branches, no polling
+of checks, and nothing that runs on every push to main without Santtu's word.
