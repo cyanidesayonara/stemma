@@ -36,6 +36,7 @@ published.
   short pieces. Saved songs are analysed again once, when first opened.
 - Right-clicking a song in the library no longer opens it, and opening a
   song no longer leaves the Loop button showing the previous song's state.
+- YouTube import uses a newer yt-dlp (2026.11.23).
 - The library file has a new format, upgraded on first launch. v3.1 or
   older treats the upgraded file as damaged: it keeps a backup and rebuilds
   the library from the song folders, without titles, artists, or setlists.
