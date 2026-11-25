@@ -614,7 +614,8 @@ class TestLibraryPanelQueueIntegration:
                 mock_exec.assert_called_once()
                 texts = [a.text() for a in menu.actions() if not a.isSeparator()]
                 assert texts == [
-                    "Play Next", "Add to Queue", "Add to Setlist", "Edit...",
+                    "Play Next", "Add to Queue", "Add to Setlist", "Select",
+                    "Edit...",
                 ]
                 menu.actions()[0].trigger()
                 menu.actions()[1].trigger()

@@ -467,6 +467,9 @@ class TestExportDoubleStartGuard:
         from src.ui.main_window import MainWindow
 
         stub = MagicMock()
+        stub._export_is_running = (
+            lambda: MainWindow._export_is_running(stub)
+        )
         stub._player.has_stems = True
         stub._export_worker.isRunning.return_value = True
 
@@ -487,6 +490,9 @@ class TestExportDoubleStartGuard:
         from src.ui.main_window import MainWindow
 
         stub = MagicMock()
+        stub._export_is_running = (
+            lambda: MainWindow._export_is_running(stub)
+        )
         stub._player.has_stems = True
         stub._export_worker = None
         stub._current_song_id = None  # get_song(None) -> stop later, no crash
@@ -506,10 +512,15 @@ class TestExportUsesAudibleMix:
 
     @staticmethod
     def _stub(tmp_path, soloed=(), muted=(), volumes=None, master=1.0):
+        from src.ui.main_window import MainWindow
+
         for name in ("vocals", "drums", "recording_take1", "recording_take2"):
             (tmp_path / f"{name}.wav").write_bytes(b"")
         volumes = volumes or {}
         stub = MagicMock()
+        stub._export_is_running = (
+            lambda: MainWindow._export_is_running(stub)
+        )
         stub._export_worker = None
         stub._current_song_id = "s1"
         stub._library.get_song.return_value = SimpleNamespace(

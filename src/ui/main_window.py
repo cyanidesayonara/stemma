@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -68,6 +69,7 @@ from src.app_settings import (
 )
 from src.beat_detector import DETECTION_VERSION
 from src.data_paths import consume_data_dir_reset_notice
+from src.batch_export import BatchExportItem, BatchExportWorker
 from src.exporter import ExportWorker, StemExporter, audible_stems
 from src.import_messages import MSG_MODEL_DAMAGED, format_import_error
 from src.library import LibraryRecovery, Setlist, SongLibrary
@@ -84,6 +86,7 @@ from src.practice_state import PracticeState
 from src.qt_signal_utils import safe_disconnect
 from src.separation_state import is_interrupted_import
 from src.song_sections import parse_sections
+from src.ui.batch_export_dialog import BatchExportDialog
 from src.ui.animated_logo import AnimatedLogoWidget
 from src.ui.library_panel import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE, LibraryPanel
 from src.ui.player_controls import (
@@ -227,7 +230,8 @@ class MainWindow(QMainWindow):
         self._watched_separation: str | None = None
         # The latest (song id, percent) report of the running separation.
         self._separation_percent: tuple[str | None, int] = (None, 0)
-        self._export_worker: ExportWorker | None = None
+        self._export_worker: ExportWorker | BatchExportWorker | None = None
+        self._export_progress: QProgressDialog | None = None
         self._play_queue = PlayQueue()
         self._navigating_from_queue = False
         self._shuffle_queue: list[str] = []
@@ -880,6 +884,7 @@ class MainWindow(QMainWindow):
                 ("N", "Next song"),
                 ("P", "Previous song"),
                 ("Q", "Toggle play queue"),
+                ("Ctrl+Click, Shift+Click", "Select several songs"),
             )),
             ("App", (
                 ("Ctrl+O", "Import a song"),
@@ -1583,7 +1588,13 @@ class MainWindow(QMainWindow):
         self.hide()
 
         if self._export_worker is not None and self._export_worker.isRunning():
-            self._export_worker.wait(5000)
+            # Stops a batch after the file it is writing; a single mix
+            # ignores it and finishes.
+            if self._export_progress is not None:
+                # It would outlive the hidden window, unresponsive.
+                self._export_progress.hide()
+            self._export_worker.requestInterruption()
+            self._export_worker.wait(30000)
 
         # Abort any background separation; interrupted songs are pruned
         # from the library on the next launch (no stems on disk).
@@ -1651,6 +1662,15 @@ class MainWindow(QMainWindow):
         self._library_panel.shuffle_toggled.connect(self._on_shuffle_toggled)
         self._library_panel.play_next_requested.connect(self.play_next)
         self._library_panel.add_to_queue_requested.connect(self.add_to_queue)
+        self._library_panel.play_next_many_requested.connect(
+            self.play_next_many
+        )
+        self._library_panel.add_many_to_queue_requested.connect(
+            self.add_many_to_queue
+        )
+        self._library_panel.export_songs_requested.connect(
+            self._on_export_songs
+        )
         self._library_panel.play_setlist_requested.connect(self.play_setlist)
         self._library_panel.setlist_changed.connect(self._on_setlist_changed)
         self._library_panel.queue_toggled.connect(
@@ -2129,6 +2149,20 @@ class MainWindow(QMainWindow):
         self._play_queue.enqueue(song_id)
         self._refresh_queue_ui()
 
+    def play_next_many(self, song_ids: list[str]) -> None:
+        """Insert *song_ids*, in order, at the front of the queue."""
+        self._play_queue.play_next_many(
+            [sid for sid in song_ids if self._is_song_playable(sid)]
+        )
+        self._refresh_queue_ui()
+
+    def add_many_to_queue(self, song_ids: list[str]) -> None:
+        """Append *song_ids*, in order, to the queue."""
+        self._play_queue.enqueue_many(
+            [sid for sid in song_ids if self._is_song_playable(sid)]
+        )
+        self._refresh_queue_ui()
+
     def play_setlist(
         self,
         setlist_id: str,
@@ -2534,8 +2568,10 @@ class MainWindow(QMainWindow):
         """Open the import dialog."""
         self._open_import_dialog()
 
-    def _open_import_dialog(self, file_path: str = "") -> None:
-        """Open the import dialog, optionally pre-filled with a file path."""
+    def _open_import_dialog(
+        self, file_path: str = "", file_paths: list[str] | None = None,
+    ) -> None:
+        """Open the import dialog, optionally pre-filled with files."""
         # Deferred import: ImportDialog pulls in yt_dlp (~0.4s) and the
         # separator chain which are not needed until the user actually
         # imports a song.  Keeping this out of the top-level imports
@@ -2547,6 +2583,7 @@ class MainWindow(QMainWindow):
             model_manager=self._model_manager,
             parent=self,
             file_path=file_path,
+            file_paths=file_paths,
             separation_queue=self._separation_queue,
         )
         if dialog.exec():
@@ -2737,24 +2774,20 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     def dropEvent(self, event) -> None:
-        """Open ImportDialog for each dropped audio file."""
+        """Open one ImportDialog for the dropped audio files."""
         mime = event.mimeData()
         if not mime.hasUrls():
             return
         event.acceptProposedAction()
-        for url in mime.urls():
-            path = url.toLocalFile()
-            if _is_audio_path(path):
-                self._open_import_dialog(file_path=path)
+        paths = [url.toLocalFile() for url in mime.urls()]
+        paths = [path for path in paths if _is_audio_path(path)]
+        if len(paths) == 1:
+            self._open_import_dialog(file_path=paths[0])
+        elif paths:
+            self._open_import_dialog(file_paths=paths)
 
-    def _on_export(self) -> None:
-        """Export the current mix as WAV or MP3."""
-        if not self._player.has_stems:
-            QMessageBox.information(
-                self, "Export", "No stems loaded. Import and separate a song first."
-            )
-            return
-
+    def _export_is_running(self) -> bool:
+        """Say so and return True while another export runs."""
         # Refuse a second export while one is running: ExportWorker is
         # parentless, so reassigning self._export_worker would drop the
         # last reference to the live QThread and crash Qt with
@@ -2765,6 +2798,18 @@ class MainWindow(QMainWindow):
                 "An export is already in progress. Please wait for it "
                 "to finish.",
             )
+            return True
+        return False
+
+    def _on_export(self) -> None:
+        """Export the current mix as WAV or MP3."""
+        if not self._player.has_stems:
+            QMessageBox.information(
+                self, "Export", "No stems loaded. Import and separate a song first."
+            )
+            return
+
+        if self._export_is_running():
             return
 
         song = self._library.get_song(self._current_song_id) if self._current_song_id else None
@@ -2870,6 +2915,100 @@ class MainWindow(QMainWindow):
             self._export_worker.error.connect(self._on_export_error)
 
             self._export_worker.start()
+
+    def _on_export_songs(self, song_ids: list[str]) -> None:
+        """Export several library songs to a folder."""
+        if self._export_is_running():
+            return
+        items: list[BatchExportItem] = []
+        found: set[str] = set()
+        for song_id in song_ids:
+            song = self._library.get_song(song_id)
+            if song is None:
+                continue
+            paths = {
+                name: os.path.join(song.stems_path, f"{name}.wav")
+                for name in ALL_STEM_NAMES
+            }
+            paths = {n: p for n, p in paths.items() if os.path.isfile(p)}
+            found |= paths.keys()
+            items.append(
+                BatchExportItem(f"{song.artist} - {song.title}", paths)
+            )
+        if not found:
+            QMessageBox.information(
+                self, "Export Songs", "There are no stems to export.",
+            )
+            return
+        dialog = BatchExportDialog(
+            len(items),
+            [n for n in ALL_STEM_NAMES if n in found],
+            read_default_export_format(self._settings),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Export Songs To")
+        if not folder:
+            return
+        worker = BatchExportWorker(
+            items,
+            folder,
+            dialog.stems,
+            ext=dialog.extension,
+            separate_files=dialog.separate_files,
+            mp3_bitrate=read_default_mp3_bitrate(self._settings),
+        )
+        progress = QProgressDialog(
+            "Exporting songs...", "Cancel", 0, len(items), self,
+        )
+        progress.setWindowTitle("Export Songs")
+        progress.setMinimumDuration(0)
+        # Closed by the worker's result, not by reaching the last song.
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.canceled.connect(worker.requestInterruption)
+        self._export_worker = worker
+        self._export_progress = progress
+        worker.progress.connect(self._on_batch_export_progress)
+        worker.completed.connect(self._on_batch_export_completed)
+        progress.setValue(0)
+        worker.start()
+
+    def _on_batch_export_progress(self, done: int, name: str) -> None:
+        progress = self._export_progress
+        if progress is not None and not progress.wasCanceled():
+            progress.setValue(done)
+            progress.setLabelText(f"Exporting {name}")
+
+    def _on_batch_export_completed(
+        self, exported: int, failures: list[str],
+    ) -> None:
+        cancelled = False
+        if self._export_progress is not None:
+            # Cancelling during the last song comes too late to matter.
+            cancelled = (
+                self._export_progress.wasCanceled()
+                and exported + len(failures) < self._export_progress.maximum()
+            )
+            self._export_progress.close()
+            self._export_progress.deleteLater()
+            self._export_progress = None
+        if self._quitting:
+            return
+        noun = "song" if exported == 1 else "songs"
+        text = f"Exported {exported} {noun}."
+        if cancelled:
+            text = f"Export cancelled. {text}"
+        if failures:
+            listed = "\n".join(failures[:8])
+            if len(failures) > 8:
+                listed += f"\nand {len(failures) - 8} more"
+            QMessageBox.warning(
+                self, "Export Songs", f"{text}\n\nNot exported:\n{listed}",
+            )
+        else:
+            QMessageBox.information(self, "Export Songs", text)
 
     def _show_export_options_dialog(
         self,
