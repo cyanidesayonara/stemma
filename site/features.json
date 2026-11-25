@@ -75,19 +75,19 @@
     {
       "id": "files",
       "title": "Bring a song, take your mix",
-      "body": "Open or drop in an MP3, WAV or FLAC file, or paste a YouTube link. Export the mix you hear, a single stem, or just the loop, as WAV or MP3.",
+      "body": "Open or drop in MP3, WAV or FLAC files, several at once, or paste a YouTube link. Export the mix you hear, a single stem, just the loop, or a whole batch of songs, as WAV or MP3.",
       "covers": [
-        "Import an MP3, WAV, or FLAC file, or a YouTube link",
-        "Export your mix, a single stem, or just the loop as WAV or MP3"
+        "Import MP3, WAV, or FLAC files, several at once, or a YouTube link",
+        "Export your mix, a single stem, or just the loop as WAV or MP3, or several songs at once"
       ]
     },
     {
       "id": "library",
-      "title": "Picks up where you stopped",
-      "body": "Your library remembers each song's place, mix, loop, speed and pitch, so practice starts where it ended. Search it, repeat a song, shuffle, or let it play on.",
+      "title": "Ready for the lesson or the gig",
+      "body": "Order songs into setlists, tag them, and line up what plays next. Each song keeps its own loop, speed and pitch, and stemma reopens where you stopped.",
       "covers": [
-        "Picks up where you left off: song, position, mix, loop, speed, and pitch",
-        "Library with search, repeat, shuffle, and autoplay"
+        "Picks up where you left off, with each song's own loop, speed, and pitch",
+        "Library with tags, setlists, a play queue, search, and shuffle"
       ]
     },
     {
