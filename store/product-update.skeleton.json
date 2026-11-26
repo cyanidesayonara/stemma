@@ -1,7 +1,7 @@
 {
   "packages": [
     {
-      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.2.0/stemma.msix",
+      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.2.1/stemma.msix",
       "languages": [
         "en-us"
       ],
@@ -46,7 +46,7 @@
       "play along",
       "stem separation"
     ],
-    "whatsNew": "What's new in version 3.2.0\n\nSetlists: put songs in order for a lesson or a gig, drag to reorder, and play them through.\n\nA play queue: choose what plays next without leaving your library.\n\nTags you can search and filter by, and a practice status for each song.\n\nEach song keeps its own loop, speed, and pitch, shown in the library.\n\nSelect several songs at once to tag, queue, add to a setlist, export, or remove them.\n\nImport several files in one go.\n\nWindows \"Make text bigger\" now applies throughout the app, and the startup screen can be skipped.\n\nSong sections (experimental) no longer cut full-length songs into too many short pieces.\n\nFixes: right-clicking a song no longer opens it, and the Store version now declares the microphone, which packaged apps need for recording."
+    "whatsNew": "What's new in version 3.2.1\n\nFixes a Microsoft Store startup issue where songs imported in the Store version could be dropped from the library index if an earlier non-Store install also had songs on the same PC."
   },
   "productId": "9P2W12L8F381",
   "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",

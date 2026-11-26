@@ -4,7 +4,7 @@ A Windows desktop music player with AI stem separation.
 
 Import a song, separate it into stems (vocals, drums, bass, guitar, piano, other), mute/solo any stem, adjust volumes, and play along with your instrument.
 
-Latest stable release: **v3.2.0**.
+Latest stable release: **v3.2.1**.
 
 ## Download
 
