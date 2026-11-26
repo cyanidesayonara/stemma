@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
@@ -352,6 +353,7 @@ class SongLibrary:
 
         os.makedirs(self._songs_dir, exist_ok=True)
         self._songs_root = os.path.normcase(os.path.realpath(self._songs_dir))
+        self._songs_abs = self._normalized_path(self._songs_dir)
 
         if os.path.isfile(self._json_path):
             self._load()
@@ -398,13 +400,59 @@ class SongLibrary:
         return None
 
     def _is_safe_song_dir(self, path: str) -> bool:
-        """Return whether *path* resolves below this library's songs root."""
+        """Return whether *path* resolves below this library's songs root.
+
+        Accepts either a realpath match under ``self._songs_root`` or, for
+        MSIX/virtualized overlays where ``realpath`` maps ``songs/`` and
+        ``songs/<id>`` onto different backing roots, a normalized path
+        strictly below ``self._songs_dir`` with no ``..`` segments and no
+        symlink or junction component below ``self._songs_dir``.
+        """
+        if not isinstance(path, str) or not path:
+            return False
         try:
             candidate = os.path.normcase(os.path.realpath(path))
             common = os.path.commonpath([self._songs_root, candidate])
         except (OSError, TypeError, ValueError):
             return False
-        return candidate != self._songs_root and common == self._songs_root
+        if candidate != self._songs_root and common == self._songs_root:
+            return True
+        return self._is_safe_virtual_song_dir(path)
+
+    def _is_safe_virtual_song_dir(self, path: str) -> bool:
+        """Fallback containment check for virtualized overlays such as MSIX.
+
+        Under Windows MSIX AppData virtualization, ``songs/`` can resolve to
+        the real ``%LOCALAPPDATA%`` tree while a song written by the Store
+        package resolves to ``Packages\\...\\LocalCache\\Local\\...``. Those
+        entries are plain directories (neither symlinks nor junctions), so
+        checking lexical containment under ``self._songs_dir`` plus every
+        component below it preserves traversal and link guards.
+        """
+        if ".." in re.split(r"[/\\]", path):
+            return False
+        try:
+            logical = self._normalized_path(path)
+            common = os.path.commonpath([self._songs_abs, logical])
+        except (OSError, TypeError, ValueError):
+            return False
+        if logical == self._songs_abs or common != self._songs_abs:
+            return False
+        rel = os.path.relpath(logical, self._songs_abs)
+        current = self._songs_dir
+        for part in rel.split(os.sep):
+            if not part or part == ".":
+                continue
+            current = os.path.join(current, part)
+            try:
+                st = os.lstat(current)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return False
+            if stat.S_ISLNK(st.st_mode) or os.path.isjunction(current):
+                return False
+        return True
 
     def _require_safe_song_dir(self, path: str) -> None:
         """Reject paths that could make a destructive operation escape."""
