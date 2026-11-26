@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 
+from src.htdemucs_dml import is_dml_sidecar, prepare_htdemucs_dml_path
 from src.version import __version__
 
 
@@ -12,9 +13,10 @@ def collect_model_providers() -> list[tuple[str, str]]:
 
     ``get_available_providers()`` reports only what the *runtime* was built
     with. It cannot tell you whether a given model initialises on the GPU:
-    DirectML rejects the HTDemucs exports at kernel-compile time,
-    ``create_onnx_session`` catches that and falls back to CPU, and the
-    runtime still advertises DmlExecutionProvider throughout.
+    HTDemucs models run via a cached ``.dml.onnx`` DirectML sidecar when
+    DirectML is available, and ``create_onnx_session`` falls back to CPU if
+    GPU initialisation fails while the runtime still advertises
+    DmlExecutionProvider throughout.
 
     A release smoke check therefore has to build a session per model and
     ask which provider it landed on. That is the only claim worth making,
@@ -34,10 +36,11 @@ def collect_model_providers() -> list[tuple[str, str]]:
 
     results: list[tuple[str, str]] = []
     for name in sorted(os.listdir(models_dir)):
-        if not name.endswith(".onnx"):
+        if not name.endswith(".onnx") or is_dml_sidecar(name):
             continue
+        session_path = prepare_htdemucs_dml_path(os.path.join(models_dir, name))
         try:
-            session = create_onnx_session(os.path.join(models_dir, name))
+            session = create_onnx_session(session_path)
         except Exception as exc:  # noqa: BLE001 - reported, never raised
             results.append((name, f"unavailable ({type(exc).__name__})"))
             continue

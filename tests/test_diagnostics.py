@@ -245,6 +245,53 @@ def test_collect_model_providers_reports_each_cached_model(
     ]
 
 
+def test_collect_model_providers_skips_dml_sidecar_and_uses_prepared_path(
+    monkeypatch, tmp_path,
+):
+    """Diagnostics report canonical filenames while probing HTDemucs via its sidecar."""
+    from src import diagnostics as diagnostics_module
+    import src.onnx_session as onnx_session
+
+    models = tmp_path / "models"
+    models.mkdir()
+    orig = models / "htdemucs.onnx"
+    sidecar = models / "htdemucs.dml.onnx"
+    beat = models / "beat_this.onnx"
+    orig.write_bytes(b"stub")
+    sidecar.write_bytes(b"stub")
+    beat.write_bytes(b"stub")
+
+    opened_paths: list[str] = []
+
+    def fake_prepare(path: str) -> str:
+        if path == str(orig):
+            return str(sidecar)
+        return path
+
+    def fake_session(path: str):
+        opened_paths.append(path)
+        return SimpleNamespace(path=path)
+
+    monkeypatch.setattr(
+        "src.data_paths.platform_user_data_dir", lambda: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        diagnostics_module, "prepare_htdemucs_dml_path", fake_prepare,
+    )
+    monkeypatch.setattr(onnx_session, "create_onnx_session", fake_session)
+    monkeypatch.setattr(
+        onnx_session,
+        "selected_session_provider",
+        lambda _session: "DmlExecutionProvider",
+    )
+
+    assert diagnostics_module.collect_model_providers() == [
+        ("beat_this.onnx", "DmlExecutionProvider"),
+        ("htdemucs.onnx", "DmlExecutionProvider"),
+    ]
+    assert opened_paths == [str(beat), str(sidecar)]
+
+
 def test_collect_model_providers_reports_session_failure(
     monkeypatch, tmp_path,
 ):

@@ -59,8 +59,9 @@ scope or date. Each upcoming version has a GitHub milestone.
 ## Research and cross-release tracks
 
 - [#125: DirectML-compatible HTDemucs exports](https://github.com/cyanidesayonara/stemma/issues/125)
-  investigates GPU inference for four/six-stem separation. Those paths are
-  CPU-only today.
+  — resolved via `src/htdemucs_dml.py` (cached `.dml.onnx` sidecar patching
+  1D `ConvTranspose`, `Reshape(allowzero=1)`, and `Split` nodes for DirectML
+  GPU execution with automatic CPU fallback).
 - [#28: experimental DSP extensions](https://github.com/cyanidesayonara/stemma/issues/28)
   evaluates separation and post-processing approaches without promising a
   quality tier.
