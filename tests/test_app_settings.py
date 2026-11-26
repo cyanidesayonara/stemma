@@ -193,3 +193,11 @@ class TestOpenSettings:
         ]
 
         assert offenders == []
+
+
+def test_separation_model_tooltip_describes_gpu_for_all_models():
+    from src.app_settings import SEPARATION_MODELS, SEPARATION_MODEL_TOOLTIP
+
+    assert "on the CPU, which is slower" not in SEPARATION_MODEL_TOOLTIP
+    assert "GPU" in SEPARATION_MODEL_TOOLTIP
+    assert len(SEPARATION_MODELS) == 3

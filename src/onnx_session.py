@@ -11,9 +11,8 @@ _CPU_PROVIDER = "CPUExecutionProvider"
 def create_onnx_session(model_path: str, use_gpu: bool = True):
     """Create a DML-first ONNX session with a safe CPU fallback.
 
-    *use_gpu* False goes straight to the CPU, for a model known not to
-    compile on DirectML: the failed attempt costs time and makes ONNX
-    Runtime print an initialization error to the console.
+    *use_gpu* False goes straight to the CPU, e.g. when retrying the unpatched
+    model after a DirectML sidecar load failure or forcing CPU fallback.
     """
     # Deferred import: ONNX Runtime is heavy and is only needed for inference.
     import onnxruntime as ort

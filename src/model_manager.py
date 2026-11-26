@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from src.htdemucs_dml import dml_sidecar_path
 from src.import_messages import DownloadIntegrityError, describe_error
 
 # Connection/read timeout for model downloads, in seconds. A stalled TCP
@@ -316,12 +317,17 @@ def model_label(model_key: str) -> str:
 
 
 def discard_model_files(model_path: str) -> None:
-    """Delete a damaged model and its external weights, if present.
+    """Delete a damaged model, its external weights, and any DML sidecar.
 
-    HTDemucs keeps its weights next to the graph as ``<name>.data``; both
-    go so the next import downloads a fresh, verified copy.
+    HTDemucs keeps its weights next to the graph as ``<name>.data`` and a
+    DirectML-patched sidecar as ``<name>.dml.onnx``; removing all of them
+    ensures the next import downloads a fresh, verified copy.
     """
-    for path in (model_path, model_path + ".data"):
+    candidates = [model_path, model_path + ".data"]
+    sidecar = dml_sidecar_path(model_path)
+    if sidecar != model_path:
+        candidates.append(sidecar)
+    for path in candidates:
         try:
             os.remove(path)
         except OSError:

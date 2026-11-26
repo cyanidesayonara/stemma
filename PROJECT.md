@@ -24,7 +24,7 @@ future scope lives in `docs/ROADMAP.md`.
 |---|---|---|
 | **Name** | stemma (always lowercase) | |
 | **Platform** | Windows desktop only | No mobile/web for now |
-| **Acceleration** | DirectML when supported | MDX two-stem selects DirectML or reports CPU fallback; HTDemucs four/six-stem remains CPU-only |
+| **Acceleration** | DirectML when supported | MDX two-stem and HTDemucs four/six-stem select DirectML (HTDemucs via a cached `.dml.onnx` sidecar) or report CPU fallback |
 | **Stems** | 2-stem, 4-stem, and 6-stem models | Selected per import |
 | **Distribution** | Microsoft Store (primary); portable `stemma.zip` + `stemma.msix` on GitHub Releases | Models download on first run |
 | **Python** | 3.14 local, 3.12 CI/release | See `docs/DEVELOPMENT.md` |
@@ -51,15 +51,16 @@ future scope lives in `docs/ROADMAP.md`.
 - **Developer**: Meta AI Research — MIT license (fully open, free)
 - **4-stem**: Vocals, Drums, Bass, Other
 - **6-stem variant**: Adds Guitar + Piano (exactly what we need)
-- **Runtime constraint**: the current exports execute on CPU; a
-  DirectML-compatible re-export is tracked in
-  [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
+- **DirectML support**: `src/htdemucs_dml.py` rewrites incompatible ops into a
+  cached `.dml.onnx` sidecar so four/six-stem separation runs on DirectML
+  with automatic CPU fallback
+  ([issue #125](https://github.com/cyanidesayonara/stemma/issues/125))
 
 ### Why ONNX Runtime over PyTorch?
 
 - ONNX Runtime avoids shipping the PyTorch training/runtime stack
-- DirectML gives MDX a Windows GPU path without a CUDA toolkit and preserves
-  a CPU fallback on unsupported systems
+- DirectML gives both MDX and HTDemucs a Windows GPU path without a CUDA
+  toolkit and preserves a CPU fallback on unsupported systems
 - Proven approach: Intel's OpenVINO Audacity plugin and others use the same pattern
 - Models are converted once from PyTorch → ONNX format and hosted on HuggingFace
 
@@ -72,6 +73,7 @@ stemma/
 ├── main.py                 # diagnostics dispatch or Qt startup
 ├── src/
 │   ├── separator.py        # HTDemucs four/six-stem engine
+│   ├── htdemucs_dml.py     # HTDemucs DirectML graph patcher and sidecar cache
 │   ├── mdx_separator.py    # MDX two-stem engine
 │   ├── onnx_session.py     # shared DirectML-first session policy
 │   ├── separation_queue.py # serialized background jobs
@@ -100,9 +102,11 @@ stemma/
 ## Module Specifications
 
 ### `separator.py` — Stem Separation Engine
-- Loads HTDemucs ONNX through the shared session factory
-- Uses CPU inference because the current four/six-stem exports do not compile
-  for DirectML
+- Loads HTDemucs ONNX through the shared session factory, using
+  `src/htdemucs_dml.py` to generate and cache a DirectML-compatible
+  `.dml.onnx` sidecar when GPU execution is available
+- Falls back to CPU on DirectML or sidecar initialization failure and reports
+  the selected provider in progress
 - Handles STFT/iSTFT pre/post-processing in NumPy (stripped from ONNX model)
 - Runs in background `QThread`, emits progress signals
 - Supports both `htdemucs` (4-stem) and `htdemucs_6s` (6-stem)
@@ -118,8 +122,8 @@ stemma/
 - Keeps the heavy ONNX Runtime import deferred until inference/diagnostics
 - Configures DirectML for sequential execution with memory patterns disabled
 - Retries with CPU when DirectML session creation fails
-- Callers pass `use_gpu=False` to go straight to the CPU; HTDemucs does,
-  because its export never compiles on DirectML
+- Callers may pass `use_gpu=False` to force CPU execution (used as fallback
+  when a DirectML sidecar fails to load)
 - Supplies a stable user-facing provider label
 
 ### `beat_detector.py` — Musical Analysis
@@ -346,8 +350,8 @@ Development and release commands are in `docs/DEVELOPMENT.md` and
 
 - Separation time depends on track length, model, hardware, drivers, and
   execution provider; no fixed timing is promised.
-- MDX two-stem can use DirectML. HTDemucs four/six-stem is CPU-only with the
-  current model exports.
+- MDX two-stem and HTDemucs four/six-stem run on DirectML GPU when supported,
+  falling back to CPU otherwise.
 - Stem isolation is model-dependent and can contain bleed or artifacts; the
   post-processing stage reduces some artifacts but does not guarantee a
   quality level.

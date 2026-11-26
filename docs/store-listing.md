@@ -93,5 +93,5 @@ stem splitter, vocal remover, backing track, slow down music, guitar practice, p
 - The Description avoids naming specific model versions (HTDemucs,
   MDX-Net): those change, and the Store copy should not need a rewrite
   when they do. Attribution for the models lives in the README.
-- Do not claim GPU acceleration for 4/6-stem separation: only the
-  2-stem path runs on the GPU today (see issue #125).
+- All stem separation paths (2-, 4-, and 6-stem) attempt DirectML GPU
+  acceleration first and fall back to the CPU when unavailable.

@@ -1,6 +1,7 @@
-"""Stem separation engine using ONNX Runtime on the CPU.
+"""Stem separation engine using ONNX Runtime.
 
-Loads an HTDemucs v4 ONNX model and separates an audio file into individual
+Loads an HTDemucs v4 ONNX model (with a cached DirectML sidecar when GPU
+acceleration is available) and separates an audio file into individual
 stems (vocals, drums, bass, other, and optionally guitar + piano for the
 6-stem variant). Pre/post-processing (STFT/iSTFT) is handled via numpy
 outside the ONNX graph.
@@ -26,9 +27,10 @@ import soundfile as sf
 from PySide6.QtCore import QThread, Signal
 
 from src.audio_io import read_audio
+from src.htdemucs_dml import is_dml_sidecar, prepare_htdemucs_dml_path
 from src.import_messages import ModelDamagedError, describe_error
 from src.model_manager import discard_model_files
-from src.onnx_session import create_onnx_session
+from src.onnx_session import create_onnx_session, session_provider_label
 from src.separation_state import (
     EXPECTED_STEMS,
     clear_completion_marker,
@@ -175,8 +177,7 @@ class SeparatorWorker(QThread):
         Steps:
             1. Load and validate the input audio file.
             2. Resample to 44100Hz if necessary.
-            3. Create a CPU ONNX Runtime session (HTDemucs does not
-               compile on DirectML, issue #125).
+            3. Create a DirectML or CPU ONNX Runtime session.
             4. Process audio in overlapping segments.
             5. For each segment: compute STFT, run inference, apply iSTFT.
             6. Write each stem to a WAV file.
@@ -200,6 +201,10 @@ class SeparatorWorker(QThread):
 
         self.progress.emit(10, "Initializing ONNX model...")
         session = self._create_session()
+        self.progress.emit(
+            12,
+            f"Using {session_provider_label(session)} for stem separation.",
+        )
 
         self.progress.emit(15, "Separating stems...")
         separated = self._run_segmented_inference(audio, session)
@@ -261,17 +266,27 @@ class SeparatorWorker(QThread):
         return np.stack(resampled_channels)
 
     def _create_session(self):
-        """Create the CPU ONNX session for HTDemucs.
+        """Create the ONNX session, using a DirectML-patched sidecar if possible.
 
-        The HTDemucs export does not compile on DirectML (issue #125), so
-        a GPU attempt only failed, slowly and with a console error.
-
-        A model that exists but will not load is deleted, so the next
-        import asks to download a fresh copy instead of failing again.
+        When DirectML is available, HTDemucs graphs are patched on first load
+        to a cached ``.dml.onnx`` sidecar next to the original model. If that
+        sidecar fails to load as damaged, it is removed and the original
+        model is retried on CPU before deleting the downloaded model files.
         """
+        session_path = prepare_htdemucs_dml_path(self.model_path)
         try:
-            return create_onnx_session(self.model_path, use_gpu=False)
+            return create_onnx_session(session_path)
         except ModelDamagedError:
+            if is_dml_sidecar(session_path) and session_path != self.model_path:
+                try:
+                    os.remove(session_path)
+                except OSError:
+                    pass
+                try:
+                    return create_onnx_session(self.model_path, use_gpu=False)
+                except ModelDamagedError:
+                    discard_model_files(self.model_path)
+                    raise
             discard_model_files(self.model_path)
             raise
 

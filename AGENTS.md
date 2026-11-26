@@ -29,11 +29,11 @@ Canonical documents:
 - Python 3.14 (local dev; GitHub Actions CI uses 3.12 per `.github/workflows/ci.yml`)
 - PySide6 (Qt 6) for GUI
 - ONNX Runtime DirectML for inference; no PyTorch
-- MDX-Net two-stem separation selects DirectML when available and reports
-  CPU fallback
-- HTDemucs v4 four/six-stem separation remains CPU-only; DirectML model
-  re-export research is tracked in
-  [issue #125](https://github.com/cyanidesayonara/stemma/issues/125)
+- MDX-Net two-stem and HTDemucs v4 four/six-stem separation select DirectML
+  when available and report CPU fallback
+- `src/htdemucs_dml.py` rewrites HTDemucs DirectML-incompatible graph ops
+  into a cached `.dml.onnx` sidecar next to the original model
+  ([issue #125](https://github.com/cyanidesayonara/stemma/issues/125))
 - sounddevice + soundfile for audio playback
 - numpy for audio buffer processing
 - librosa for STFT/iSTFT (pre/post-processing outside ONNX model)
@@ -45,6 +45,8 @@ Canonical documents:
 - `main.py` and `src/app.py`: diagnostics or Qt application startup
 - `src/separator.py` and `src/mdx_separator.py`: HTDemucs and MDX
   separation engines
+- `src/htdemucs_dml.py`: DirectML graph patcher and `.dml.onnx` sidecar
+  cache for HTDemucs
 - `src/onnx_session.py`: shared DirectML-first session construction with
   CPU fallback
 - `src/separation_queue.py`: serialized background separation jobs
@@ -89,7 +91,8 @@ rationale and subsystem boundaries.
 Set with the v3.2.1 release prep on 2026-11-26:
 
 - Latest stable: **v3.2.1** (library, setlists, and play queue, [#132](https://github.com/cyanidesayonara/stemma/issues/132); MSIX virtualized library path fix, [#279](https://github.com/cyanidesayonara/stemma/issues/279))
-- Next: time-boxed DirectML GPU separation research for 4/6-stem HTDemucs ([#125](https://github.com/cyanidesayonara/stemma/issues/125)); see `docs/ROADMAP.md`
+- Next: DirectML GPU separation for 4/6-stem HTDemucs ([#125](https://github.com/cyanidesayonara/stemma/issues/125))
+  implemented for the next release; see `docs/ROADMAP.md`
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.

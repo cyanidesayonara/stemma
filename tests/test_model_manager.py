@@ -121,9 +121,11 @@ class TestModelManager:
     def test_discard_removes_graph_and_weights(self, tmp_dir):
         graph = _write(tmp_dir, "htdemucs.onnx", 4)
         weights = _write(tmp_dir, "htdemucs.onnx.data", 4)
+        sidecar = _write(tmp_dir, "htdemucs.dml.onnx", 4)
         model_manager.discard_model_files(graph)
         assert not os.path.exists(graph)
         assert not os.path.exists(weights)
+        assert not os.path.exists(sidecar)
         model_manager.discard_model_files(graph)  # already gone: no error
 
     def test_download_model_returns_downloader(self, tmp_dir):

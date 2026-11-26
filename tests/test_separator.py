@@ -162,6 +162,9 @@ class TestSegmentedOverlapAdd:
             def __init__(self):
                 self.calls = 0
 
+            def get_providers(self):
+                return ["CPUExecutionProvider"]
+
             def run(self, _outputs, feeds):
                 self.calls += 1
                 segment = feeds["input"][0]
@@ -257,11 +260,9 @@ class TestSeparatorCreateSession:
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
-    def test_goes_straight_to_cpu_with_dml_available(
+    def test_tries_dml_then_falls_back_to_cpu_when_dml_fails(
         self, mock_infer, mock_providers, tmp_dir, sample_audio_path
     ):
-        """HTDemucs never compiles on DirectML (#125), so it is not tried;
-        the DML-then-CPU fallback is covered in test_onnx_session.py."""
         model_path = os.path.join(tmp_dir, "model.onnx")
         with open(model_path, "wb") as f:
             f.write(b"x")
@@ -288,9 +289,14 @@ class TestSeparatorCreateSession:
         )
         sess = worker._create_session()
         assert sess is cpu_session
-        assert mock_infer.call_count == 1
-        only_kw = mock_infer.call_args_list[0][1]
-        assert only_kw["providers"] == ["CPUExecutionProvider"]
+        assert mock_infer.call_count == 2
+        assert mock_infer.call_args_list[0][1]["providers"] == [
+            "DmlExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        assert mock_infer.call_args_list[1][1]["providers"] == [
+            "CPUExecutionProvider",
+        ]
 
     @patch("onnxruntime.get_available_providers")
     @patch("onnxruntime.InferenceSession")
@@ -514,21 +520,61 @@ class TestMemoryEstimation:
         assert result is None or (isinstance(result, int) and result > 0)
 
 
-def test_htdemucs_worker_asks_for_a_cpu_session(monkeypatch, tmp_path):
-    """HTDemucs never compiles on DirectML (#125), so it asks for the CPU."""
+def test_htdemucs_worker_uses_dml_sidecar_when_available(monkeypatch, tmp_path):
+    """HTDemucs resolves a DirectML sidecar and asks create_onnx_session for GPU."""
     import src.separator as separator
 
+    model_path = str(tmp_path / "htdemucs.onnx")
+    sidecar_path = str(tmp_path / "htdemucs.dml.onnx")
     seen = {}
 
+    def fake_prepare(path):
+        assert path == model_path
+        return sidecar_path
+
     def fake_create(path, use_gpu=True):
+        seen["path"] = path
         seen["use_gpu"] = use_gpu
         return object()
 
+    monkeypatch.setattr(separator, "prepare_htdemucs_dml_path", fake_prepare)
     monkeypatch.setattr(separator, "create_onnx_session", fake_create)
     worker = separator.SeparatorWorker(
         input_path=str(tmp_path / "in.wav"),
         output_dir=str(tmp_path / "out"),
-        model_path=str(tmp_path / "htdemucs.onnx"),
+        model_path=model_path,
     )
     worker._create_session()
-    assert seen["use_gpu"] is False
+    assert seen == {"path": sidecar_path, "use_gpu": True}
+
+
+def test_htdemucs_worker_cleans_damaged_sidecar_and_retries_cpu(monkeypatch, tmp_path):
+    """Corrupt .dml.onnx sidecar is deleted and retried against CPU before failing."""
+    from src.import_messages import ModelDamagedError
+    import src.separator as separator
+
+    orig = tmp_path / "htdemucs.onnx"
+    sidecar = tmp_path / "htdemucs.dml.onnx"
+    orig.write_bytes(b"orig")
+    sidecar.write_bytes(b"corrupt")
+
+    calls = []
+    cpu_session = object()
+
+    def fake_create(path, use_gpu=True):
+        calls.append((path, use_gpu))
+        if path == str(sidecar):
+            raise ModelDamagedError(path)
+        return cpu_session
+
+    monkeypatch.setattr(separator, "prepare_htdemucs_dml_path", lambda _p: str(sidecar))
+    monkeypatch.setattr(separator, "create_onnx_session", fake_create)
+    worker = separator.SeparatorWorker(
+        input_path=str(tmp_path / "in.wav"),
+        output_dir=str(tmp_path / "out"),
+        model_path=str(orig),
+    )
+    assert worker._create_session() is cpu_session
+    assert calls == [(str(sidecar), True), (str(orig), False)]
+    assert not sidecar.exists()
+    assert orig.exists()
