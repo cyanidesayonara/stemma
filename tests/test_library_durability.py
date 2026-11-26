@@ -879,3 +879,90 @@ class TestVirtualizedSongPaths:
             os.path.join(songs_dir, "sub", "..", "sibling")
         )
         assert not lib._is_safe_song_dir(os.path.join(songs_dir, "sub", ".."))
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", ".. ")
+        )
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", "...")
+        )
+
+    def test_songs_root_aliases_are_rejected(self, tmp_path):
+        data_dir = str(tmp_path / "data")
+        lib = SongLibrary(data_dir)
+        songs_dir = os.path.join(data_dir, "songs")
+
+        assert not lib._is_safe_song_dir(songs_dir)
+        assert not lib._is_safe_song_dir(os.path.join(songs_dir, "."))
+        if sys.platform == "win32":
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, "..."))
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, ".. "))
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, " "))
+
+    @pytest.mark.parametrize(
+        "virtual_target",
+        [
+            r"D:\Packages\LocalCache\songs\8b0caee1825b",
+            r"\\?\C:\Packages\LocalCache\songs\8b0caee1825b",
+        ],
+    )
+    def test_cross_drive_or_long_prefix_virtual_realpath_uses_fallback(
+        self, tmp_path, monkeypatch, virtual_target,
+    ):
+        data_dir = str(tmp_path / "data")
+        entry = _song_on_disk(
+            data_dir, song_id="8b0caee1825b", title="Around The World",
+        )
+        _write_index(
+            data_dir,
+            json.dumps({
+                "schema_version": 2, "songs": [entry], "setlists": [],
+            }),
+        )
+        real_realpath = os.path.realpath
+        song_norm = os.path.normcase(
+            real_realpath(os.path.join(data_dir, "songs", "8b0caee1825b"))
+        )
+
+        def fake_realpath(path):
+            resolved = real_realpath(path)
+            if os.path.normcase(resolved) == song_norm:
+                return virtual_target
+            return resolved
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+        lib = SongLibrary(data_dir)
+
+        assert lib.recovery is None
+        assert [(s.id, s.title) for s in lib.songs] == [
+            ("8b0caee1825b", "Around The World"),
+        ]
+
+    def test_cross_drive_symlink_or_junction_realpath_is_still_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        songs_dir = os.path.join(data_dir, "songs")
+        os.makedirs(songs_dir, exist_ok=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        link_dir = os.path.join(songs_dir, "linked-song")
+        if sys.platform == "win32":
+            # Windows-only stdlib module for creating NTFS directory junctions.
+            import _winapi
+            _winapi.CreateJunction(str(outside), link_dir)
+        else:
+            os.symlink(str(outside), link_dir, target_is_directory=True)
+        lib = SongLibrary(data_dir)
+        real_realpath = os.path.realpath
+        link_norm = os.path.normcase(os.path.abspath(link_dir))
+
+        def fake_realpath(path):
+            if os.path.normcase(os.path.abspath(path)) == link_norm:
+                return r"D:\outside"
+            return real_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+        assert not lib._is_safe_song_dir(link_dir)
+        assert not lib._is_safe_song_dir(os.path.join(link_dir, "nested"))

@@ -412,10 +412,12 @@ class SongLibrary:
             return False
         try:
             candidate = os.path.normcase(os.path.realpath(path))
+            if candidate == self._songs_root:
+                return False
             common = os.path.commonpath([self._songs_root, candidate])
         except (OSError, TypeError, ValueError):
-            return False
-        if candidate != self._songs_root and common == self._songs_root:
+            common = None
+        if common == self._songs_root:
             return True
         return self._is_safe_virtual_song_dir(path)
 
@@ -429,7 +431,11 @@ class SongLibrary:
         checking lexical containment under ``self._songs_dir`` plus every
         component below it preserves traversal and link guards.
         """
-        if ".." in re.split(r"[/\\]", path):
+        raw_parts = [p for p in re.split(r"[/\\]", path) if p]
+        if any(
+            part != "." and part.rstrip(". ") in ("", "..")
+            for part in raw_parts
+        ):
             return False
         try:
             logical = self._normalized_path(path)
@@ -443,6 +449,8 @@ class SongLibrary:
         for part in rel.split(os.sep):
             if not part or part == ".":
                 continue
+            if part != part.rstrip(". "):
+                return False
             current = os.path.join(current, part)
             try:
                 st = os.lstat(current)
