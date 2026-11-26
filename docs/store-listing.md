@@ -4,7 +4,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 `python scripts/build_store_listing.py` to regenerate this file.
 Do not edit this markdown by hand.
 
-This copy reflects listing content for version **3.2.0**.
+This copy reflects listing content for version **3.2.1**.
 
 Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
 
@@ -49,25 +49,9 @@ Built for Windows, with keyboard shortcuts for the whole practice loop that work
 
 ## What's new in this version
 
-What's new in version 3.2.0
+What's new in version 3.2.1
 
-Setlists: put songs in order for a lesson or a gig, drag to reorder, and play them through.
-
-A play queue: choose what plays next without leaving your library.
-
-Tags you can search and filter by, and a practice status for each song.
-
-Each song keeps its own loop, speed, and pitch, shown in the library.
-
-Select several songs at once to tag, queue, add to a setlist, export, or remove them.
-
-Import several files in one go.
-
-Windows "Make text bigger" now applies throughout the app, and the startup screen can be skipped.
-
-Song sections (experimental) no longer cut full-length songs into too many short pieces.
-
-Fixes: right-clicking a song no longer opens it, and the Store version now declares the microphone, which packaged apps need for recording.
+Fixes a Microsoft Store startup issue where songs imported in the Store version could be dropped from the library index if an earlier non-Store install also had songs on the same PC.
 
 ---
 

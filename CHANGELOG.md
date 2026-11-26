@@ -9,6 +9,13 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v3.2.1](https://github.com/cyanidesayonara/stemma/releases/tag/v3.2.1) - 2026-11-26
+
+- Fixes a Microsoft Store (MSIX) startup issue where songs imported in the
+  Store build could be dropped from the library index when an older
+  unvirtualized `%LOCALAPPDATA%\stemma\songs` folder also existed on disk
+  (#279).
+
 ## [v3.2.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.2.0) - 2026-11-25
 
 - Setlists: put songs in order for a lesson or a gig, drag to reorder, and
