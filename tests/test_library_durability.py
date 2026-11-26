@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import shutil
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -662,3 +663,306 @@ def test_import_dialog_rollback_survives_a_locked_folder(
         ImportDialog._on_model_download_finished(stub, "")
 
     stub._library.remove_song.assert_called_once_with("abc")
+
+
+class TestVirtualizedSongPaths:
+    """Windows MSIX AppData virtualization can give ``songs/`` and
+    ``songs/<id>`` different ``os.path.realpath`` roots when an earlier
+    unvirtualized ``songs/`` folder already exists in ``%LOCALAPPDATA%``.
+    """
+
+    @staticmethod
+    def _simulate_msix_realpath(
+        monkeypatch, data_dir, cache_root, virtual_names, *, prefixes=(),
+    ):
+        real_realpath = os.path.realpath
+        songs_real = real_realpath(os.path.join(data_dir, "songs"))
+        songs_norm = os.path.normcase(songs_real)
+        cache_songs = real_realpath(os.path.join(cache_root, "songs"))
+
+        def _is_virtual_top(name):
+            name_cf = os.path.normcase(name)
+            if any(name_cf == os.path.normcase(v) for v in virtual_names):
+                return True
+            return any(
+                name_cf.startswith(os.path.normcase(p)) for p in prefixes
+            )
+
+        def fake_realpath(path):
+            resolved = real_realpath(path)
+            norm = os.path.normcase(resolved)
+            prefix = songs_norm + os.sep
+            if norm.startswith(prefix):
+                rel = resolved[len(songs_real) + 1:]
+                first, sep, rest = rel.partition(os.sep)
+                if _is_virtual_top(first):
+                    return (
+                        os.path.join(cache_songs, first, rest)
+                        if sep
+                        else os.path.join(cache_songs, first)
+                    )
+            return resolved
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+    def test_msix_virtualized_song_loads_without_damage_or_backup(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        cache_root = str(tmp_path / "localcache")
+        entry = _song_on_disk(
+            data_dir, song_id="8b0caee1825b", title="Around The World",
+        )
+        _write_index(
+            data_dir,
+            json.dumps({
+                "schema_version": 2, "songs": [entry], "setlists": [],
+            }),
+        )
+        self._simulate_msix_realpath(
+            monkeypatch, data_dir, cache_root, {"8b0caee1825b"},
+        )
+
+        lib = SongLibrary(data_dir)
+
+        assert lib.recovery is None
+        assert glob.glob(os.path.join(data_dir, "library.json*.bak")) == []
+        assert [(s.id, s.title, s.artist) for s in lib.songs] == [
+            ("8b0caee1825b", "Around The World", "Band"),
+        ]
+
+    def test_msix_virtualized_song_survives_rebuild_from_disk(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        cache_root = str(tmp_path / "localcache")
+        _song_on_disk(data_dir, song_id="8b0caee1825b")
+        self._simulate_msix_realpath(
+            monkeypatch, data_dir, cache_root, {"8b0caee1825b"},
+        )
+
+        lib = SongLibrary(data_dir)
+
+        assert [s.id for s in lib.songs] == ["8b0caee1825b"]
+        assert lib.recovery is not None
+        assert lib.recovery.kind == "missing"
+
+    def test_msix_virtualized_song_can_be_removed(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        cache_root = str(tmp_path / "localcache")
+        entry = _song_on_disk(data_dir, song_id="8b0caee1825b")
+        _write_index(
+            data_dir,
+            json.dumps({
+                "schema_version": 2, "songs": [entry], "setlists": [],
+            }),
+        )
+        self._simulate_msix_realpath(
+            monkeypatch,
+            data_dir,
+            cache_root,
+            {"8b0caee1825b"},
+            prefixes=(".remove-8b0caee1825b-",),
+        )
+        lib = SongLibrary(data_dir)
+
+        lib.remove_song("8b0caee1825b")
+
+        assert lib.songs == []
+        assert not os.path.exists(
+            os.path.join(data_dir, "songs", "8b0caee1825b")
+        )
+        assert _index(data_dir) == []
+
+    def test_msix_virtualized_rebased_song_is_kept(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        cache_root = str(tmp_path / "localcache")
+        _song_on_disk(data_dir, song_id="8b0caee1825b")
+        old_dir = tmp_path / "old_location" / "8b0caee1825b"
+        entry = {
+            "id": "8b0caee1825b",
+            "title": "Around The World",
+            "artist": "RHCP",
+            "original_path": str(old_dir / "original.wav"),
+            "stems_path": str(old_dir),
+            "model_used": "htdemucs",
+            "date_added": "2026-11-21T00:09:10+00:00",
+        }
+        _write_index(data_dir, json.dumps([entry]))
+        self._simulate_msix_realpath(
+            monkeypatch, data_dir, cache_root, {"8b0caee1825b"},
+        )
+
+        lib = SongLibrary(data_dir)
+
+        assert lib.recovery is None
+        assert [(s.id, s.title, s.artist) for s in lib.songs] == [
+            ("8b0caee1825b", "Around The World", "RHCP"),
+        ]
+        expected_dir = os.path.join(data_dir, "songs", "8b0caee1825b")
+        assert lib._normalized_path(lib.songs[0].stems_path) == (
+            lib._normalized_path(expected_dir)
+        )
+        assert os.path.isfile(lib.songs[0].original_path)
+
+    def test_junction_or_symlink_inside_songs_is_still_rejected(
+        self, tmp_path,
+    ):
+        data_dir = str(tmp_path / "data")
+        songs_dir = os.path.join(data_dir, "songs")
+        os.makedirs(songs_dir, exist_ok=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep", encoding="utf-8")
+        (outside / "original.wav").write_bytes(b"audio")
+        link_dir = os.path.join(songs_dir, "linked-song")
+        if sys.platform == "win32":
+            # Windows-only stdlib module for creating NTFS directory junctions.
+            import _winapi
+            _winapi.CreateJunction(str(outside), link_dir)
+        else:
+            os.symlink(str(outside), link_dir, target_is_directory=True)
+        entry = {
+            "id": "linked-song",
+            "title": "Linked",
+            "artist": "Band",
+            "original_path": os.path.join(link_dir, "original.wav"),
+            "stems_path": link_dir,
+            "model_used": "htdemucs",
+            "date_added": "2026-01-01T00:00:00+00:00",
+        }
+        _write_index(data_dir, json.dumps([entry]))
+
+        lib = SongLibrary(data_dir)
+
+        assert not lib._is_safe_song_dir(link_dir)
+        assert not lib._is_safe_song_dir(os.path.join(link_dir, "nested"))
+        assert lib.songs == []
+        assert (outside / "keep.txt").is_file()
+
+        unsafe = library_module.Song(
+            id="linked-song",
+            title="Linked",
+            artist="Band",
+            original_path=os.path.join(link_dir, "original.wav"),
+            stems_path=link_dir,
+            model_used="htdemucs",
+            date_added="2026-01-01T00:00:00+00:00",
+        )
+        lib._writable = True
+        lib._songs.append(unsafe)
+        with pytest.raises(ValueError, match="outside"):
+            lib.remove_song("linked-song")
+        assert (outside / "keep.txt").is_file()
+
+    def test_dotdot_traversal_under_virtualized_realpath_is_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        cache_root = str(tmp_path / "localcache")
+        _song_on_disk(data_dir, song_id="sub")
+        _song_on_disk(data_dir, song_id="sibling")
+        self._simulate_msix_realpath(
+            monkeypatch, data_dir, cache_root, {"sub", "sibling"},
+        )
+        lib = SongLibrary(data_dir)
+        songs_dir = os.path.join(data_dir, "songs")
+
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", "..", "..", "outside")
+        )
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", "..", "sibling")
+        )
+        assert not lib._is_safe_song_dir(os.path.join(songs_dir, "sub", ".."))
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", ".. ")
+        )
+        assert not lib._is_safe_song_dir(
+            os.path.join(songs_dir, "sub", "...")
+        )
+
+    def test_songs_root_aliases_are_rejected(self, tmp_path):
+        data_dir = str(tmp_path / "data")
+        lib = SongLibrary(data_dir)
+        songs_dir = os.path.join(data_dir, "songs")
+
+        assert not lib._is_safe_song_dir(songs_dir)
+        assert not lib._is_safe_song_dir(os.path.join(songs_dir, "."))
+        if sys.platform == "win32":
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, "..."))
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, ".. "))
+            assert not lib._is_safe_song_dir(os.path.join(songs_dir, " "))
+
+    @pytest.mark.parametrize(
+        "virtual_target",
+        [
+            r"D:\Packages\LocalCache\songs\8b0caee1825b",
+            r"\\?\C:\Packages\LocalCache\songs\8b0caee1825b",
+        ],
+    )
+    def test_cross_drive_or_long_prefix_virtual_realpath_uses_fallback(
+        self, tmp_path, monkeypatch, virtual_target,
+    ):
+        data_dir = str(tmp_path / "data")
+        entry = _song_on_disk(
+            data_dir, song_id="8b0caee1825b", title="Around The World",
+        )
+        _write_index(
+            data_dir,
+            json.dumps({
+                "schema_version": 2, "songs": [entry], "setlists": [],
+            }),
+        )
+        real_realpath = os.path.realpath
+        song_norm = os.path.normcase(
+            real_realpath(os.path.join(data_dir, "songs", "8b0caee1825b"))
+        )
+
+        def fake_realpath(path):
+            resolved = real_realpath(path)
+            if os.path.normcase(resolved) == song_norm:
+                return virtual_target
+            return resolved
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+        lib = SongLibrary(data_dir)
+
+        assert lib.recovery is None
+        assert [(s.id, s.title) for s in lib.songs] == [
+            ("8b0caee1825b", "Around The World"),
+        ]
+
+    def test_cross_drive_symlink_or_junction_realpath_is_still_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        data_dir = str(tmp_path / "data")
+        songs_dir = os.path.join(data_dir, "songs")
+        os.makedirs(songs_dir, exist_ok=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        link_dir = os.path.join(songs_dir, "linked-song")
+        if sys.platform == "win32":
+            # Windows-only stdlib module for creating NTFS directory junctions.
+            import _winapi
+            _winapi.CreateJunction(str(outside), link_dir)
+        else:
+            os.symlink(str(outside), link_dir, target_is_directory=True)
+        lib = SongLibrary(data_dir)
+        real_realpath = os.path.realpath
+        link_norm = os.path.normcase(os.path.abspath(link_dir))
+
+        def fake_realpath(path):
+            if os.path.normcase(os.path.abspath(path)) == link_norm:
+                return r"D:\outside"
+            return real_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+        assert not lib._is_safe_song_dir(link_dir)
+        assert not lib._is_safe_song_dir(os.path.join(link_dir, "nested"))
