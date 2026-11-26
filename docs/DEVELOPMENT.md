@@ -306,8 +306,8 @@ python main.py --diagnostics
 The release workflow runs the frozen executable with
 `--diagnostics-file`. A valid DirectML release must report
 `DmlExecutionProvider` for cached models when DirectML is available;
-both HTDemucs and MDX progress separately tell the user whether a
-particular session selected `DirectML GPU` or `CPU fallback`.
+both HTDemucs and MDX worker progress signals separately report whether
+a particular session selected `DirectML GPU` or `CPU fallback`.
 Diagnostics resolve HTDemucs models through their cached `.dml.onnx`
 DirectML sidecar and skip listing `*.dml.onnx` as duplicate entries.
 

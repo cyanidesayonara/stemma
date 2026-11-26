@@ -1,7 +1,7 @@
 """What the empty player shows while an imported song is being separated.
 
-A long song can take several minutes to separate on the CPU (4 and 6
-stems). The player used to sit empty for all of it, with progress only in
+A long song can take a while to separate, especially on CPU fallback.
+The player used to sit empty for all of it, with progress only in
 the library row (#159). This view names the song and shows the stage, a
 progress bar, and an estimate of the time left, and says the app stays
 usable meanwhile.
@@ -32,7 +32,7 @@ def stage_for(percent: int) -> str:
     """Plain stage name for a worker progress *percent*.
 
     The workers' own messages ("Processing segment 57/150...", "Using
-    DirectML (GPU) for MDX separation.") are not shown: the percentage and
+    DirectML GPU for stem separation.") are not shown: the percentage and
     the time left already say how far along the separation is.
     """
     if percent < 5:

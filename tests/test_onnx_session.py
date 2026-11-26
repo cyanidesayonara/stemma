@@ -115,8 +115,7 @@ def test_selected_provider_and_user_label_are_reported():
 
 
 def test_cpu_only_session_never_tries_directml(monkeypatch, tmp_path):
-    """HTDemucs cannot compile on DirectML; trying cost time and printed an
-    ONNX Runtime error on every 4/6-stem import (#159)."""
+    """Callers can force CPU execution without probing DirectML."""
     from src.onnx_session import create_onnx_session
 
     ort, calls, _ = _fake_ort(

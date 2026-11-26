@@ -6,9 +6,9 @@ song separates. The library panel subscribes to the queue's signals to
 show per-song progress; the main window finalizes or rolls back the
 library row when a job ends.
 
-Jobs run strictly serially: separation saturates either the CPU
-(HTDemucs) or the GPU (MDX), so overlapping jobs would only slow each
-other down and multiply peak memory.
+Jobs run strictly serially: separation saturates either the GPU (DirectML)
+or the CPU, so overlapping jobs would only slow each other down and multiply
+peak memory.
 """
 
 from collections import deque

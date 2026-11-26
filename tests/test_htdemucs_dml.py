@@ -588,10 +588,59 @@ def test_ensure_dml_model_fallbacks_on_corrupt_or_missing_file(tmp_path):
     missing = str(tmp_path / "missing.onnx")
     assert ensure_dml_model(missing) == missing
 
+    # Corrupt bytes fallback cleanly
     corrupt = tmp_path / "htdemucs.onnx"
     corrupt.write_bytes(b"not-a-valid-onnx-protobuf-\xff\xff")
     assert ensure_dml_model(str(corrupt)) == str(corrupt)
     assert not (tmp_path / "htdemucs.dml.onnx").exists()
+
+
+def test_lifts_1d_conv_transpose_when_weight_is_also_in_graph_input(tmp_path):
+    """Legacy exporters duplicate initializers in graph.input; keep ORT load clean."""
+    rng = np.random.default_rng(19)
+    w_arr = rng.standard_normal((2, 3, 4)).astype(np.float32)
+    raw_model = _model(
+        nodes=[
+            _node(
+                "ConvTranspose",
+                ["x", "w"],
+                ["y"],
+                name="ct1d",
+                attrs=[_attr_ints("strides", [2]), _attr_ints("pads", [1, 1])],
+            )
+        ],
+        inputs=[_value_info("x", 1, [1, 2, 6]), _value_info("w", 1, [2, 3, 4])],
+        outputs=[_value_info("y", 1, [1, 3, 12])],
+        initializers=[_tensor_f32("w", w_arr)],
+    )
+    patched, changes = patch_onnx_bytes(raw_model)
+    assert changes == 1
+    x_in = rng.standard_normal((1, 2, 6)).astype(np.float32)
+    orig_sess = ort.InferenceSession(raw_model, providers=["CPUExecutionProvider"])
+    pat_sess = ort.InferenceSession(patched, providers=["CPUExecutionProvider"])
+    np.testing.assert_allclose(
+        pat_sess.run(None, {"x": x_in})[0],
+        orig_sess.run(None, {"x": x_in})[0],
+        atol=1e-6,
+    )
+
+
+def test_ensure_dml_model_logs_to_stemma_and_catches_struct_errors(
+    tmp_path, monkeypatch, caplog,
+):
+    """Patch errors (including struct.error) log under 'stemma' and fall back safely."""
+    import logging
+
+    src = tmp_path / "htdemucs.onnx"
+    src.write_bytes(b"valid-looking-bytes")
+
+    def broken_patch(*_args, **_kwargs):
+        raise struct.error("bad packed tensor")
+
+    monkeypatch.setattr(htdemucs_dml, "patch_onnx_bytes", broken_patch)
+    with caplog.at_level(logging.WARNING, logger="stemma"):
+        assert ensure_dml_model(str(src)) == str(src)
+    assert any("Failed to build DirectML sidecar" in r.message for r in caplog.records)
 
 
 def test_prepare_htdemucs_dml_path_checks_provider_and_model_name(tmp_path, monkeypatch):

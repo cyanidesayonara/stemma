@@ -31,7 +31,7 @@ import struct
 import tempfile
 from collections.abc import Callable
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("stemma")
 
 # Bump whenever the graph rewrite logic changes so cached sidecars rebuild.
 PATCH_VERSION = 1
@@ -350,6 +350,7 @@ def _parse_opset(raw: memoryview) -> tuple[str, int]:
 
 
 def _read_int64_tensor_values(tensor: dict, model_dir: str | None) -> list[int] | None:
+    """Decode an INT64 initializer from inline fields, raw bytes, or external data."""
     if tensor["dtype"] != 7:  # TensorProto.INT64
         return None
     if tensor["int64_data"]:
@@ -447,6 +448,7 @@ def _lift_conv_transpose_1d_to_2d(
     axis_init: str,
     used_names: set[str],
 ) -> tuple[list[bytes], list[str]]:
+    """Wrap a 1D ConvTranspose with Unsqueeze/Squeeze so DirectML runs it in 2D."""
     base = node["name"] or f"conv_tr_{idx}"
     orig_x = node["inputs"][0]
     orig_y = node["outputs"][0]
@@ -511,6 +513,7 @@ def _resolve_split_sizes(
     vi_map: dict[str, dict],
     model_dir: str | None,
 ) -> tuple[list[int], str | None]:
+    """Resolve static per-output Split sizes from initializer, attribute, or value_info."""
     dropped_init: str | None = None
     inputs = node["inputs"]
     if len(inputs) >= 2 and inputs[1]:
@@ -563,6 +566,7 @@ def _plan_rewrites(
     default_opset: int | None,
     model_dir: str | None,
 ) -> tuple[set[int], set[int], set[str], dict[int, tuple[int, list[int]]], set[str]]:
+    """Validate graph invariants and collect indices of nodes to rewrite."""
     reshape_indices: set[int] = set()
     conv_tr_indices: set[int] = set()
     weights_to_4d: set[str] = set()
@@ -625,6 +629,7 @@ def _expand_split_to_slices(
     ensure_i64: Callable[[str, list[int]], str],
     used_names: set[str],
 ) -> tuple[list[bytes], list[str]]:
+    """Expand one Split node into explicit Slice nodes per non-empty output."""
     data_inp = node["inputs"][0]
     ax_init = ensure_i64(f"__stemma_sl_ax_{axis}", [axis])
     step_init = ensure_i64("__stemma_sl_step_1", [1])
@@ -760,11 +765,11 @@ def patch_onnx_bytes(
             if t_name in weights_to_4d:
                 gval = _rewrite_tensor_dims(gval, tensor["dims"] + (1,))  # type: ignore[arg-type]
             graph_out.extend(_encode_bytes_field(5, gval))  # type: ignore[arg-type]
-        elif gfno == 13 and gwire == 2:
+        elif gfno in (11, 13) and gwire == 2:
             vi = _parse_value_info(memoryview(gval))  # type: ignore[arg-type]
             if vi["name"] in weights_to_4d:
                 continue
-            graph_out.extend(_encode_bytes_field(13, gval))  # type: ignore[arg-type]
+            graph_out.extend(_encode_bytes_field(gfno, gval))  # type: ignore[arg-type]
         else:
             graph_out.extend(_encode_raw_field(gfno, gwire, gval))
     for init_bytes in extra_inits:
@@ -832,13 +837,13 @@ def ensure_dml_model(model_path: str) -> str:
                 and meta.get(_META_SOURCE_SHA256) == src_sha256
             ):
                 return sidecar
-        except (OSError, ValueError):
+        except (OSError, ValueError, struct.error, IndexError, TypeError):
             pass
 
     model_dir = os.path.dirname(os.path.abspath(model_path)) or None
     try:
         patched_bytes, change_count = patch_onnx_bytes(raw_bytes, model_dir=model_dir)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, struct.error, IndexError, TypeError) as exc:
         logger.warning("Failed to build DirectML sidecar for %s: %s", model_path, exc)
         return model_path
 
