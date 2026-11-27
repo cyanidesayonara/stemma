@@ -3,8 +3,8 @@
 Loads an HTDemucs v4 ONNX model (with a cached DirectML sidecar when GPU
 acceleration is available) and separates an audio file into individual
 stems (vocals, drums, bass, other, and optionally guitar + piano for the
-6-stem variant). Pre/post-processing (STFT/iSTFT) is handled via numpy
-outside the ONNX graph.
+6-stem variant). Pre/post-processing (STFT/iSTFT via ``src/stft_utils.py``
+and ``soxr`` resampling) is handled outside the ONNX graph.
 
 The ONNX model expects two inputs:
     - "input": raw waveform [1, 2, segment_samples]
@@ -17,25 +17,31 @@ And returns two outputs:
 Runs inference on a background QThread to avoid freezing the GUI.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import os
 import sys
 
-import librosa
 import numpy as np
 import soundfile as sf
+import soxr
 from PySide6.QtCore import QThread, Signal
 
 from src.audio_io import read_audio
 from src.htdemucs_dml import is_dml_sidecar, prepare_htdemucs_dml_path
 from src.import_messages import ModelDamagedError, describe_error
 from src.model_manager import discard_model_files
-from src.onnx_session import create_onnx_session, session_provider_label
+from src.onnx_session import (
+    create_onnx_session,
+    selected_session_provider,
+    session_provider_label,
+)
 from src.separation_state import (
     EXPECTED_STEMS,
     clear_completion_marker,
     write_completion_marker,
 )
+from src.stft_utils import istft_frames_first, stft_batch
 
 
 # Stem names for each model variant.
@@ -93,9 +99,11 @@ def estimate_separation_memory(
     The dominant allocations are:
     * Input audio (stereo float32)
     * The overlap-add accumulator (n_stems * 2 * total_samples * float32)
-    * A mixture copy inside wiener_filter (2 * total_samples * float32)
     * Per-segment ONNX temporaries (~100 MB, bounded by segment size)
     * ORT session / model weights
+
+    ``wiener_filter`` sums the mixture per chunk in the frequency domain,
+    so it no longer holds a full-track mixture copy.
     """
     n_stems = 6 if is_6_stem else 4
     total_samples = int(SAMPLE_RATE * duration_seconds)
@@ -103,10 +111,9 @@ def estimate_separation_memory(
 
     audio = 2 * total_samples * bps
     accumulator = n_stems * 2 * total_samples * bps
-    mixture_copy = 2 * total_samples * bps
     segment_temps = 100 * 1024 * 1024
 
-    return audio + accumulator + mixture_copy + segment_temps + _ORT_OVERHEAD_BYTES
+    return audio + accumulator + segment_temps + _ORT_OVERHEAD_BYTES
 
 
 def available_memory_bytes() -> int | None:
@@ -254,16 +261,11 @@ class SeparatorWorker(QThread):
         Returns:
             Resampled audio array with shape (channels, new_samples).
         """
-        if sr == SAMPLE_RATE:
+        if sr == SAMPLE_RATE or audio.shape[1] == 0:
             return audio
 
-        resampled_channels = []
-        for ch in range(audio.shape[0]):
-            resampled = librosa.resample(
-                audio[ch], orig_sr=sr, target_sr=SAMPLE_RATE
-            )
-            resampled_channels.append(resampled)
-        return np.stack(resampled_channels)
+        resampled = soxr.resample(audio.T, sr, SAMPLE_RATE, quality="HQ")
+        return np.ascontiguousarray(resampled.T, dtype=np.float32)
 
     def _create_session(self):
         """Create the ONNX session, using a DirectML-patched sidecar if possible.
@@ -353,36 +355,124 @@ class SeparatorWorker(QThread):
         )
         weight = np.zeros(padded_length, dtype=np.float32)
 
-        for seg_idx, start in enumerate(starts):
-            if self._is_cancelled:
-                return result
+        use_dml_pipeline = (
+            selected_session_provider(session) == "DmlExecutionProvider"
+            and n_segments > 1
+        )
+        use_custom_istft = (
+            type(self)._compute_istft_cac is not SeparatorWorker._compute_istft_cac
+            or "_compute_istft_cac" in self.__dict__
+        )
+        stem_workers = 1 if use_custom_istft else min(n_stems, 6)
+        stem_pool = (
+            ThreadPoolExecutor(max_workers=stem_workers)
+            if stem_workers > 1
+            else None
+        )
+        pipeline_pool = (
+            ThreadPoolExecutor(max_workers=1) if use_dml_pipeline else None
+        )
 
-            pct = 15 + int(75 * seg_idx / max(n_segments, 1))
-            self.progress.emit(
-                pct, f"Processing segment {seg_idx + 1}/{n_segments}..."
+        def _accumulate(start_pos: int, outputs: list[np.ndarray]) -> None:
+            stems_out = self._postprocess_outputs(
+                outputs,
+                stem_pool=stem_pool,
+                use_custom_istft=use_custom_istft,
             )
+            end_pos = start_pos + SEGMENT_SAMPLES
+            result[:, :, start_pos:end_pos] += stems_out * window
+            weight[start_pos:end_pos] += window
 
-            end = start + SEGMENT_SAMPLES
-            segment = audio[:, start:end]
+        pending = None
+        try:
+            for seg_idx, start in enumerate(starts):
+                if self._is_cancelled:
+                    return result
 
-            stems_out = self._infer_segment(segment, session)
+                pct = 15 + int(75 * seg_idx / max(n_segments, 1))
+                self.progress.emit(
+                    pct, f"Processing segment {seg_idx + 1}/{n_segments}..."
+                )
 
-            # Apply Hann window and accumulate.
-            for s in range(n_stems):
-                for ch in range(2):
-                    result[s, ch, start:end] += stems_out[s, ch] * window
+                segment = audio[:, start : start + SEGMENT_SAMPLES]
+                outputs = self._run_model(segment, session)
 
-            weight[start:end] += window
+                if pending is not None:
+                    pending.result()
+                    pending = None
+
+                if self._is_cancelled:
+                    return result
+
+                if pipeline_pool is not None:
+                    pending = pipeline_pool.submit(_accumulate, start, outputs)
+                else:
+                    _accumulate(start, outputs)
+
+            if pending is not None:
+                pending.result()
+                pending = None
+        finally:
+            if pending is not None:
+                try:
+                    pending.result()
+                except Exception:
+                    pass
+            if pipeline_pool is not None:
+                pipeline_pool.shutdown(wait=True)
+            if stem_pool is not None:
+                stem_pool.shutdown(wait=True)
 
         # Normalize by the accumulated window weight.
         # Avoid division by zero in silent padding regions.
-        weight = np.maximum(weight, 1e-8)
-        for s in range(n_stems):
-            for ch in range(2):
-                result[s, ch] /= weight
+        np.maximum(weight, 1e-8, out=weight)
+        result /= weight
 
         # Remove left context and all right-side padding.
         return result[:, :, context:context + total_samples]
+
+    def _run_model(
+        self, segment: np.ndarray, session
+    ) -> list[np.ndarray]:
+        """Run STFT and ONNX Runtime forward pass for a single segment."""
+        spec = self._compute_stft_cac(segment)
+        return session.run(
+            None,
+            {
+                "input": segment[np.newaxis, :, :],
+                "x": spec[np.newaxis, :, :, :],
+            },
+        )
+
+    def _postprocess_outputs(
+        self,
+        outputs: list[np.ndarray],
+        stem_pool: ThreadPoolExecutor | None = None,
+        use_custom_istft: bool = False,
+    ) -> np.ndarray:
+        """Invert spectral outputs via iSTFT and add temporal stem waveforms."""
+        spec_out = outputs[0]
+        temporal_out = outputs[1]
+        n_stems = spec_out.shape[1]
+        if stem_pool is not None and not use_custom_istft:
+            spectral = list(
+                stem_pool.map(
+                    lambda s: self._compute_istft_cac(
+                        spec_out[0, s], length=SEGMENT_SAMPLES
+                    ),
+                    range(n_stems),
+                )
+            )
+            spectral_stems = np.stack(spectral, axis=0)
+        else:
+            spectral_stems = np.empty(
+                (n_stems, 2, SEGMENT_SAMPLES), dtype=np.float32
+            )
+            for s in range(n_stems):
+                spectral_stems[s] = self._compute_istft_cac(
+                    spec_out[0, s], length=SEGMENT_SAMPLES
+                )
+        return spectral_stems + temporal_out[0]
 
     def _infer_segment(
         self, segment: np.ndarray, session
@@ -397,42 +487,7 @@ class SeparatorWorker(QThread):
             Separated stems for this segment,
             shape (n_stems, 2, SEGMENT_SAMPLES).
         """
-        # Compute the complex-as-channels (CaC) spectrogram.
-        spec = self._compute_stft_cac(segment)
-
-        # Prepare model inputs.
-        # "input": raw waveform [1, 2, SEGMENT_SAMPLES]
-        mix_input = segment[np.newaxis, :, :]  # Add batch dim.
-        # "x": CaC spectrogram [1, 4, NFFT//2, time_frames]
-        spec_input = spec[np.newaxis, :, :, :]  # Add batch dim.
-
-        # Run inference.
-        outputs = session.run(
-            None,
-            {
-                "input": mix_input,
-                "x": spec_input,
-            },
-        )
-
-        # outputs[0]: spectral path [1, n_stems, 4, NFFT//2, time_frames]
-        # outputs[1]: temporal path [1, n_stems, 2, SEGMENT_SAMPLES]
-        spec_out = outputs[0]  # [1, n_stems, 4, freq, time]
-        temporal_out = outputs[1]  # [1, n_stems, 2, samples]
-
-        # Convert spectral output back to time domain via iSTFT.
-        n_stems = spec_out.shape[1]
-        spectral_stems = np.zeros(
-            (n_stems, 2, SEGMENT_SAMPLES), dtype=np.float32
-        )
-        for s in range(n_stems):
-            spectral_stems[s] = self._compute_istft_cac(
-                spec_out[0, s], length=SEGMENT_SAMPLES
-            )
-
-        # Combine spectral and temporal paths (the model sums them).
-        combined = spectral_stems + temporal_out[0]
-        return combined
+        return self._postprocess_outputs(self._run_model(segment, session))
 
     def _compute_stft_cac(self, audio: np.ndarray) -> np.ndarray:
         """Compute the complex-as-channels STFT spectrogram.
@@ -448,21 +503,16 @@ class SeparatorWorker(QThread):
         Returns:
             CaC spectrogram, shape (4, NFFT//2, time_frames).
         """
-        cac_channels = []
-        for ch in range(audio.shape[0]):
-            stft = librosa.stft(
-                audio[ch],
-                n_fft=NFFT,
-                hop_length=HOP_LENGTH,
-                center=True,
-            )
-            # stft shape: (NFFT//2 + 1, time_frames)
-            # Trim to NFFT//2 to match model expectation.
-            stft = stft[:NFFT // 2, :]
-            cac_channels.append(stft.real)
-            cac_channels.append(stft.imag)
-
-        return np.stack(cac_channels).astype(np.float32)
+        spec = stft_batch(
+            audio, n_fft=NFFT, hop_length=HOP_LENGTH, pad_mode="constant"
+        )[:, : NFFT // 2, :]
+        cac = np.empty(
+            (spec.shape[0] * 2, spec.shape[1], spec.shape[2]),
+            dtype=np.float32,
+        )
+        cac[0::2] = spec.real
+        cac[1::2] = spec.imag
+        return cac
 
     def _compute_istft_cac(
         self, cac_spec: np.ndarray, length: int
@@ -476,30 +526,21 @@ class SeparatorWorker(QThread):
         Returns:
             Stereo audio, shape (2, length).
         """
-        result = np.zeros((2, length), dtype=np.float32)
-
-        for ch in range(2):
-            real = cac_spec[ch * 2]      # shape: (NFFT//2, time)
-            imag = cac_spec[ch * 2 + 1]  # shape: (NFFT//2, time)
-
-            # Reconstruct the full-size complex spectrogram.
-            # Add back the Nyquist bin (zeroed) to get NFFT//2 + 1 bins.
-            nyquist = np.zeros((1, real.shape[1]), dtype=np.float32)
-            real_full = np.concatenate([real, nyquist], axis=0)
-            imag_full = np.concatenate([imag, nyquist], axis=0)
-
-            complex_spec = real_full + 1j * imag_full
-
-            audio = librosa.istft(
-                complex_spec,
-                hop_length=HOP_LENGTH,
-                n_fft=NFFT,
-                length=length,
-                center=True,
-            )
-            result[ch] = audio
-
-        return result
+        n_frames = cac_spec.shape[2]
+        spec_t = np.zeros((2, n_frames, NFFT // 2 + 1), dtype=np.complex64)
+        real_t = spec_t.real[:, :, : NFFT // 2]
+        imag_t = spec_t.imag[:, :, : NFFT // 2]
+        real_t[0] = cac_spec[0].T
+        imag_t[0] = cac_spec[1].T
+        real_t[1] = cac_spec[2].T
+        imag_t[1] = cac_spec[3].T
+        return istft_frames_first(
+            spec_t,
+            n_fft=NFFT,
+            hop_length=HOP_LENGTH,
+            length=length,
+            overwrite_x=True,
+        )
 
     def _post_process(self, stems: np.ndarray) -> np.ndarray:
         """Apply Wiener filtering and soft gating to improve stem quality.

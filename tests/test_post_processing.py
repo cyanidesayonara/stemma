@@ -254,3 +254,80 @@ class TestChunkedProcessing:
         stems = _make_stems(n_stems=4, duration_s=duration_s)
         result = soft_gate(stems)
         assert result.shape == stems.shape
+
+
+class TestReferenceParityAndEdgeCases:
+    """Verify vectorized post-processing matches reference math and empty inputs."""
+
+    def test_wiener_and_soft_gate_handle_empty_inputs(self):
+        empty_samples = np.zeros((4, 2, 0), dtype=np.float32)
+        assert wiener_filter(empty_samples) is empty_samples
+        assert soft_gate(empty_samples) is empty_samples
+
+        empty_stems = np.zeros((0, 2, 1024), dtype=np.float32)
+        assert wiener_filter(empty_stems) is empty_stems
+        assert soft_gate(empty_stems) is empty_stems
+
+    def test_wiener_filter_matches_librosa_reference(self):
+        import librosa
+        from src.separator import HOP_LENGTH, NFFT
+
+        rng = np.random.default_rng(123)
+        stems = (rng.standard_normal((4, 2, SAMPLE_RATE)) * 0.1).astype(np.float32)
+
+        for exponent in (1.0, 2.0, 4.0):
+            for n_iterations in (1, 2):
+                actual = wiener_filter(
+                    stems.copy(), n_iterations=n_iterations, exponent=exponent
+                )
+                ref = stems.copy()
+                mixture = np.sum(ref, axis=0)
+                for ch in range(2):
+                    mix_stft = librosa.stft(
+                        mixture[ch], n_fft=NFFT, hop_length=HOP_LENGTH, center=True
+                    )
+                    cur = [
+                        librosa.stft(
+                            ref[s, ch], n_fft=NFFT, hop_length=HOP_LENGTH, center=True
+                        )
+                        for s in range(4)
+                    ]
+                    for _ in range(n_iterations):
+                        tot = np.maximum(
+                            sum(np.abs(c) ** exponent for c in cur), 1e-10
+                        )
+                        cur = [(np.abs(c) ** exponent / tot) * mix_stft for c in cur]
+                    for s in range(4):
+                        ref[s, ch] = librosa.istft(
+                            cur[s],
+                            hop_length=HOP_LENGTH,
+                            n_fft=NFFT,
+                            length=SAMPLE_RATE,
+                            center=True,
+                        )
+                np.testing.assert_allclose(actual, ref, atol=1e-4, rtol=1e-4)
+
+    def test_soft_gate_matches_librosa_reference(self):
+        import librosa
+
+        rng = np.random.default_rng(456)
+        stems = (rng.standard_normal((4, 2, SAMPLE_RATE * 2)) * 0.05).astype(np.float32)
+        stems[:, :, SAMPLE_RATE:] *= 1e-4
+
+        actual = soft_gate(stems.copy(), threshold_db=-40.0)
+        ref = stems.copy()
+        thresh = 10.0 ** (-40.0 / 20.0)
+        att, rel = 0.5, 0.25
+        for s in range(4):
+            mono = np.mean(ref[s], axis=0)
+            rms = librosa.feature.rms(y=mono, frame_length=2048, hop_length=512)[0]
+            gate = (rms >= thresh).astype(np.float32)
+            smoothed = np.empty_like(gate)
+            cur = gate[0]
+            for i, g in enumerate(gate):
+                cur += (att if g > cur else rel) * (g - cur)
+                smoothed[i] = cur
+            times = librosa.frames_to_samples(np.arange(len(smoothed)), hop_length=512)
+            env = np.interp(np.arange(ref.shape[2]), times, smoothed).astype(np.float32)
+            ref[s] *= env[np.newaxis, :]
+        np.testing.assert_allclose(actual, ref, atol=1e-6, rtol=1e-6)

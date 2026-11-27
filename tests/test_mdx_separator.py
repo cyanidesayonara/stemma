@@ -335,3 +335,43 @@ def test_real_model_separates_tone(app, tmp_path):
         return float(np.sqrt(np.mean(audio ** 2)))
 
     assert rms(other) > 5 * rms(vocals)
+
+
+class TestResample:
+    """``_resample`` converts any input rate to the model's 44.1 kHz."""
+
+    @pytest.mark.parametrize("channels", [1, 2, 6])
+    @pytest.mark.parametrize("n_samples", [0, 1, 2, 10, 48000])
+    def test_48k_to_44k_shape_and_dtype(self, tmp_path, channels, n_samples):
+        worker, _ = _make_worker(tmp_path, session=None, seconds=0.1)
+        audio = np.random.default_rng(1).standard_normal(
+            (channels, n_samples)
+        ).astype(np.float32)
+
+        out = worker._resample(audio, 48000)
+
+        assert out.shape[0] == channels
+        assert out.dtype == np.float32
+        assert out.flags["C_CONTIGUOUS"]
+        if n_samples == 0:
+            assert out.shape[1] == 0
+        else:
+            assert abs(out.shape[1] - round(n_samples * 44100 / 48000)) <= 1
+
+    def test_48k_tone_keeps_its_pitch_and_level(self, tmp_path):
+        worker, _ = _make_worker(tmp_path, session=None, seconds=0.1)
+        t = np.arange(48000) / 48000
+        tone = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+        out = worker._resample(np.stack([tone, tone]), 48000)
+
+        t_out = np.arange(out.shape[1]) / 44100
+        expected = 0.5 * np.sin(2 * np.pi * 440 * t_out)
+        core = slice(1000, out.shape[1] - 1000)
+        np.testing.assert_allclose(out[0, core], expected[core], atol=1e-3)
+        np.testing.assert_array_equal(out[0], out[1])
+
+    def test_native_rate_is_returned_unchanged(self, tmp_path):
+        worker, _ = _make_worker(tmp_path, session=None, seconds=0.1)
+        audio = np.zeros((2, 100), dtype=np.float32)
+        assert worker._resample(audio, 44100) is audio

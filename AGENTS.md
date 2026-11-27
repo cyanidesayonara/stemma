@@ -35,8 +35,8 @@ Canonical documents:
   into a cached `.dml.onnx` sidecar next to the original model
   ([issue #125](https://github.com/cyanidesayonara/stemma/issues/125))
 - sounddevice + soundfile for audio playback
-- numpy for audio buffer processing
-- librosa for STFT/iSTFT (pre/post-processing outside ONNX model)
+- numpy + scipy.fft (`src/stft_utils.py`) and soxr for separation resampling,
+  STFT/iSTFT, and post-processing; librosa for beat/chord/section analysis
 - yt-dlp + ffmpeg for YouTube audio download
 - PyInstaller for packaging
 
@@ -45,6 +45,8 @@ Canonical documents:
 - `main.py` and `src/app.py`: diagnostics or Qt application startup
 - `src/separator.py` and `src/mdx_separator.py`: HTDemucs and MDX
   separation engines
+- `src/stft_utils.py`: batched `scipy.fft` STFT/iSTFT helpers shared by
+  separation and post-processing
 - `src/htdemucs_dml.py`: DirectML graph patcher and `.dml.onnx` sidecar
   cache for HTDemucs
 - `src/onnx_session.py`: shared DirectML-first session construction with
