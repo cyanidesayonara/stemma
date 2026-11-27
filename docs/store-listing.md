@@ -4,7 +4,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 `python scripts/build_store_listing.py` to regenerate this file.
 Do not edit this markdown by hand.
 
-This copy reflects listing content for version **3.2.1**.
+This copy reflects listing content for version **3.3.0**.
 
 Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
 
@@ -35,7 +35,7 @@ Practice any song with the band. stemma splits a track into vocals, drums, bass,
 
 stemma turns any song into a practice tool.
 
-Import a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, fast, and GPU-accelerated when your PC supports it), four stems, or all six.
+Import a track and stemma separates it into individual stems -- vocals, drums, bass, guitar, piano, and everything else -- so you can mute the part you play and perform it yourself. Silence the guitar and it is your guitar in the mix. Solo the drums to lock in with them. Pull the vocal down and sing the line yourself. Choose two stems (vocals and the backing track, the quickest), four stems, or all six; every model is GPU-accelerated when your PC supports it.
 
 Everything else is built around learning a part properly. Set an A-B loop over the two bars that keep tripping you up and drill them. Slow the passage down without the pitch dropping, or turn on the Loop Trainer and let stemma step the speed up a notch on every repeat until you are at full tempo. Transpose the whole song into a key that suits your voice or instrument, up to seven semitones either way, and the key and chord readouts follow. Count yourself in, play along to the metronome, and record your take against the backing to hear how it really sat.
 
@@ -49,9 +49,11 @@ Built for Windows, with keyboard shortcuts for the whole practice loop that work
 
 ## What's new in this version
 
-What's new in version 3.2.1
+What's new in version 3.3.0
 
-Fixes a Microsoft Store startup issue where songs imported in the Store version could be dropped from the library index if an earlier non-Store install also had songs on the same PC.
+The 4-stem and 6-stem models now separate on your graphics card through DirectML, like the 2-stem model. If the graphics card cannot run them, stemma uses the processor as before.
+
+Separation is faster too: with a supported graphics card, a five-minute song separates into 4 or 6 stems in about a minute.
 
 ---
 
@@ -60,7 +62,7 @@ Fixes a Microsoft Store startup issue where songs imported in the Store version 
 Split any song into vocals, drums, bass, guitar, piano, and other
 Mute your part and play along with the rest of the band
 Per-stem mute, solo, and volume
-Fast two-stem vocal remover, GPU-accelerated when available
+GPU-accelerated separation on every model, with CPU fallback
 Slow down or speed up from 0.5x to 2x without changing pitch
 A-B loop to drill a difficult passage
 Loop Trainer: speed steps up on every repeat until you reach full tempo

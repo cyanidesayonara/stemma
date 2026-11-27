@@ -1,6 +1,6 @@
 # Roadmap
 
-Latest stable release: **v3.2.1**.
+Latest stable release: **v3.3.0**.
 
 This document is intentionally short. GitHub issues hold acceptance criteria,
 discussion, and live status; `../CHANGELOG.md` records only shipped releases.
@@ -56,12 +56,18 @@ scope or date. Each upcoming version has a GitHub milestone.
 - [#272: acceptance pass and release checklist](https://github.com/cyanidesayonara/stemma/issues/272)
   — the hands-on pass on the merged build, and the release steps.
 
-## Research and cross-release tracks
+## v3.3 -- GPU separation for every model (shipped)
 
 - [#125: DirectML-compatible HTDemucs exports](https://github.com/cyanidesayonara/stemma/issues/125)
-  — resolved via `src/htdemucs_dml.py` (cached `.dml.onnx` sidecar patching
-  1D `ConvTranspose`, `Reshape(allowzero=1)`, and `Split` nodes for DirectML
-  GPU execution with automatic CPU fallback).
+  — released in v3.3.0: `src/htdemucs_dml.py` writes a cached `.dml.onnx`
+  sidecar (1D `ConvTranspose`, `Reshape(allowzero=1)`, and `Split` patched)
+  so 4/6-stem separation runs on DirectML, with CPU fallback.
+- [#283: faster separation pipeline](https://github.com/cyanidesayonara/stemma/pull/283)
+  — released in v3.3.0: batched `scipy.fft` STFT/iSTFT, `soxr` resampling,
+  and DirectML inference overlapped with CPU post-processing.
+
+## Research and cross-release tracks
+
 - [#28: experimental DSP extensions](https://github.com/cyanidesayonara/stemma/issues/28)
   evaluates separation and post-processing approaches without promising a
   quality tier.
