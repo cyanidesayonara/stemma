@@ -73,6 +73,7 @@ stemma/
 ├── main.py                 # diagnostics dispatch or Qt startup
 ├── src/
 │   ├── separator.py        # HTDemucs four/six-stem engine
+│   ├── stft_utils.py       # vectorized scipy.fft STFT/iSTFT helpers
 │   ├── htdemucs_dml.py     # HTDemucs DirectML graph patcher and sidecar cache
 │   ├── mdx_separator.py    # MDX two-stem engine
 │   ├── onnx_session.py     # shared DirectML-first session policy
@@ -107,7 +108,9 @@ stemma/
   `.dml.onnx` sidecar when GPU execution is available
 - Falls back to CPU on DirectML or sidecar initialization failure and reports
   the selected provider in progress
-- Handles STFT/iSTFT pre/post-processing in NumPy (stripped from ONNX model)
+- Handles resampling (`soxr`) and batched STFT/iSTFT (`stft_utils.py` +
+  `scipy.fft`) outside the ONNX model, overlapping CPU post-processing with
+  DirectML inference
 - Runs in background `QThread`, emits progress signals
 - Supports both `htdemucs` (4-stem) and `htdemucs_6s` (6-stem)
 
@@ -115,8 +118,8 @@ stemma/
 - Produces vocals and backing (`other`) stems
 - Requests DirectML through the shared session factory, falls back to CPU
   on session-init failure, and reports the selected provider in progress
-- Handles STFT packing, windowing, context trim, and reconstruction without
-  PyTorch
+- Handles resampling (`soxr`) and STFT/iSTFT packing, windowing, context trim,
+  and reconstruction via `stft_utils.py` without PyTorch
 
 ### `onnx_session.py` — Execution-Provider Policy
 - Keeps the heavy ONNX Runtime import deferred until inference/diagnostics

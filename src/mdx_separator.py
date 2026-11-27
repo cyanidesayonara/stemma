@@ -1,18 +1,18 @@
 """MDX-Net 2-stem separation engine (ONNX Runtime, DirectML-accelerated).
 
 Runs a UVR MDX-Net model to split a song into a primary stem and its
-complement (e.g. Instrumental + Vocals). Unlike the HTDemucs export,
-MDX-Net ONNX graphs initialize and run on the DirectML execution
-provider when supported. Session creation falls back to CPU when needed,
-and separation progress reports the selected provider.
+complement (e.g. Instrumental + Vocals). MDX-Net ONNX graphs initialize
+and run on the DirectML execution provider when supported. Session
+creation falls back to CPU when needed, and separation progress reports
+the selected provider.
 
 The model operates on spectrogram chunks:
     input  [1, 4, dim_f, dim_t]  -- (L.re, L.im, R.re, R.im) x freq x time
     output [1, 4, dim_f, dim_t]  -- the primary stem's spectrogram
 
-STFT/iSTFT run in numpy/librosa outside the graph, matching UVR's
-torch.stft settings (periodic Hann, center=True, reflect padding).
-The secondary stem is derived as (mix - primary).
+STFT/iSTFT run via ``scipy.fft`` (matching UVR's periodic Hann,
+center=True, reflect padding). The secondary stem is derived as
+(mix - primary).
 
 Inference windows use the classic UVR scheme: each window carries
 ``trim = n_fft // 2`` samples of context on both sides and only the
@@ -26,9 +26,9 @@ python-audio-separator (MIT).
 
 import os
 
-import librosa
 import numpy as np
 import soundfile as sf
+import soxr
 from PySide6.QtCore import QThread, Signal
 
 from src.audio_io import read_audio
@@ -40,6 +40,7 @@ from src.separation_state import (
     clear_completion_marker,
     write_completion_marker,
 )
+from src.stft_utils import istft_frames_first, stft_batch
 
 SAMPLE_RATE = 44100
 
@@ -175,12 +176,10 @@ class MdxSeparatorWorker(QThread):
         return to_stereo(audio.T.astype(np.float32)), sr
 
     def _resample(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        if sr == SAMPLE_RATE:
+        if sr == SAMPLE_RATE or audio.shape[1] == 0:
             return audio
-        return np.stack([
-            librosa.resample(ch, orig_sr=sr, target_sr=SAMPLE_RATE)
-            for ch in audio
-        ]).astype(np.float32)
+        resampled = soxr.resample(audio.T, sr, SAMPLE_RATE, quality="HQ")
+        return np.ascontiguousarray(resampled.T, dtype=np.float32)
 
     def _create_session(self):
         """Create the session; delete a model that exists but won't load."""
@@ -199,45 +198,36 @@ class MdxSeparatorWorker(QThread):
         n_fft = self.params["n_fft"]
         hop = self.params["hop"]
         dim_f = self.params["dim_f"]
-        specs = []
-        for ch in range(2):
-            spec = librosa.stft(
-                chunk[ch],
-                n_fft=n_fft,
-                hop_length=hop,
-                window="hann",
-                center=True,
-                pad_mode="reflect",
-            )
-            # Crop the top bin(s): the model sees dim_f of n_fft//2+1 bins.
-            spec = spec[:dim_f]
-            specs.append(spec.real.astype(np.float32))
-            specs.append(spec.imag.astype(np.float32))
+        spec = stft_batch(
+            chunk, n_fft=n_fft, hop_length=hop, pad_mode="reflect"
+        )[:, :dim_f, :]
         # Channel order (L.re, L.im, R.re, R.im), matching UVR's
         # reshape([B, ch, 2, f, t]) -> [B, 4, f, t] flattening.
-        return np.stack(specs)[np.newaxis]
+        out = np.empty((1, 4, dim_f, spec.shape[-1]), dtype=np.float32)
+        out[0, 0::2] = spec.real
+        out[0, 1::2] = spec.imag
+        return out
 
     def _istft(self, spec4: np.ndarray, length: int) -> np.ndarray:
         """(4, dim_f, dim_t) model output -> (2, length) waveform."""
         n_fft = self.params["n_fft"]
         hop = self.params["hop"]
+        dim_f, n_frames = spec4.shape[1], spec4.shape[2]
         bins = n_fft // 2 + 1
-        out = []
-        for ch in range(2):
-            re = spec4[ch * 2]
-            im = spec4[ch * 2 + 1]
-            full = np.zeros((bins, re.shape[1]), dtype=np.complex64)
-            full[: re.shape[0]] = re + 1j * im
-            wave = librosa.istft(
-                full,
-                hop_length=hop,
-                n_fft=n_fft,
-                window="hann",
-                center=True,
-                length=length,
-            )
-            out.append(wave.astype(np.float32))
-        return np.stack(out)
+        full_t = np.zeros((2, n_frames, bins), dtype=np.complex64)
+        real_t = full_t.real[:, :, :dim_f]
+        imag_t = full_t.imag[:, :, :dim_f]
+        real_t[0] = spec4[0].T
+        imag_t[0] = spec4[1].T
+        real_t[1] = spec4[2].T
+        imag_t[1] = spec4[3].T
+        return istft_frames_first(
+            full_t,
+            n_fft=n_fft,
+            hop_length=hop,
+            length=length,
+            overwrite_x=True,
+        )
 
     # ------------------------------------------------------------------
     # Windowed inference

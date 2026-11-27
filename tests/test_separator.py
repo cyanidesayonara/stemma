@@ -578,3 +578,76 @@ def test_htdemucs_worker_cleans_damaged_sidecar_and_retries_cpu(monkeypatch, tmp
     assert calls == [(str(sidecar), True), (str(orig), False)]
     assert not sidecar.exists()
     assert orig.exists()
+
+
+def test_dml_pipeline_matches_cpu_and_handles_cancel(tmp_dir, sample_audio_path, monkeypatch):
+    """DmlExecutionProvider overlaps post-processing bit-identically and stops cleanly on cancel."""
+    import src.separator as separator
+
+    class PipelineSession:
+        def __init__(self, provider: str, cancel_on_call: int | None = None, worker=None):
+            self._provider = provider
+            self._cancel_on = cancel_on_call
+            self._worker = worker
+            self.calls = 0
+
+        def get_providers(self):
+            return [self._provider]
+
+        def run(self, _outputs, feeds):
+            self.calls += 1
+            if self._cancel_on is not None and self.calls == self._cancel_on:
+                self._worker.cancel()
+            segment = feeds["input"][0]
+            temporal = np.repeat(
+                (segment / len(STEMS_4))[np.newaxis, np.newaxis],
+                len(STEMS_4),
+                axis=1,
+            )
+            spectral = np.zeros(
+                (1, len(STEMS_4), 4, 1, 1),
+                dtype=np.float32,
+            )
+            return [spectral, temporal.astype(np.float32)]
+
+    monkeypatch.setattr(separator, "SEGMENT_SAMPLES", 16)
+    t = np.linspace(0.0, 4.0 * np.pi, 48, dtype=np.float32)
+    audio = np.stack([0.3 + np.sin(t), 0.2 + np.cos(t)])
+
+    def make_worker():
+        w = SeparatorWorker(
+            input_path=sample_audio_path,
+            output_dir=tmp_dir,
+            model_path="fake_model.onnx",
+        )
+        monkeypatch.setattr(
+            w,
+            "_compute_stft_cac",
+            lambda _seg: np.zeros((4, 1, 1), dtype=np.float32),
+        )
+        monkeypatch.setattr(
+            w,
+            "_compute_istft_cac",
+            lambda _spec, length: np.zeros((2, length), dtype=np.float32),
+        )
+        return w
+
+    cpu_worker = make_worker()
+    dml_worker = make_worker()
+    cpu_out = cpu_worker._run_segmented_inference(
+        audio, PipelineSession("CPUExecutionProvider")
+    )
+    dml_sess = PipelineSession("DmlExecutionProvider")
+    dml_out = dml_worker._run_segmented_inference(audio, dml_sess)
+    assert dml_sess.calls > 1
+    np.testing.assert_allclose(dml_out, cpu_out, atol=1e-7, rtol=1e-7)
+
+    # Cancel mid-pipeline while a background accumulation future may be in flight.
+    cancel_worker = make_worker()
+    cancel_sess = PipelineSession(
+        "DmlExecutionProvider", cancel_on_call=2, worker=cancel_worker
+    )
+    cancel_res = cancel_worker._run_segmented_inference(audio, cancel_sess)
+    assert cancel_worker._is_cancelled
+    assert cancel_sess.calls == 2
+    assert cancel_res.shape[0] == len(STEMS_4)
