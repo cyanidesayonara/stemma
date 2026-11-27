@@ -16,8 +16,10 @@ published.
   each model once and reuses it (#125, #282).
 - Faster separation: STFT, iSTFT, resampling, overlap-add,
   and post-processing were rewritten, and on DirectML the CPU work for one
-  segment overlaps inference on the next. A 5-minute song separates about
-  2.5x faster with 4 stems and 2.9x faster with 6 stems (#283).
+  segment overlaps inference on the next. On an RTX 4070 Ti, a 5-minute
+  song separates in about 43 s with 4 stems and 52 s with 6 stems, 2.5x
+  and 2.9x faster than with DirectML inference alone (#283). CPU-only
+  separation gains less, because inference dominates there.
 
 ## [v3.2.1](https://github.com/cyanidesayonara/stemma/releases/tag/v3.2.1) - 2026-11-26
 

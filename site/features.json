@@ -4,10 +4,10 @@
     {
       "id": "split",
       "title": "Every part on its own",
-      "body": "stemma splits a song into vocals, drums, bass, guitar, piano and other, right on your PC: nothing is uploaded, and there is no account or subscription. In a hurry? The two-stem vocal remover is quicker, and uses your graphics card when Windows supports it.",
+      "body": "stemma splits a song into vocals, drums, bass, guitar, piano and other, right on your PC: nothing is uploaded, and there is no account or subscription. Every model uses your graphics card when Windows supports it, and the two-stem vocal remover is quickest of all.",
       "covers": [
         "Split any song into vocals, drums, bass, guitar, piano, and other",
-        "Fast two-stem vocal remover, GPU-accelerated when available",
+        "GPU-accelerated separation on every model, with CPU fallback",
         "Runs entirely on your PC: no account, no subscription, no uploads"
       ]
     },
