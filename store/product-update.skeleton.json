@@ -1,7 +1,7 @@
 {
   "packages": [
     {
-      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.2.1/stemma.msix",
+      "packageUrl": "https://github.com/cyanidesayonara/stemma/releases/download/v3.3.0/stemma.msix",
       "languages": [
         "en-us"
       ],
@@ -46,7 +46,7 @@
       "play along",
       "stem separation"
     ],
-    "whatsNew": "What's new in version 3.2.1\n\nFixes a Microsoft Store startup issue where songs imported in the Store version could be dropped from the library index if an earlier non-Store install also had songs on the same PC."
+    "whatsNew": "What's new in version 3.3.0\n\nThe 4-stem and 6-stem models now separate on your graphics card through DirectML, like the 2-stem model. If the graphics card cannot run them, stemma uses the processor as before.\n\nSeparation is faster: on a five-minute song, the 4-stem and 6-stem models take less than half the time they took in version 3.2."
   },
   "productId": "9P2W12L8F381",
   "packageFamilyName": "SanttuNyknen.stemma_rt9h3xsn8gsh8",

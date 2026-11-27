@@ -1,5 +1,5 @@
 # Informational only. Release authority is the git tag / synced version.py.
-listing_version: "3.2.1"
+listing_version: "3.3.0"
 
 # Live Microsoft Store product identity (apps.microsoft.com).
 # Snapshot of published copy before the 2.6.0 submission:
@@ -218,3 +218,12 @@ whats_new:
     Fixes a Microsoft Store startup issue where songs imported in the
     Store version could be dropped from the library index if an earlier
     non-Store install also had songs on the same PC.
+  "3.3.0": |
+    What's new in version 3.3.0
+
+    The 4-stem and 6-stem models now separate on your graphics card
+    through DirectML, like the 2-stem model. If the graphics card cannot
+    run them, stemma uses the processor as before.
+
+    Separation is faster: on a five-minute song, the 4-stem and 6-stem
+    models take less than half the time they took in version 3.2.

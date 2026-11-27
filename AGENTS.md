@@ -11,7 +11,7 @@ mute/solo any stem, and play along with your instrument.
 
 Local-only. No cloud, no subscriptions, no command line needed by the end user.
 
-Latest stable release: **v3.2.1**. See "Current Status" below.
+Latest stable release: **v3.3.0**. See "Current Status" below.
 
 Canonical documents:
 
@@ -90,11 +90,10 @@ rationale and subsystem boundaries.
 
 ## Current Status
 
-Set with the v3.2.1 release prep on 2026-11-26:
+Set with the v3.3.0 release prep on 2026-11-27:
 
-- Latest stable: **v3.2.1** (library, setlists, and play queue, [#132](https://github.com/cyanidesayonara/stemma/issues/132); MSIX virtualized library path fix, [#279](https://github.com/cyanidesayonara/stemma/issues/279))
-- Next: DirectML GPU separation for 4/6-stem HTDemucs ([#125](https://github.com/cyanidesayonara/stemma/issues/125))
-  implemented for the next release; see `docs/ROADMAP.md`
+- Latest stable: **v3.3.0** (DirectML GPU separation for 4/6-stem HTDemucs, [#125](https://github.com/cyanidesayonara/stemma/issues/125); faster separation pipeline, [#283](https://github.com/cyanidesayonara/stemma/pull/283))
+- Next: not decided; see `docs/ROADMAP.md`
 
 Use `docs/ROADMAP.md` for future scope and `CHANGELOG.md` for shipped
 releases. Do not infer release status from code already present on a branch.

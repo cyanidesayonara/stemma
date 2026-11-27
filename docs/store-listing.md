@@ -4,7 +4,7 @@ Generated from `store/listing.yaml`. Edit the YAML, then run
 `python scripts/build_store_listing.py` to regenerate this file.
 Do not edit this markdown by hand.
 
-This copy reflects listing content for version **3.2.1**.
+This copy reflects listing content for version **3.3.0**.
 
 Public Store listing: https://apps.microsoft.com/detail/9p2w12l8f381 (product id `9P2W12L8F381`).
 
@@ -49,9 +49,11 @@ Built for Windows, with keyboard shortcuts for the whole practice loop that work
 
 ## What's new in this version
 
-What's new in version 3.2.1
+What's new in version 3.3.0
 
-Fixes a Microsoft Store startup issue where songs imported in the Store version could be dropped from the library index if an earlier non-Store install also had songs on the same PC.
+The 4-stem and 6-stem models now separate on your graphics card through DirectML, like the 2-stem model. If the graphics card cannot run them, stemma uses the processor as before.
+
+Separation is faster: on a five-minute song, the 4-stem and 6-stem models take less than half the time they took in version 3.2.
 
 ---
 

@@ -9,6 +9,16 @@ Release publication on GitHub is authoritative. Source code present on
 `main` or a feature branch is not considered shipped until a release is
 published.
 
+## [v3.3.0](https://github.com/cyanidesayonara/stemma/releases/tag/v3.3.0) - 2026-11-27
+
+- The 4-stem and 6-stem HTDemucs models now run on the GPU through
+  DirectML, with CPU fallback. stemma patches a DirectML-compatible copy of
+  each model once and reuses it (#125, #282).
+- Faster separation: STFT, iSTFT, resampling, overlap-add,
+  and post-processing were rewritten, and on DirectML the CPU work for one
+  segment overlaps inference on the next. A 5-minute song separates about
+  2.5x faster with 4 stems and 2.9x faster with 6 stems (#283).
+
 ## [v3.2.1](https://github.com/cyanidesayonara/stemma/releases/tag/v3.2.1) - 2026-11-26
 
 - Fixes a Microsoft Store (MSIX) startup issue where songs imported in the
