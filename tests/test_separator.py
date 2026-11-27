@@ -651,3 +651,123 @@ def test_dml_pipeline_matches_cpu_and_handles_cancel(tmp_dir, sample_audio_path,
     assert cancel_worker._is_cancelled
     assert cancel_sess.calls == 2
     assert cancel_res.shape[0] == len(STEMS_4)
+
+
+def test_dml_pipeline_overlaps_postprocess_with_next_inference(
+    tmp_dir, sample_audio_path, monkeypatch,
+):
+    """On DirectML, segment i-1 post-processing runs on a worker thread
+    while segment i is in session.run; the barrier only clears if both
+    are in flight at the same time."""
+    import threading
+
+    import src.separator as separator
+
+    monkeypatch.setattr(separator, "SEGMENT_SAMPLES", 16)
+    audio = np.ones((2, 48), dtype=np.float32)
+    barrier = threading.Barrier(2, timeout=5.0)
+    main_thread = threading.get_ident()
+    post_threads = []
+
+    class OverlapSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get_providers(self):
+            return ["DmlExecutionProvider"]
+
+        def run(self, _outputs, feeds):
+            self.calls += 1
+            if self.calls == 2:
+                # Segment 1's post-processing must be running now.
+                barrier.wait()
+            segment = feeds["input"][0]
+            temporal = np.repeat(
+                (segment / len(STEMS_4))[np.newaxis, np.newaxis],
+                len(STEMS_4),
+                axis=1,
+            ).astype(np.float32)
+            spectral = np.zeros((1, len(STEMS_4), 4, 1, 1), dtype=np.float32)
+            return [spectral, temporal]
+
+    worker = SeparatorWorker(
+        input_path=sample_audio_path,
+        output_dir=tmp_dir,
+        model_path="fake_model.onnx",
+    )
+    monkeypatch.setattr(
+        worker,
+        "_compute_stft_cac",
+        lambda _seg: np.zeros((4, 1, 1), dtype=np.float32),
+    )
+    real_post = worker._postprocess_outputs
+
+    def recording_post(outputs, **kwargs):
+        post_threads.append(threading.get_ident())
+        if len(post_threads) == 1:
+            barrier.wait()
+        return real_post(outputs, **kwargs)
+
+    monkeypatch.setattr(worker, "_postprocess_outputs", recording_post)
+    monkeypatch.setattr(
+        worker,
+        "_compute_istft_cac",
+        lambda _spec, length: np.zeros((2, length), dtype=np.float32),
+    )
+
+    worker._run_segmented_inference(audio, OverlapSession())
+
+    assert post_threads
+    assert all(tid != main_thread for tid in post_threads)
+
+
+def test_segmented_inference_uses_real_istft_with_stem_pool(
+    tmp_dir, sample_audio_path, monkeypatch,
+):
+    """Without a patched _compute_istft_cac, per-stem iSTFT runs on the
+    stem pool and produces finite, correctly shaped stems."""
+    import src.separator as separator
+
+    seg = 8192
+    monkeypatch.setattr(separator, "SEGMENT_SAMPLES", seg)
+    rng = np.random.default_rng(3)
+    audio = (rng.standard_normal((2, seg * 2)) * 0.1).astype(np.float32)
+    n_frames = seg // HOP_LENGTH + 1
+    spec = (rng.standard_normal((1, len(STEMS_4), 4, NFFT // 2, n_frames)) * 0.01)
+    spec = spec.astype(np.float32)
+
+    class SpecSession:
+        def __init__(self, provider):
+            self._provider = provider
+
+        def get_providers(self):
+            return [self._provider]
+
+        def run(self, _outputs, feeds):
+            segment = feeds["input"][0]
+            temporal = np.repeat(
+                (segment / len(STEMS_4))[np.newaxis, np.newaxis],
+                len(STEMS_4),
+                axis=1,
+            ).astype(np.float32)
+            return [spec, temporal]
+
+    worker = SeparatorWorker(
+        input_path=sample_audio_path,
+        output_dir=tmp_dir,
+        model_path="fake_model.onnx",
+    )
+    used_pool = []
+    real_post = worker._postprocess_outputs
+
+    def spying_post(outputs, stem_pool=None, use_custom_istft=False):
+        used_pool.append(stem_pool is not None and not use_custom_istft)
+        return real_post(
+            outputs, stem_pool=stem_pool, use_custom_istft=use_custom_istft
+        )
+
+    monkeypatch.setattr(worker, "_postprocess_outputs", spying_post)
+    pooled = worker._run_segmented_inference(audio, SpecSession("CPUExecutionProvider"))
+    assert used_pool and all(used_pool)
+    assert np.all(np.isfinite(pooled))
+    assert pooled.shape == (len(STEMS_4), 2, audio.shape[1])

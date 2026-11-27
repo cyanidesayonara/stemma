@@ -114,6 +114,9 @@ def istft_frames_first(
     """Invert ``(..., n_frames, n_fft // 2 + 1)`` spectrogram to ``(..., length)`` float32."""
     n_frames = spec_t.shape[-2]
     lead_shape = spec_t.shape[:-2]
+    if n_frames == 0:
+        empty_len = 0 if length is None else max(0, length)
+        return np.zeros(lead_shape + (empty_len,), dtype=np.float32)
     inv, copy_len, out_len = _window_sumsquare_inv(n_fft, hop_length, n_frames, length)
     if out_len == 0:
         return np.zeros(lead_shape + (0,), dtype=np.float32)
@@ -159,10 +162,12 @@ def istft_batch(
 ) -> np.ndarray:
     """Invert ``(..., n_fft // 2 + 1, n_frames)`` spectrogram to ``(..., length)`` float32."""
     spec_t = np.ascontiguousarray(np.swapaxes(stft_matrix, -1, -2))
+    # A single-frame contiguous input swaps to a view of the caller's
+    # array; never let irfft overwrite memory the caller still owns.
     return istft_frames_first(
         spec_t,
         n_fft=n_fft,
         hop_length=hop_length,
         length=length,
-        overwrite_x=True,
+        overwrite_x=not np.shares_memory(spec_t, stft_matrix),
     )

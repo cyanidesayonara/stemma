@@ -161,3 +161,28 @@ def test_stft_istft_roundtrip_smooth_and_noisy_stereo():
     spec_f = stft_frames_first(noisy, n_fft=6144, hop_length=1024, pad_mode="reflect")
     rec_f = istft_frames_first(spec_f, n_fft=6144, hop_length=1024, length=noisy.shape[1])
     np.testing.assert_allclose(rec_f, noisy, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("length", [None, 100])
+def test_istft_with_zero_frames_returns_empty_or_silent(length):
+    spec_t = np.zeros((2, 0, 512 // 2 + 1), dtype=np.complex64)
+    out = istft_frames_first(spec_t, n_fft=512, hop_length=1024, length=length)
+    expected_len = 0 if length is None else length
+    assert out.shape == (2, expected_len)
+    assert out.dtype == np.float32
+    assert not out.any()
+
+
+def test_istft_batch_single_frame_does_not_mutate_input():
+    rng = np.random.default_rng(5)
+    spec = (
+        rng.standard_normal((2, 4096 // 2 + 1, 1))
+        + 1j * rng.standard_normal((2, 4096 // 2 + 1, 1))
+    ).astype(np.complex64)
+    original = spec.copy()
+    spec.setflags(write=False)
+
+    out = istft_batch(spec, n_fft=4096, hop_length=1024, length=2048)
+
+    assert out.shape == (2, 2048)
+    np.testing.assert_array_equal(spec, original)

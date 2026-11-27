@@ -99,9 +99,11 @@ def estimate_separation_memory(
     The dominant allocations are:
     * Input audio (stereo float32)
     * The overlap-add accumulator (n_stems * 2 * total_samples * float32)
-    * A mixture copy inside wiener_filter (2 * total_samples * float32)
     * Per-segment ONNX temporaries (~100 MB, bounded by segment size)
     * ORT session / model weights
+
+    ``wiener_filter`` sums the mixture per chunk in the frequency domain,
+    so it no longer holds a full-track mixture copy.
     """
     n_stems = 6 if is_6_stem else 4
     total_samples = int(SAMPLE_RATE * duration_seconds)
@@ -109,10 +111,9 @@ def estimate_separation_memory(
 
     audio = 2 * total_samples * bps
     accumulator = n_stems * 2 * total_samples * bps
-    mixture_copy = 2 * total_samples * bps
     segment_temps = 100 * 1024 * 1024
 
-    return audio + accumulator + mixture_copy + segment_temps + _ORT_OVERHEAD_BYTES
+    return audio + accumulator + segment_temps + _ORT_OVERHEAD_BYTES
 
 
 def available_memory_bytes() -> int | None:
@@ -399,6 +400,9 @@ class SeparatorWorker(QThread):
                 if pending is not None:
                     pending.result()
                     pending = None
+
+                if self._is_cancelled:
+                    return result
 
                 if pipeline_pool is not None:
                     pending = pipeline_pool.submit(_accumulate, start, outputs)
